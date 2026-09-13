@@ -84,7 +84,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AppThemeProvider>
-            <header className="border-b bg-card">
+            {/* sticky rather than static so a page that fills the viewport
+                below it (see vault/[noteId]/page.tsx's full-bleed note view)
+                still always has the header in view, without restructuring
+                the whole app into a fixed-height/nested-scroll shell. */}
+            <header className="sticky top-0 z-40 shrink-0 border-b bg-card">
               <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
                 <Link href="/" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
                   <BookOpen className="size-5" />

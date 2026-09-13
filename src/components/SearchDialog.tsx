@@ -111,7 +111,9 @@ export default function SearchDialog() {
     function handleKeyDown(e: KeyboardEvent) {
       const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
       const target = e.target as HTMLElement | null;
-      const isTyping = target && /^(INPUT|TEXTAREA)$/.test(target.tagName);
+      // isContentEditable also catches CodeMirror's note editor (NoteEditor.tsx),
+      // whose typing surface is a contenteditable <div>, not an <input>/<textarea>.
+      const isTyping = !!target && (/^(INPUT|TEXTAREA)$/.test(target.tagName) || target.isContentEditable);
       const isSlash = e.key === "/" && !isTyping;
       if (!isCmdK && !isSlash) return;
       e.preventDefault();
