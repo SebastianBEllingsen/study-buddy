@@ -29,18 +29,27 @@ export function FolderCustomizePopover({
           />
         }
       >
-        {folder.icon ? (
-          <span className="text-sm leading-none">{folder.icon}</span>
-        ) : (
-          <Palette
-            className="size-3.5 text-muted-foreground"
-            style={folder.color ? { color: folder.color } : undefined}
-          />
-        )}
+        {/* Always the same plain "customize" affordance, regardless of what
+            icon/color the folder has — it's a button to open the picker,
+            not a preview of the result, which already renders in the
+            header next to the folder name. */}
+        <Palette className="size-3.5 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverContent className="w-64 space-y-3 p-3" onClick={(e) => e.stopPropagation()}>
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Icon</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-muted-foreground">Icon</p>
+            {folder.icon && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto px-1.5 py-0.5 text-xs"
+                onClick={() => onCustomize(folder.id, { icon: null })}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
           <div className="grid grid-cols-8 gap-1">
             {ICON_CHOICES.map((choice) => (
               <button

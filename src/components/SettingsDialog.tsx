@@ -715,13 +715,25 @@ function FontPicker() {
     <Select value={value} onValueChange={(v) => v && handleChange(v)}>
       <SelectTrigger className="w-full">
         <SelectValue>
-          {(v: string) => FONT_CHOICES.find((f) => f.key === v)?.label ?? "Theme default"}
+          {(v: string) => {
+            const font = FONT_CHOICES.find((f) => f.key === v);
+            return (
+              <span style={font ? { fontFamily: `var(${font.cssVar})` } : undefined}>
+                {font?.label ?? "Theme default"}
+              </span>
+            );
+          }}
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="theme">Theme default</SelectItem>
+        {/* Theme default renders in whatever heading font the active theme
+            already picks (--heading-font), same as the rest of the app,
+            rather than a fixed font of its own. */}
+        <SelectItem value="theme" style={{ fontFamily: "var(--heading-font)" }}>
+          Theme default
+        </SelectItem>
         {FONT_CHOICES.map((font) => (
-          <SelectItem key={font.key} value={font.key}>
+          <SelectItem key={font.key} value={font.key} style={{ fontFamily: `var(${font.cssVar})` }}>
             {font.label}
           </SelectItem>
         ))}

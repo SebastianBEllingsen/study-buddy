@@ -906,14 +906,24 @@ function FolderCard({
                   onDragLeave={() => setNameDragOver(false)}
                   onDrop={handleNameAreaDrop}
                 >
-                  {folder.icon ? (
-                    <span className="shrink-0 text-sm leading-none">{folder.icon}</span>
-                  ) : (
-                    <FolderIcon
-                      className="size-4 shrink-0 text-muted-foreground"
-                      style={folder.color ? { color: folder.color } : undefined}
-                    />
-                  )}
+                  {/* A background tint is the only way an accent color
+                      shows up when the icon is an emoji — CSS `color`
+                      doesn't affect emoji glyphs the way it does the
+                      lucide FolderIcon, so the tint has to live behind
+                      whichever one is showing, not on the glyph itself. */}
+                  <span
+                    className="flex size-5 shrink-0 items-center justify-center rounded-md"
+                    style={folder.color ? { backgroundColor: `${folder.color}26` } : undefined}
+                  >
+                    {folder.icon ? (
+                      <span className="text-sm leading-none">{folder.icon}</span>
+                    ) : (
+                      <FolderIcon
+                        className={`size-4 ${folder.color ? "" : "text-muted-foreground"}`}
+                        style={folder.color ? { color: folder.color } : undefined}
+                      />
+                    )}
+                  </span>
                   {renaming ? (
                     <Input
                       autoFocus
