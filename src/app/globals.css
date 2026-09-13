@@ -1,0 +1,690 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "katex/dist/katex.min.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--heading-font);
+  --color-focus: var(--focus);
+  --color-amber: var(--amber);
+  --color-sage: var(--sage);
+  --color-clay: var(--clay);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  font-weight: 600;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-body h1 {
+  font-size: 1.25rem;
+}
+.markdown-body h2 {
+  font-size: 1.125rem;
+}
+.markdown-body h3 {
+  font-size: 1rem;
+}
+
+.markdown-body p {
+  margin-bottom: 0.75em;
+  line-height: 1.6;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-bottom: 0.75em;
+  padding-left: 1.5em;
+}
+
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+}
+
+/* Unscoped (not .markdown-body-prefixed) since rendered math also appears
+   outside markdown — quiz questions/options and flashcard fronts/backs
+   render via MathText.tsx, plain strings with no markdown wrapper. KaTeX's
+   class names don't collide with anything else in this app. */
+.katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.25em;
+}
+.katex {
+  font-size: 1.05em;
+}
+p .katex,
+li .katex {
+  vertical-align: -0.05em;
+}
+
+:root {
+  /* Study Buddy's default "Calm" appearance theme: Paper/Ink for the base
+     surface, one quiet accent (Focus) for interactive elements, and three
+     semantic-only accents (Amber/Sage/Clay) reserved for streak-and-review
+     meaning — never used decoratively.
+
+     --focus/--amber/--sage/--clay are ROLE names, not literal-color names:
+     "amber" always means "streak/highlight," "sage" always means
+     "success," etc. The alternate "Gamified" theme below (picked in
+     Settings → Appearance, see AppThemeProvider.tsx) redefines what hex
+     value each role holds — e.g. --amber becomes a hot magenta there — so
+     every component that reads these tokens (ModelBadge, flashcard rating
+     buttons, quiz feedback, the streak counter, Practice mode buttons)
+     re-skins automatically with no component changes. */
+  --heading-font: var(--font-source-serif);
+  --background: #f1efea;
+  --foreground: #23262b;
+  --card: #faf9f5;
+  --card-foreground: #23262b;
+  --popover: #faf9f5;
+  --popover-foreground: #23262b;
+  --primary: #2f6f68;
+  --primary-foreground: #f6f5f1;
+  --secondary: #e7e5de;
+  --secondary-foreground: #23262b;
+  --muted: #eae8e1;
+  --muted-foreground: #63665e;
+  --accent: #e7e5de;
+  --accent-foreground: #23262b;
+  --destructive: #c1554b;
+  --border: #dedbd2;
+  --input: #dedbd2;
+  --ring: #2f6f68;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --focus: #2f6f68;
+  --amber: #c98a2c;
+  --sage: #4b8a63;
+  --clay: #c1554b;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+/* Applied by next-themes on <html> — via the "dark" class for an explicit
+   choice, or resolved from the OS/browser preference when the theme is
+   "system" (the default). See ThemeProvider.tsx / ThemeToggle.tsx. */
+.dark {
+  --background: #1e2124;
+  --foreground: #edebe5;
+  --card: #262a2e;
+  --card-foreground: #edebe5;
+  --popover: #262a2e;
+  --popover-foreground: #edebe5;
+  --primary: #62a79e;
+  --primary-foreground: #12181a;
+  --secondary: #33373b;
+  --secondary-foreground: #edebe5;
+  --muted: #33373b;
+  --muted-foreground: #a8aba3;
+  --accent: #33373b;
+  --accent-foreground: #edebe5;
+  --destructive: #d97c72;
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: #62a79e;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --focus: #62a79e;
+  --amber: #d9a441;
+  --sage: #5fa378;
+  --clay: #d97c72;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* --- "Gamified" appearance theme --------------------------------------
+   An arcade/game-HUD skin: violet ground, a vivid Surge accent standing in
+   for Focus, and a hot-magenta Combo standing in for Amber's streak/due
+   role — high-energy on purpose, for a student who wants studying to feel
+   like leveling up rather than a quiet reading app. Picked per-viewer in
+   Settings → Appearance (AppThemeProvider.tsx sets [data-app-theme] on
+   <html>); the light/dark toggle stays fully independent of this choice,
+   so all four combinations exist. */
+[data-app-theme="gamified"] {
+  --heading-font: var(--font-space-grotesk);
+  --background: #f4eeff;
+  --foreground: #1b1330;
+  --card: #ffffff;
+  --card-foreground: #1b1330;
+  --popover: #ffffff;
+  --popover-foreground: #1b1330;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #ede4ff;
+  --secondary-foreground: #1b1330;
+  --muted: #ede4ff;
+  --muted-foreground: #6b6180;
+  --accent: #ede4ff;
+  --accent-foreground: #1b1330;
+  --destructive: #e0263f;
+  --border: #ddd0fa;
+  --input: #ddd0fa;
+  --ring: #7c3aed;
+  --radius: 0.9rem;
+  --focus: #7c3aed;
+  --amber: #d6236f;
+  --sage: #0fa37a;
+  --clay: #e0263f;
+}
+
+.dark[data-app-theme="gamified"] {
+  --background: #14101f;
+  --foreground: #f1eefb;
+  --card: #1e1830;
+  --card-foreground: #f1eefb;
+  --popover: #1e1830;
+  --popover-foreground: #f1eefb;
+  --primary: #9b6bff;
+  --primary-foreground: #14101f;
+  --secondary: #2a2244;
+  --secondary-foreground: #f1eefb;
+  --muted: #2a2244;
+  --muted-foreground: #b0a6d9;
+  --accent: #2a2244;
+  --accent-foreground: #f1eefb;
+  --destructive: #ff5c6a;
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: #9b6bff;
+  --focus: #9b6bff;
+  --amber: #ff3d9a;
+  --sage: #2de1a6;
+  --clay: #ff5c6a;
+}
+
+/* Small gamified-only flourishes, scoped entirely by attribute selector so
+   components stay theme-agnostic — no JS branching for these. */
+[data-app-theme="gamified"] [data-slot="button"][data-variant="default"] {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent),
+    0 6px 24px -8px color-mix(in oklch, var(--primary) 70%, transparent);
+}
+[data-app-theme="gamified"] .stat-glow {
+  text-shadow: 0 0 24px color-mix(in oklch, currentcolor 55%, transparent);
+}
+
+/* --- "Mono" appearance theme -------------------------------------------
+   A precise, undecorated skin for technical coursework (pentesting,
+   machine vision, discrete maths — the actual subjects in this app):
+   monospace headings (reusing the Geist Mono already loaded, no extra
+   font), a sharp small radius instead of soft rounding, and hues borrowed
+   from diff/syntax coloring (blue keyword, gold warning, green add, red
+   remove) rather than anything playful. Character comes from restraint —
+   this theme deliberately gets no glow/flourish treatment. */
+[data-app-theme="mono"] {
+  --heading-font: var(--font-geist-mono);
+  --background: #f7f8fa;
+  --foreground: #14171a;
+  --card: #ffffff;
+  --card-foreground: #14171a;
+  --popover: #ffffff;
+  --popover-foreground: #14171a;
+  --primary: #1170d6;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef1;
+  --secondary-foreground: #14171a;
+  --muted: #eceef1;
+  --muted-foreground: #5b6470;
+  --accent: #eceef1;
+  --accent-foreground: #14171a;
+  --destructive: #c4302b;
+  --border: #dce0e4;
+  --input: #dce0e4;
+  --ring: #1170d6;
+  --radius: 0.375rem;
+  --focus: #1170d6;
+  --amber: #a97a12;
+  --sage: #1c8c5a;
+  --clay: #c4302b;
+}
+
+.dark[data-app-theme="mono"] {
+  --background: #0b0e11;
+  --foreground: #c9d1d9;
+  --card: #12161b;
+  --card-foreground: #c9d1d9;
+  --popover: #12161b;
+  --popover-foreground: #c9d1d9;
+  --primary: #4da8f0;
+  --primary-foreground: #0b0e11;
+  --secondary: #1c2128;
+  --secondary-foreground: #c9d1d9;
+  --muted: #1c2128;
+  --muted-foreground: #8b949e;
+  --accent: #1c2128;
+  --accent-foreground: #c9d1d9;
+  --destructive: #f0666a;
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #4da8f0;
+  --focus: #4da8f0;
+  --amber: #e3b341;
+  --sage: #3fb979;
+  --clay: #f0666a;
+}
+
+/* --- "Sepia" appearance theme -------------------------------------------
+   A warm reading-room mood for late study sessions: parchment and walnut
+   rather than the generic AI-slop "cream + terracotta" combo — deeper,
+   duskier paper, and a brown/umber accent instead of orange-clay, so it
+   reads as an old library rather than a template default. Spectral (a
+   serif drawn for long-form on-screen reading) carries headings, distinct
+   from Calm's Source Serif so the two warm-ish themes don't collapse into
+   each other. */
+[data-app-theme="sepia"] {
+  --heading-font: var(--font-spectral);
+  --background: #efe6d6;
+  --foreground: #3a2e22;
+  --card: #f7f1e4;
+  --card-foreground: #3a2e22;
+  --popover: #f7f1e4;
+  --popover-foreground: #3a2e22;
+  --primary: #6b4a2e;
+  --primary-foreground: #f7f1e4;
+  --secondary: #e6d9bf;
+  --secondary-foreground: #3a2e22;
+  --muted: #e6d9bf;
+  --muted-foreground: #685a47;
+  --accent: #e6d9bf;
+  --accent-foreground: #3a2e22;
+  --destructive: #8c2e22;
+  --border: #ddd0b8;
+  --input: #ddd0b8;
+  --ring: #6b4a2e;
+  --radius: 0.5rem;
+  --focus: #6b4a2e;
+  --amber: #b8892f;
+  --sage: #4c6b4f;
+  --clay: #8c2e22;
+}
+
+.dark[data-app-theme="sepia"] {
+  --background: #201811;
+  --foreground: #eae0cb;
+  --card: #2b2118;
+  --card-foreground: #eae0cb;
+  --popover: #2b2118;
+  --popover-foreground: #eae0cb;
+  --primary: #b08a5c;
+  --primary-foreground: #201811;
+  --secondary: #33291d;
+  --secondary-foreground: #eae0cb;
+  --muted: #33291d;
+  --muted-foreground: #b3a184;
+  --accent: #33291d;
+  --accent-foreground: #eae0cb;
+  --destructive: #c4573f;
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: #b08a5c;
+  --focus: #b08a5c;
+  --amber: #d9a441;
+  --sage: #6b9370;
+  --clay: #c4573f;
+}
+
+/* --- "Blueprint" appearance theme ---------------------------------------
+   A drafting-table/cyanotype skin, grounded in the actual coursework this
+   app is used for (pentesting, machine vision, discrete maths) — the first
+   theme where a saturated blue is the SURFACE color, not just an accent.
+   Light mode reads as pale drafting vellum with navy ink; dark mode is the
+   classic cyanotype blueprint (deep blue ground, pale cyan linework).
+   Corners go sharper than every other theme (drafted precision), and
+   headings use IBM Plex Sans (designed for technical/engineering
+   documentation). The one deliberate flourish is a faint drafting-grid
+   texture on the page background — restrained, not applied to cards. */
+[data-app-theme="blueprint"] {
+  --heading-font: var(--font-ibm-plex-sans);
+  --background: #eaf1f8;
+  --foreground: #14304d;
+  --card: #ffffff;
+  --card-foreground: #14304d;
+  --popover: #ffffff;
+  --popover-foreground: #14304d;
+  --primary: #1b5fa8;
+  --primary-foreground: #ffffff;
+  --secondary: #dbe7f2;
+  --secondary-foreground: #14304d;
+  --muted: #dbe7f2;
+  --muted-foreground: #4d6683;
+  --accent: #dbe7f2;
+  --accent-foreground: #14304d;
+  --destructive: #b3392c;
+  --border: #c7d8e8;
+  --input: #c7d8e8;
+  --ring: #1b5fa8;
+  --radius: 0.25rem;
+  --focus: #1b5fa8;
+  --amber: #c77d1e;
+  --sage: #2e7d5b;
+  --clay: #b3392c;
+  --grid-line: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+
+.dark[data-app-theme="blueprint"] {
+  --background: #0f2a47;
+  --foreground: #dcebf7;
+  --card: #15355a;
+  --card-foreground: #dcebf7;
+  --popover: #15355a;
+  --popover-foreground: #dcebf7;
+  --primary: #6fc3f0;
+  --primary-foreground: #0f2a47;
+  --secondary: #1c4066;
+  --secondary-foreground: #dcebf7;
+  --muted: #1c4066;
+  --muted-foreground: #9dbdda;
+  --accent: #1c4066;
+  --accent-foreground: #dcebf7;
+  --destructive: #f0685a;
+  --border: oklch(1 0 0 / 16%);
+  --input: oklch(1 0 0 / 20%);
+  --ring: #6fc3f0;
+  --focus: #6fc3f0;
+  --amber: #f0a83c;
+  --sage: #5fd1a0;
+  --clay: #f0685a;
+  --grid-line: color-mix(in oklch, var(--primary) 14%, transparent);
+}
+
+[data-app-theme="blueprint"] body {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* --- "Canvas" appearance theme -----------------------------------------
+   A courseware skin borrowing Canvas LMS's own identity: its crimson brand
+   red as the one accent, clean white module cards on a light cool-gray
+   page (rather than any of this app's warmer/darker grounds), and Lato —
+   Canvas's actual UI typeface — carrying headings. Corners round a touch
+   more than Calm's default, matching Canvas's own module cards. No
+   dark-mode equivalent exists in the real product; this one inverts
+   lightness while keeping the same crimson hue, same as every other
+   theme's dark variant. */
+[data-app-theme="canvas"] {
+  --heading-font: var(--font-lato);
+  --background: #f5f6f7;
+  --foreground: #2d3b45;
+  --card: #ffffff;
+  --card-foreground: #2d3b45;
+  --popover: #ffffff;
+  --popover-foreground: #2d3b45;
+  --primary: #d6352c;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0f2;
+  --secondary-foreground: #2d3b45;
+  --muted: #eef0f2;
+  --muted-foreground: #5e6b76;
+  --accent: #eef0f2;
+  --accent-foreground: #2d3b45;
+  --destructive: #8b1a1a;
+  --border: #dde1e4;
+  --input: #dde1e4;
+  --ring: #d6352c;
+  --radius: 0.5rem;
+  --focus: #d6352c;
+  --amber: #c9861a;
+  --sage: #1e8449;
+  --clay: #8b1a1a;
+}
+
+.dark[data-app-theme="canvas"] {
+  --background: #1c2126;
+  --foreground: #e7eaec;
+  --card: #262c32;
+  --card-foreground: #e7eaec;
+  --popover: #262c32;
+  --popover-foreground: #e7eaec;
+  --primary: #f0564a;
+  --primary-foreground: #1c2126;
+  --secondary: #333a41;
+  --secondary-foreground: #e7eaec;
+  --muted: #333a41;
+  --muted-foreground: #a7b0b8;
+  --accent: #333a41;
+  --accent-foreground: #e7eaec;
+  --destructive: #d9776b;
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #f0564a;
+  --focus: #f0564a;
+  --amber: #e0a83c;
+  --sage: #3fbf6b;
+  --clay: #d9776b;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* --- Flashcard 3D flip --- */
+/* Perspective needs to scale with the flipping element's own size, not be a
+   fixed value — this card can be ~900px+ wide, and a "close camera" value
+   like 1200px on something that wide produces an exaggerated, distorted
+   wide-angle skew mid-rotation instead of a subtle flip. 3000px keeps the
+   distortion mild regardless of card width. */
+.flip-perspective {
+  perspective: 3000px;
+}
+.flip-card {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.35s cubic-bezier(0.4, 0.2, 0.2, 1);
+}
+.flip-card[data-flipped="true"] {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  backface-visibility: hidden;
+}
+.flip-face-back {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  transform: rotateY(180deg);
+}
+
+/* --- One-shot entrance/attention animations (not Tailwind's looping
+   animate-pulse — these play once, tied to a state change appearing). --- */
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-pop-in {
+  animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes pulse-once {
+  0% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: var(--pulse-color, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.animate-pulse-once {
+  animation: pulse-once 0.6s ease-out;
+}
+
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(120px) rotate(var(--confetti-spin, 180deg));
+  }
+}
+.animate-confetti-fall {
+  animation: confetti-fall 0.9s ease-in forwards;
+}
+
+/* Hard 2026 baseline: anyone with this OS preference set gets near-instant
+   transitions instead of motion, across every animation in this file and
+   every tw-animate-css/Tailwind transition utility used elsewhere. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Home dashboard widget grid (see lib/dashboardGrid.ts) — an Android-style
+   free-form 6-column grid on larger screens, where each tile's position
+   comes from CSS custom properties set inline per-tile. Below the `sm`
+   breakpoint there isn't room for real 2D placement, so tiles just stack
+   full-width in document order instead of trying to remap the desktop
+   grid coordinates onto fewer columns. GRID_COLS/ROW_HEIGHT_PX in
+   dashboardGrid.ts must match the values here. */
+.dashboard-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+.dashboard-tile {
+  grid-column: 1 / -1;
+  /* `1fr` tracks are really `minmax(auto, 1fr)` — without this, one tile
+     with an unshrinkable descendant (e.g. nowrap text) can force its whole
+     column wider than its siblings', which is what made tiles render at
+     visibly different widths despite an equal colSpan. */
+  min-width: 0;
+  min-height: 0;
+}
+@media (min-width: 640px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(6, 1fr);
+    grid-auto-rows: 120px;
+  }
+  .dashboard-tile {
+    grid-column: var(--tile-col) / span var(--tile-span-col);
+    grid-row: var(--tile-row) / span var(--tile-span-row);
+  }
+}
+
+/* A scrollable list (Upcoming/Assignments dashboard widgets) that only
+   shows its scrollbar while the pointer is over it — the thumb is
+   transparent at rest and only painted on :hover, rather than the
+   scrollbar disappearing/reserving no space, so content never reflows. */
+.scrollbar-hover {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scrollbar-hover:hover {
+  scrollbar-color: var(--border) transparent;
+}
+.scrollbar-hover::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar-hover::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-hover::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+.scrollbar-hover:hover::-webkit-scrollbar-thumb {
+  background: var(--border);
+}

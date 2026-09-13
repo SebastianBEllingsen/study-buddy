@@ -1,0 +1,177 @@
+CREATE TABLE IF NOT EXISTS courses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  ai_backend TEXT NOT NULL DEFAULT 'api' CHECK (ai_backend IN ('api', 'claude_code')), -- legacy; superseded by ai_provider (see migrate() in db.ts)
+  ai_provider TEXT NOT NULL DEFAULT 'api', -- 'api' | 'claude_code' | 'openai' | 'gemini' | 'free'
+  anthropic_api_key TEXT,
+  openai_api_key TEXT,
+  gemini_api_key TEXT,
+  openrouter_api_key TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Only ai_backend here (not ai_provider): on a database from before
+-- ai_provider existed, this INSERT runs before migrate() has a chance to add
+-- the column, so referencing it here would break that case. A fresh
+-- database gets ai_provider = 'api' from the column's own DEFAULT; migrate()
+-- backfills it for pre-existing databases.
+INSERT OR IGNORE INTO app_settings (id, ai_backend) VALUES (1, 'api');
+
+CREATE TABLE IF NOT EXISTS folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  is_master INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_folders_course_id ON folders(course_id);
+
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  filename TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  extracted_text TEXT,
+  page_count INTEGER,
+  char_count INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'extracted' | 'failed'
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_course_id ON documents(course_id);
+-- idx_documents_folder_id is created in db.ts's migrate(), after folder_id is
+-- guaranteed to exist on documents (it may have just been added via ALTER
+-- TABLE on a database created before folders existed).
+
+CREATE TABLE IF NOT EXISTS generated_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  mode TEXT NOT NULL, -- 'notes' | 'quiz' | 'flashcards'
+  title TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  source_document_ids TEXT NOT NULL, -- JSON array
+  -- The folder this was actually GENERATED from — NULL means "all course
+  -- material" (pooled across every folder). Distinct from folder_id above,
+  -- which is only where the item is FILED: a pooled generation is stored in
+  -- the course's default folder but its source material spans every folder,
+  -- so folder_id alone isn't enough to know what counts as "new" later.
+  source_folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_generated_items_course_id ON generated_items(course_id);
+
+CREATE TABLE IF NOT EXISTS quiz_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  generated_item_id INTEGER NOT NULL REFERENCES generated_items(id) ON DELETE CASCADE,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT,
+  score REAL,
+  answers_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_item_id ON quiz_attempts(generated_item_id);
+
+CREATE TABLE IF NOT EXISTS flashcard_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  generated_item_id INTEGER NOT NULL REFERENCES generated_items(id) ON DELETE CASCADE,
+  card_index INTEGER NOT NULL,
+  last_result TEXT NOT NULL, -- 'again' | 'hard' | 'good' | 'easy'
+  reviewed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_reviews_item_id ON flashcard_reviews(generated_item_id);
+
+-- Current per-card scheduling STATE (one row per card, upserted in place) —
+-- distinct from flashcard_reviews above, which is an append-only historical
+-- log of every review event and is never read back for scheduling. A card
+-- with no row here yet has never been reviewed and is due immediately.
+CREATE TABLE IF NOT EXISTS flashcard_schedule (
+  generated_item_id INTEGER NOT NULL REFERENCES generated_items(id) ON DELETE CASCADE,
+  card_index INTEGER NOT NULL,
+  ease_factor REAL NOT NULL DEFAULT 2.5,
+  interval_days REAL NOT NULL DEFAULT 0,
+  repetitions INTEGER NOT NULL DEFAULT 0,
+  due_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_reviewed_at TEXT,
+  PRIMARY KEY (generated_item_id, card_index)
+);
+
+-- Read-only external ICS calendar subscriptions (e.g. a university student
+-- portal's timetable feed, an LMS's assignment-due-dates feed) — merged
+-- into the Google Calendar events list at read time (see
+-- lib/calendarFeeds.ts), never written back to.
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  url TEXT NOT NULL,
+  -- Independently toggleable: a feed can back the Assignments widget's
+  -- checklist without also cluttering the /calendar month grid, or vice
+  -- versa. Both default on (a newly added feed shows up everywhere).
+  show_on_calendar INTEGER NOT NULL DEFAULT 1,
+  show_in_widget INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The Vault: personal Obsidian-style notes, deliberately separate from a
+-- course's AI-generated "notes" GenerationMode (a per-course study-notes
+-- document) — these are user-authored, and organized into courses/folders
+-- the same way documents/generated_items are (course_id/folder_id/position;
+-- see listNotesForCourse). They still link to each other and to course
+-- material ACROSS courses via [[note:ID]] / [[doc:ID#snippet]] /
+-- [[item:ID#snippet]] syntax (see lib/noteLinks.ts) — organization is
+-- per-course, but linking isn't. Backlinks are computed at read time by
+-- scanning every note's markdown rather than maintained in a separate links
+-- table — cheap at personal-vault scale and never goes stale on an edit.
+-- Title uniqueness (so a [[wikilink]] unambiguously resolves to one note) is
+-- enforced case-insensitively in application code (see models.ts), not by a
+-- DB constraint here — SQLite's COLLATE NOCASE and Postgres's lower()
+-- indexes aren't expressible identically across both schema files, and a
+-- personal single-user vault doesn't need a DB-level race guard on top of
+-- the app-level check.
+--
+-- course_id/folder_id are nullable here (unlike documents/generated_items'
+-- NOT NULL) purely because they were ALTER'd onto this table after it
+-- already shipped — SQLite's ALTER TABLE ADD COLUMN can't add a NOT NULL
+-- column without a default, and there's no meaningful default course to
+-- fall back to. Application code (models.ts's createNote) always populates
+-- both, defaulting folder_id to the course's master folder, so in practice
+-- every note has both set, the same as documents/generated_items.
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+  folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL,
+  markdown TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Not indexed here (unlike idx_documents_course_id below): this file runs
+-- unconditionally on every startup, before migrate()'s ALTER TABLEs below
+-- have added course_id to a database that already had this table from
+-- before that column existed — indexing it here would fail on exactly that
+-- upgrade path. See sqlite.ts's migrate() for where this index is created,
+-- after the column is guaranteed to exist.
+
+-- Which feed-sourced calendar events the Assignments widget's checklist has
+-- been ticked off for. Keyed by the event's own id (see calendarFeeds.ts's
+-- `${feed.label}:${uid}:${instance.start}` — stable across refetches of the
+-- same ICS feed) rather than a foreign key, since feed events are never
+-- rows of their own — they're parsed fresh from the feed URL on every read.
+CREATE TABLE IF NOT EXISTS completed_assignments (
+  event_id TEXT PRIMARY KEY,
+  completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

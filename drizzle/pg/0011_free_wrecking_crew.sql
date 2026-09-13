@@ -1,0 +1,2 @@
+ALTER TABLE "calendar_feeds" ADD COLUMN "show_on_calendar" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "calendar_feeds" ADD COLUMN "show_in_widget" boolean DEFAULT true NOT NULL;

@@ -1,0 +1,1087 @@
+"use client";
+
+import { Suspense, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  BookOpen,
+  CalendarDays,
+  Check,
+  Flame,
+  GripVertical,
+  Layers,
+  ListChecks,
+  Palette,
+  Pencil,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "cn";
+import type { AppSettings, CalendarFeed, Course, DueFlashcardItem, HomeWidgetConfig } from "@/lib/models";
+import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
+import { tileGridStyle } from "@/lib/dashboardGrid";
+import StudyHeatmap from "@/components/StudyHeatmap";
+import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
+import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
+import { DueFlashcardsDialog } from "@/components/DueFlashcardsDialog";
+import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EventInfoTooltip } from "@/components/EventInfoTooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
+function DeleteCourseButton({
+  onConfirm,
+  iconClassName = "text-muted-foreground",
+}: {
+  onConfirm: () => Promise<void> | void;
+  iconClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleConfirm() {
+    setDeleting(true);
+    try {
+      await onConfirm();
+      setOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger
+        render={<Button variant="ghost" size="icon-sm" />}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        aria-label="Delete course"
+      >
+        <Trash2 className={`size-3.5 ${iconClassName}`} />
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this course?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently deletes all its folders, documents, and generated
+            notes/quizzes/flashcards — including attempt and review history. This
+            can&apos;t be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleConfirm}>
+            {deleting ? "Deleting…" : "Delete course"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function CourseCard({
+  course,
+  hasDue,
+  onRename,
+  onDelete,
+  onReorder,
+  onCustomized,
+}: {
+  course: Course;
+  hasDue: boolean;
+  onRename: (courseId: number, name: string) => Promise<void>;
+  onDelete: (courseId: number) => Promise<void>;
+  onReorder: (draggedCourseId: number, targetCourseId: number) => void;
+  onCustomized: () => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(course.name);
+  const [dragOver, setDragOver] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const { push: pushWithTransition } = useViewTransitionRouter();
+
+  async function commitRename() {
+    const trimmed = nameDraft.trim();
+    setRenaming(false);
+    if (!trimmed || trimmed === course.name) {
+      setNameDraft(course.name);
+      return;
+    }
+    await onRename(course.id, trimmed);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const payload = readDragPayload(e);
+    if (payload?.kind === "course" && payload.id !== course.id) {
+      onReorder(payload.id, course.id);
+    }
+  }
+
+  // Opt-in (see CustomizeCourseDialog) — the cover banner as the card's own
+  // background, with a dark scrim so title/icons stay legible over a busy
+  // photo regardless of what's under it.
+  const showCoverOnCard = course.show_cover_on_card && !!course.cover_image;
+  const mutedIconClass = showCoverOnCard ? "text-white/70" : "text-muted-foreground";
+  const noIconFrame = !!course.icon_image && !course.show_icon_frame;
+
+  return (
+    <Card
+      className={`relative h-full overflow-hidden [contain:paint] transition-shadow hover:shadow-md hover:ring-primary/30 ${
+        dragOver ? "ring-2 ring-primary" : ""
+      } ${showCoverOnCard ? "bg-cover bg-center text-white" : ""}`}
+      style={showCoverOnCard ? { backgroundImage: `url(${course.cover_image})` } : undefined}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+    >
+      {showCoverOnCard && <div className="absolute inset-0 bg-black/55" />}
+      {hasDue && (
+        // Replaces a former border-l accent: a border sits outside the
+        // scrim overlay's reach (box-model gap), so it always showed a
+        // sliver of raw, unmuted cover-image color. This dot is painted
+        // after the overlay in DOM order, so it stays on top instead.
+        <span aria-hidden="true" className="absolute right-2.5 top-2.5 z-10 size-2 rounded-full bg-focus" />
+      )}
+      <CardContent className="relative flex items-start gap-2">
+        <div
+          draggable
+          onDragStart={(e) => setDragPayload(e, { kind: "course", id: course.id })}
+          className="cursor-grab select-none pt-1.5 active:cursor-grabbing"
+        >
+          <GripVertical className={`size-4 ${mutedIconClass}`} />
+        </div>
+        <div
+          // "No frame" drops the rounded/tinted container entirely so a
+          // transparent-background badge reads as a sticker sitting
+          // directly on the card, rather than a photo cropped into a box —
+          // and uses bg-contain (not bg-cover) so the sticker's own shape
+          // isn't cropped to a square.
+          className={`flex size-9 shrink-0 items-center justify-center bg-center ${
+            noIconFrame
+              ? "bg-contain"
+              : `overflow-hidden rounded-lg bg-cover ${showCoverOnCard ? "bg-white/15 backdrop-blur-sm" : "bg-muted"}`
+          }`}
+          style={
+            course.icon_image
+              ? { backgroundImage: `url(${course.icon_image})` }
+              : course.color && !showCoverOnCard
+                ? { backgroundColor: `${course.color}26` }
+                : undefined
+          }
+        >
+          {!course.icon_image &&
+            (course.icon ? (
+              <span className="text-base">{course.icon}</span>
+            ) : (
+              <BookOpen className={`size-4.5 ${mutedIconClass}`} />
+            ))}
+        </div>
+        <div className="min-w-0 flex-1 pt-1">
+          {renaming ? (
+            <Input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename();
+                }
+                if (e.key === "Escape") {
+                  setNameDraft(course.name);
+                  setRenaming(false);
+                }
+              }}
+              className="h-7"
+            />
+          ) : (
+            <Link
+              href={`/courses/${course.id}`}
+              onClick={(e) => {
+                // Let modified clicks (new tab, etc.) fall through to normal
+                // Link behavior; only intercept a plain left click to add
+                // the view transition.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                pushWithTransition(`/courses/${course.id}`);
+              }}
+            >
+              <CardTitle className="truncate">{course.name}</CardTitle>
+            </Link>
+          )}
+        </div>
+        {!renaming && (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setCustomizeOpen(true)}
+              aria-label={`Customize ${course.name}`}
+            >
+              <Palette className={`size-3.5 ${mutedIconClass}`} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setRenaming(true)}
+              aria-label={`Rename ${course.name}`}
+            >
+              <Pencil className={`size-3.5 ${mutedIconClass}`} />
+            </Button>
+            <DeleteCourseButton onConfirm={() => onDelete(course.id)} iconClassName={mutedIconClass} />
+          </div>
+        )}
+      </CardContent>
+      <CustomizeCourseDialog
+        course={course}
+        open={customizeOpen}
+        onOpenChange={setCustomizeOpen}
+        onSaved={onCustomized}
+      />
+    </Card>
+  );
+}
+
+interface Stats {
+  dueFlashcards: { total: number; items: DueFlashcardItem[] };
+  streak: number;
+  activity: Record<string, number>;
+}
+
+// How much a widget shows adapts to how much room it's been given — same
+// idea as an iOS/Android home-screen widget rendering less detail at a
+// smaller size, not just clipping the same content.
+interface WidgetLayout {
+  colSpan: number;
+  rowSpan: number;
+}
+
+function StreakWidget({ stats }: { stats: Stats }) {
+  if (stats.streak === 0) {
+    return (
+      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
+        <Flame className="size-5 text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">No streak yet — study today to start one.</p>
+      </Card>
+    );
+  }
+  return (
+    <Card className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
+      <span className="stat-glow font-heading text-3xl font-semibold text-amber">{stats.streak}</span>
+      <span className="flex items-center gap-1 text-sm text-muted-foreground">
+        <Flame className="size-3.5 text-amber" />
+        day streak
+      </span>
+    </Card>
+  );
+}
+
+function DueCardsWidget({ stats, layout }: { stats: Stats; layout: WidgetLayout }) {
+  const { dueFlashcards } = stats;
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  if (dueFlashcards.total === 0) {
+    return (
+      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
+        <Layers className="size-5 text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">Nothing due — you&apos;re all caught up.</p>
+      </Card>
+    );
+  }
+
+  // A single row of height doesn't have room for a header plus even one
+  // list row, and a narrow column doesn't have room for the list's
+  // course-name/count columns — either way this falls back to the same
+  // compact number+label look as the streak widget rather than squeezing
+  // in a list that doesn't fit. It's clickable either way — resizing the
+  // widget shouldn't be the only way to see which sets are due.
+  if (layout.colSpan <= 2 || layout.rowSpan === 1) {
+    return (
+      <>
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => setDialogOpen(true)}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setDialogOpen(true)}
+          className="h-full cursor-pointer items-center justify-center gap-1 overflow-hidden border text-center transition-colors hover:bg-muted/40"
+        >
+          <span className="stat-glow font-heading text-3xl font-semibold text-amber">
+            {dueFlashcards.total}
+          </span>
+          <span className="flex items-center gap-1 text-sm text-muted-foreground">
+            <Layers className="size-3.5" />
+            card{dueFlashcards.total === 1 ? "" : "s"} due
+          </span>
+        </Card>
+        <DueFlashcardsDialog open={dialogOpen} onOpenChange={setDialogOpen} items={dueFlashcards.items} />
+      </>
+    );
+  }
+
+  const maxShown = layout.rowSpan >= 3 ? 9 : 6;
+  const shown = dueFlashcards.items.slice(0, maxShown);
+  const remaining = dueFlashcards.items.length - shown.length;
+
+  return (
+    <>
+      <Card className="h-full space-y-3 overflow-hidden border p-4">
+        <button
+          type="button"
+          onClick={() => setDialogOpen(true)}
+          className="flex items-baseline gap-2 text-left"
+        >
+          <span className="stat-glow font-heading text-3xl font-semibold text-amber">
+            {dueFlashcards.total}
+          </span>
+          <span className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground hover:underline">
+            <Layers className="size-3.5" />
+            card{dueFlashcards.total === 1 ? "" : "s"} due
+          </span>
+        </button>
+        <ul className="space-y-1">
+          {shown.map((item) => (
+            <li key={item.itemId}>
+              <Link
+                href={`/items/${item.itemId}`}
+                className="flex items-center gap-2 rounded-md px-2 py-1 -mx-2 text-sm hover:bg-muted"
+              >
+                <span className="size-1.5 shrink-0 rounded-full bg-amber" />
+                <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                <span className="shrink-0 text-muted-foreground">{item.courseName}</span>
+                <span className="shrink-0 text-muted-foreground">{item.dueCount} due</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        {remaining > 0 && (
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="px-2 text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
+          >
+            +{remaining} more set{remaining === 1 ? "" : "s"} with cards due
+          </button>
+        )}
+      </Card>
+      <DueFlashcardsDialog open={dialogOpen} onOpenChange={setDialogOpen} items={dueFlashcards.items} />
+    </>
+  );
+}
+
+// Fewer weeks at a narrower width, so squares stay a legible size instead
+// of shrinking to fit — a real resize of the content, not a CSS clip.
+function heatmapWeeksFor(colSpan: number): number {
+  if (colSpan <= 2) return 6;
+  if (colSpan <= 4) return 10;
+  return 14;
+}
+
+function HeatmapWidget({ activity, layout }: { activity: Record<string, number>; layout: WidgetLayout }) {
+  return (
+    <Card className="h-full overflow-hidden border p-3">
+      <StudyHeatmap
+        activity={activity}
+        weeks={heatmapWeeksFor(layout.colSpan)}
+        showLabel={layout.rowSpan >= 2}
+      />
+    </Card>
+  );
+}
+
+interface UpcomingCalendarEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  start: string;
+  end: string;
+  allDay: boolean;
+  htmlLink: string | null;
+  source: string;
+}
+
+// A small dot before a feed-sourced event's title (never shown for the
+// user's own "google" events, which need no extra label) — a structural
+// indicator of which calendar an event came from, not decoration, same
+// idea as CourseCard's due-indicator left border. Hashing the label into
+// one of the theme's existing semantic tokens means a new feed doesn't
+// need a color assigned by hand, and stays stable across reloads.
+const SOURCE_DOT_COLORS = ["bg-focus", "bg-amber", "bg-sage"];
+function sourceDotColor(source: string): string {
+  let hash = 0;
+  for (let i = 0; i < source.length; i++) hash = (hash * 31 + source.charCodeAt(i)) | 0;
+  return SOURCE_DOT_COLORS[Math.abs(hash) % SOURCE_DOT_COLORS.length];
+}
+
+// The date a Google Calendar event's `start` represents, in local calendar
+// terms. All-day dates are plain "YYYY-MM-DD" strings — building a Date
+// straight from that string's own Y/M/D (rather than `new Date(iso)`, which
+// parses as UTC midnight) avoids shifting the event a day in negative-UTC
+// zones. Timed events use the instant itself, which Date already resolves
+// to the viewer's local day.
+function eventLocalDate(event: UpcomingCalendarEvent): Date {
+  if (event.allDay) {
+    const [y, m, d] = event.start.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(event.start);
+}
+
+function eventDayLabel(event: UpcomingCalendarEvent): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const day = eventLocalDate(event);
+  day.setHours(0, 0, 0, 0);
+  if (day.getTime() === today.getTime()) return "Today";
+  if (day.getTime() === tomorrow.getTime()) return "Tomorrow";
+  return day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function eventTimeLabel(event: UpcomingCalendarEvent): string {
+  if (event.allDay) return "All day";
+  return new Date(event.start).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+// Links an Upcoming-widget event straight to its own day on /calendar,
+// flashed and scrolled into view there (see MonthGrid's highlightEventId in
+// calendar/page.tsx) — the same "navigate and highlight" idea already used
+// for search results (lib/scrollToHighlight.ts), applied to a specific
+// element by id instead of a text match.
+function eventCalendarHref(event: UpcomingCalendarEvent): string {
+  const day = eventLocalDate(event);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateParam = `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+  return `/calendar?date=${dateParam}&highlight=${encodeURIComponent(event.id)}`;
+}
+
+// Same as above, but for the Assignments widget specifically: that widget's
+// events are feed-sourced only, and a feed can be toggled off "On calendar"
+// (personal view) while still appearing in the widget — so its links must
+// always land on the dedicated Assignments calendar tab, or the highlight
+// target might not even be in the personal view's event list.
+function assignmentsCalendarHref(event: UpcomingCalendarEvent): string {
+  return `${eventCalendarHref(event)}&view=assignments`;
+}
+
+// More events at a bigger size — the same "show more detail when there's
+// more room" adaptation as the other widgets.
+function upcomingMaxResultsFor(layout: WidgetLayout): number {
+  const base = layout.colSpan >= 6 ? 5 : layout.colSpan >= 3 ? 4 : 2;
+  const bonus = layout.rowSpan >= 3 ? 4 : layout.rowSpan >= 2 ? 2 : 0;
+  return base + bonus;
+}
+
+// A compact agenda list — like the Google Calendar widget you'd pin to a
+// phone's home screen — rather than the full month grid on /calendar.
+function UpcomingEventsWidget({
+  connected,
+  layout,
+}: {
+  connected: boolean;
+  layout: WidgetLayout;
+}) {
+  const [events, setEvents] = useState<UpcomingCalendarEvent[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const maxResults = upcomingMaxResultsFor(layout);
+  // The list's date/time columns need more room than a narrow tile has —
+  // below that width it falls back to just the next event, the same
+  // compact-number-card look as the streak/due widgets.
+  const compact = layout.colSpan <= 2;
+
+  useEffect(() => {
+    if (!connected) return;
+    // excludeHiddenFeeds: a feed toggled off "On calendar" in Settings
+    // shouldn't show up here either — done server-side (see
+    // api/calendar/events/route.ts) so it's applied BEFORE maxResults caps
+    // the result, not after, which could otherwise leave far fewer events
+    // visible than maxResults if hidden-feed events crowded the top of the
+    // sorted list.
+    fetch(`/api/calendar/events?maxResults=${maxResults}&excludeHiddenFeeds=true`)
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) {
+          setError(body.error ?? "Couldn't load events");
+          return;
+        }
+        setEvents(body.events);
+      })
+      .catch(() => setError("Couldn't load events"));
+  }, [connected, maxResults]);
+
+  if (!connected) {
+    return (
+      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+        <CalendarDays className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
+        <p className="text-xs text-muted-foreground">
+          {compact
+            ? "Connect Calendar"
+            : "Connect Google Calendar or add a calendar feed in Settings to see what's coming up here."}
+        </p>
+      </Card>
+    );
+  }
+
+  if (compact) {
+    const next = events?.[0];
+    return (
+      <Card className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+        <CalendarDays className="size-5 text-focus" />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {!error && events === null && <Skeleton className="h-4 w-16 rounded" />}
+        {!error && events && !next && <p className="text-xs text-muted-foreground">Nothing coming up.</p>}
+        {!error && next && (
+          <Link href={eventCalendarHref(next)} className="w-full hover:underline">
+            <p className="flex items-center justify-center gap-1.5 truncate text-sm font-medium">
+              {next.source !== "google" && (
+                <span className={`size-1.5 shrink-0 rounded-full ${sourceDotColor(next.source)}`} />
+              )}
+              {next.title}
+            </p>
+            <p className="text-xs text-muted-foreground">{eventDayLabel(next)}</p>
+          </Link>
+        )}
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
+        <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
+          <CalendarDays className="size-4 text-focus" />
+          Upcoming
+        </span>
+        <Link href="/calendar" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+          Open calendar
+        </Link>
+      </div>
+      {/* `min-h-0` is required for a flex child to actually shrink below its
+          content size — without it `flex-1` still lets this grow past the
+          tile's height, so `overflow-y-auto` never has anything to scroll
+          and the list just gets clipped by the parent's `overflow-hidden`
+          instead (silently losing events past the visible area). */}
+      <div className="scrollbar-hover min-h-0 flex-1 overflow-y-auto">
+        {error && <p className="px-4 py-6 text-sm text-destructive">{error}</p>}
+        {!error && events === null && (
+          <div className="space-y-2 p-3">
+            <Skeleton className="h-8 rounded-md" />
+            <Skeleton className="h-8 rounded-md" />
+          </div>
+        )}
+        {!error && events && events.length === 0 && (
+          <p className="px-4 py-6 text-sm text-muted-foreground">Nothing coming up.</p>
+        )}
+        {!error && events && events.length > 0 && (
+          <ul className="divide-y">
+            {events.map((event) => (
+              <li key={event.id}>
+                <EventInfoTooltip event={event}>
+                  <Link
+                    href={eventCalendarHref(event)}
+                    className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-muted/40"
+                  >
+                    <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                      {eventDayLabel(event)}
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                      {event.source !== "google" && (
+                        <span className={`size-1.5 shrink-0 rounded-full ${sourceDotColor(event.source)}`} />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">{event.title}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event)}</span>
+                  </Link>
+                </EventInfoTooltip>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Which feeds actually feed into "assignments due" (show_in_widget) is
+// configured in Settings now, not here — this widget is a checklist of the
+// *assignments themselves*: each one can be ticked off (persisted via
+// /api/assignments/completed, keyed by the feed event's own id) and gets a
+// green/checkmark treatment once done. Only feed-sourced events show here —
+// the user's own Google events already have the Upcoming widget.
+function AssignmentsWidget({
+  feeds,
+  layout,
+}: {
+  feeds: CalendarFeed[] | null;
+  layout: WidgetLayout;
+}) {
+  const [events, setEvents] = useState<UpcomingCalendarEvent[] | null>(null);
+  const [completedIds, setCompletedIds] = useState<Set<string> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const compact = layout.colSpan <= 2 || layout.rowSpan === 1;
+
+  useEffect(() => {
+    fetch("/api/calendar/events?maxResults=50")
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) {
+          setError(body.error ?? "Couldn't load assignments");
+          return;
+        }
+        setEvents(body.events);
+      })
+      .catch(() => setError("Couldn't load assignments"));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/assignments/completed")
+      .then((r) => r.json())
+      .then((body: { ids: string[] }) => setCompletedIds(new Set(body.ids)));
+  }, []);
+
+  async function toggleCompleted(eventId: string) {
+    const wasCompleted = completedIds?.has(eventId) ?? false;
+    setCompletedIds((prev) => {
+      const next = new Set(prev);
+      if (wasCompleted) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
+    const res = await fetch("/api/assignments/completed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId, completed: !wasCompleted }),
+    });
+    if (!res.ok) {
+      toast.error("Couldn't save that");
+      setCompletedIds((prev) => {
+        const next = new Set(prev);
+        if (wasCompleted) next.add(eventId);
+        else next.delete(eventId);
+        return next;
+      });
+    }
+  }
+
+  if (feeds && feeds.length === 0) {
+    return (
+      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+        <ListChecks className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
+        <p className="text-xs text-muted-foreground">
+          {compact ? "Add a feed" : "Add a calendar feed in Settings to track assignments here."}
+        </p>
+      </Card>
+    );
+  }
+
+  const enabledLabels = new Set((feeds ?? []).filter((f) => f.show_in_widget).map((f) => f.label));
+  const assignments = (events ?? []).filter((e) => enabledLabels.has(e.source));
+  const loading = events === null || feeds === null || completedIds === null;
+
+  if (compact) {
+    const next = assignments.find((e) => !completedIds?.has(e.id)) ?? assignments[0];
+    return (
+      <Card className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+        <ListChecks className="size-5 text-focus" />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {!error && loading && <Skeleton className="h-4 w-16 rounded" />}
+        {!error && !loading && !next && <p className="text-xs text-muted-foreground">Nothing due.</p>}
+        {!error && next && (
+          <Link href={assignmentsCalendarHref(next)} className="w-full hover:underline">
+            <p className="truncate text-sm font-medium">{next.title}</p>
+            <p className="text-xs text-muted-foreground">{eventDayLabel(next)}</p>
+          </Link>
+        )}
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
+        <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
+          <ListChecks className="size-4 text-focus" />
+          Assignments
+        </span>
+      </div>
+      <div className="scrollbar-hover min-h-0 flex-1 overflow-y-auto">
+        {error && <p className="px-4 py-6 text-sm text-destructive">{error}</p>}
+        {!error && loading && (
+          <div className="space-y-2 p-3">
+            <Skeleton className="h-8 rounded-md" />
+            <Skeleton className="h-8 rounded-md" />
+          </div>
+        )}
+        {!error && !loading && assignments.length === 0 && (
+          <p className="px-4 py-6 text-sm text-muted-foreground">Nothing due from the selected feeds.</p>
+        )}
+        {!error && assignments.length > 0 && (
+          <ul className="divide-y">
+            {assignments.map((event) => {
+              const done = completedIds?.has(event.id) ?? false;
+              return (
+                <li
+                  key={event.id}
+                  className={cn("flex items-center gap-3 px-4 py-2 text-sm", done && "bg-sage/10")}
+                >
+                  <Checkbox
+                    checked={done}
+                    onCheckedChange={() => toggleCompleted(event.id)}
+                    aria-label={done ? `Mark ${event.title} as not done` : `Mark ${event.title} as done`}
+                  />
+                  <EventInfoTooltip event={event}>
+                    <Link
+                      href={assignmentsCalendarHref(event)}
+                      className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                    >
+                      <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                        {eventDayLabel(event)}
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                        <span className={`size-1.5 shrink-0 rounded-full ${sourceDotColor(event.source)}`} />
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate",
+                            done && "text-muted-foreground line-through"
+                          )}
+                        >
+                          {event.title}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event)}</span>
+                    </Link>
+                  </EventInfoTooltip>
+                  {done && <Check className="size-3.5 shrink-0 text-sage" />}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// useSearchParams (only used for the Google Calendar OAuth redirect toast
+// below) needs a Suspense boundary somewhere above it for static
+// generation — see the default export at the bottom of this file.
+function HomePageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [courses, setCourses] = useState<Course[] | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [feeds, setFeeds] = useState<CalendarFeed[] | null>(null);
+  const [dashboardCustomizeOpen, setDashboardCustomizeOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const refresh = useCallback(() => {
+    fetch("/api/courses")
+      .then((r) => r.json())
+      .then(setCourses);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Landed back here from the Google Calendar OAuth redirect (see
+  // api/calendar/oauth/callback/route.ts) — surface the result once, then
+  // drop the query params so refreshing/sharing the URL doesn't re-show it.
+  useEffect(() => {
+    const connected = searchParams.get("calendarConnected");
+    const error = searchParams.get("calendarError");
+    if (!connected && !error) return;
+    if (connected) toast.success("Connected Google Calendar");
+    if (error) toast.error(error);
+    router.replace("/", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then(setStats);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then(setSettings);
+  }, []);
+
+  // Shared by both calendar-ish widgets below — the Upcoming widget filters
+  // by show_on_calendar, the Assignments widget by show_in_widget — so both
+  // widgets stay in sync with a single fetch instead of each polling
+  // /api/calendar-feeds on its own.
+  function loadFeeds() {
+    fetch("/api/calendar-feeds")
+      .then((r) => r.json())
+      .then((body: { feeds: CalendarFeed[] }) => setFeeds(body.feeds));
+  }
+
+  useEffect(loadFeeds, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/courses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't create the course");
+        return;
+      }
+      const course = await res.json();
+      setOpen(false);
+      router.push(`/courses/${course.id}`);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleRename(courseId: number, newName: string) {
+    await fetch(`/api/courses/${courseId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName }),
+    });
+    refresh();
+  }
+
+  async function handleDelete(courseId: number) {
+    const res = await fetch(`/api/courses/${courseId}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error("Couldn't delete the course");
+      return;
+    }
+    toast.success("Course deleted");
+    refresh();
+  }
+
+  async function handleReorder(draggedCourseId: number, targetCourseId: number) {
+    if (!courses) return;
+    const current = courses.map((c) => c.id);
+    const from = current.indexOf(draggedCourseId);
+    const to = current.indexOf(targetCourseId);
+    if (from === -1 || to === -1) return;
+    const next = [...current];
+    next.splice(from, 1);
+    next.splice(to, 0, draggedCourseId);
+
+    await fetch("/api/courses/reorder", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderedIds: next }),
+    });
+    refresh();
+  }
+
+  // Updates local state immediately (so the dashboard behind the customize
+  // dialog reflects every drag/toggle live) and persists in the background.
+  async function persistHomeWidgets(next: HomeWidgetConfig[]) {
+    setSettings((prev) => (prev ? { ...prev, homeWidgets: next } : prev));
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ homeWidgets: next }),
+      });
+      if (!res.ok) toast.error("Couldn't save dashboard layout");
+    } catch {
+      toast.error("Couldn't save dashboard layout");
+    }
+  }
+
+  const coursesWithDue = new Set(stats?.dueFlashcards.items.map((i) => i.courseId));
+
+  const newCourseDialog = (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<Button />}>
+        <Plus />
+        New course
+      </DialogTrigger>
+      <DialogContent>
+        <form onSubmit={handleCreate}>
+          <DialogHeader>
+            <DialogTitle>New course</DialogTitle>
+            <DialogDescription>
+              Give it a name — you&apos;ll upload PDFs and organize them into folders next.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <Label htmlFor="course-name">Name</Label>
+            <Input
+              id="course-name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Discrete Maths 2"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={creating || !name.trim()}>
+              {creating ? "Creating…" : "Create course"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+
+  function renderWidget(widget: HomeWidgetConfig) {
+    const layout: WidgetLayout = { colSpan: widget.colSpan, rowSpan: widget.rowSpan };
+    switch (widget.id) {
+      case "streak":
+        return stats && <StreakWidget key="streak" stats={stats} />;
+      case "due":
+        return stats && <DueCardsWidget key="due" stats={stats} layout={layout} />;
+      case "heatmap":
+        return stats && <HeatmapWidget key="heatmap" activity={stats.activity} layout={layout} />;
+      case "calendar":
+        return (
+          <UpcomingEventsWidget
+            key="calendar"
+            connected={!!settings?.googleCalendarConnected || !!settings?.hasCalendarFeeds}
+            layout={layout}
+          />
+        );
+      case "assignments":
+        return <AssignmentsWidget key="assignments" feeds={feeds} layout={layout} />;
+    }
+  }
+
+  const shownWidgets = settings?.homeWidgets.filter((w) => w.enabled) ?? [];
+
+  return (
+    <div className="space-y-6">
+      {settings && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Your dashboard</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 px-2 text-xs"
+              onClick={() => setDashboardCustomizeOpen(true)}
+            >
+              <SlidersHorizontal className="size-3.5" />
+              Customize
+            </Button>
+          </div>
+          {shownWidgets.length === 0 ? (
+            <Card elevation="flat" className="items-center border py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                Nothing here — add a widget from Customize.
+              </p>
+            </Card>
+          ) : (
+            <div className="dashboard-grid">
+              {shownWidgets.map((w) => (
+                <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
+                  {renderWidget(w)}
+                </div>
+              ))}
+            </div>
+          )}
+          <DashboardCustomizeDialog
+            open={dashboardCustomizeOpen}
+            onOpenChange={setDashboardCustomizeOpen}
+            widgets={settings.homeWidgets}
+            onChange={persistHomeWidgets}
+            renderContent={renderWidget}
+          />
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <h1 className="font-heading text-2xl font-semibold">Your courses</h1>
+        {courses !== null && courses.length > 0 && newCourseDialog}
+      </div>
+
+      {courses === null && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
+        </div>
+      )}
+
+      {courses?.length === 0 && (
+        <Card elevation="flat" className="items-center border py-16 text-center">
+          <div className="flex size-12 items-center justify-center rounded-full bg-focus/10">
+            <BookOpen className="size-6 text-focus" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-heading text-lg font-semibold">An empty shelf</p>
+            <p className="text-sm text-muted-foreground">
+              Add a course, upload its PDFs, and generate notes, quizzes, or flashcards from them.
+            </p>
+          </div>
+          {newCourseDialog}
+        </Card>
+      )}
+
+      {courses && courses.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {courses.map((course) => (
+            <CourseCard
+              key={course.id}
+              course={course}
+              hasDue={coursesWithDue.has(course.id)}
+              onRename={handleRename}
+              onDelete={handleDelete}
+              onReorder={handleReorder}
+              onCustomized={refresh}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <HomePageContent />
+    </Suspense>
+  );
+}

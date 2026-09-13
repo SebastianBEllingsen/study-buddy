@@ -1,0 +1,1 @@
+ALTER TABLE "documents" ADD COLUMN "file_base64" text;

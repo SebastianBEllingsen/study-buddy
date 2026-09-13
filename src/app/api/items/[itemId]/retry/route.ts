@@ -1,0 +1,29 @@
+import { getGeneratedItem } from "@/lib/models";
+import { createRetryQuiz, NoMissedQuestionsError } from "@/lib/generate";
+import { describeAiError } from "@/lib/aiClient";
+
+type Params = { params: Promise<{ itemId: string }> };
+
+export async function POST(request: Request, { params }: Params) {
+  const { itemId } = await params;
+  const item = await getGeneratedItem(Number(itemId));
+  if (!item || item.mode !== "quiz") {
+    return Response.json({ error: "Quiz item not found" }, { status: 404 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const missedIndices: number[] = Array.isArray(body?.missedIndices)
+    ? body.missedIndices.filter((i: unknown) => Number.isInteger(i))
+    : [];
+
+  try {
+    const retryItem = await createRetryQuiz(item, missedIndices);
+    return Response.json(retryItem, { status: 201 });
+  } catch (err) {
+    if (err instanceof NoMissedQuestionsError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
+    console.error("Retry quiz generation failed:", err);
+    return Response.json({ error: await describeAiError(err) }, { status: 502 });
+  }
+}

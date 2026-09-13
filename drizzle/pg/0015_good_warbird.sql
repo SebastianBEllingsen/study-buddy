@@ -1,0 +1,1 @@
+ALTER TABLE "courses" ADD COLUMN "show_icon_frame" boolean DEFAULT true NOT NULL;

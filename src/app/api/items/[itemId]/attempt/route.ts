@@ -1,0 +1,89 @@
+import { getGeneratedItem, createQuizAttempt, completeQuizAttempt } from "@/lib/models";
+import { gradeShortAnswers } from "@/lib/grading";
+import { describeAiError } from "@/lib/aiClient";
+import type { QuizContent, QuizQuestion } from "@/lib/types";
+
+type Params = { params: Promise<{ itemId: string }> };
+
+interface AttemptResultEntry {
+  index: number;
+  type: QuizQuestion["type"];
+  correct: boolean;
+  verdict?: "correct" | "partial" | "incorrect";
+  feedback: string;
+  explanation: string;
+  correctAnswer: string;
+}
+
+export async function POST(request: Request, { params }: Params) {
+  const { itemId } = await params;
+  try {
+    const item = await getGeneratedItem(Number(itemId));
+    if (!item || item.mode !== "quiz") {
+      return Response.json({ error: "Quiz item not found" }, { status: 404 });
+    }
+
+    const body = await request.json();
+    const answers: (number | string)[] = Array.isArray(body?.answers) ? body.answers : [];
+
+    const content = JSON.parse(item.content_json) as QuizContent;
+    const attempt = await createQuizAttempt(item.id);
+
+    // Grade MCQs locally (no API call needed) and collect short-answer
+    // questions for a single batched grading call.
+    const shortAnswerIndices: number[] = [];
+    const shortAnswerPayload: { question: string; modelAnswer: string; userAnswer: string }[] = [];
+    const results: AttemptResultEntry[] = content.questions.map((q, index) => {
+      if (q.type === "mcq") {
+        const selected = answers[index];
+        const correct = selected === q.correctIndex;
+        return {
+          index,
+          type: "mcq" as const,
+          correct,
+          feedback: correct ? "Correct." : "Incorrect.",
+          explanation: q.explanation,
+          correctAnswer: q.options[q.correctIndex],
+        };
+      }
+      shortAnswerIndices.push(index);
+      shortAnswerPayload.push({
+        question: q.question,
+        modelAnswer: q.modelAnswer,
+        userAnswer: String(answers[index] ?? ""),
+      });
+      // Placeholder, filled in below once grading returns.
+      return {
+        index,
+        type: "short_answer" as const,
+        correct: false,
+        feedback: "",
+        explanation: q.explanation,
+        correctAnswer: q.modelAnswer,
+      };
+    });
+
+    if (shortAnswerPayload.length > 0) {
+      const graded = await gradeShortAnswers(shortAnswerPayload);
+      graded.results.forEach((g, i) => {
+        const resultIndex = shortAnswerIndices[i];
+        results[resultIndex].verdict = g.verdict;
+        results[resultIndex].feedback = g.feedback;
+        results[resultIndex].correct = g.verdict === "correct";
+      });
+    }
+
+    const points = results.reduce((sum, r) => {
+      if (r.verdict === "partial") return sum + 0.5;
+      return sum + (r.correct ? 1 : 0);
+    }, 0);
+    const score = results.length > 0 ? (points / results.length) * 100 : 0;
+
+    await completeQuizAttempt({ id: attempt.id, score, answersJson: results });
+
+    return Response.json({ attemptId: attempt.id, score, results });
+  } catch (err) {
+    console.error("Grading quiz attempt failed:", err);
+    return Response.json({ error: await describeAiError(err) }, { status: 502 });
+  }
+}

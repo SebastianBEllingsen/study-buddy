@@ -1,0 +1,1 @@
+ALTER TABLE "courses" ADD COLUMN "show_cover_on_card" boolean DEFAULT false NOT NULL;
