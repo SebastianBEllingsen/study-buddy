@@ -1174,6 +1174,17 @@ export default function CoursePage() {
     return idParam ? Number(idParam) : null;
   })();
 
+  // Feeds the "Recent activity" dashboard widget — fire-and-forget, a failed
+  // write here shouldn't interrupt viewing the document itself.
+  useEffect(() => {
+    if (viewingDocumentId === null) return;
+    fetch("/api/recent-views", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "document", id: viewingDocumentId }),
+    }).catch(() => {});
+  }, [viewingDocumentId]);
+
   function openDocumentViewer(documentId: number) {
     router.replace(`/courses/${courseId}?document=${documentId}`, { scroll: false });
   }

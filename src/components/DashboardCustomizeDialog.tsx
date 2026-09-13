@@ -4,7 +4,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { EyeOff, GripVertical, Plus } from "lucide-react";
 import { cn } from "cn";
-import type { HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
+import type { HomeWidgetConfig, HomeWidgetId, HomeWidgetZone } from "@/lib/models";
 import { HOME_WIDGET_META } from "@/lib/homeWidgetMeta";
 import {
   GRID_COLS,
@@ -35,6 +35,10 @@ interface DragGhost {
   clientY: number;
   width: number;
   height: number;
+}
+
+function pointInRect(x: number, y: number, rect: DOMRect): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
 function WidgetTile({
@@ -115,6 +119,60 @@ function HiddenChip({
   );
 }
 
+// One of the two independent grids (top-of-page / below-the-courses-list) —
+// same tile rendering and drop-preview outline either way, just scoped to
+// whichever zone's widgets it's handed.
+function ZoneGrid({
+  zone,
+  gridRef,
+  widgets,
+  activeId,
+  previewLayout,
+  onMoveStart,
+  onResizeStart,
+  onHide,
+  renderContent,
+  emptyLabel,
+}: {
+  zone: HomeWidgetZone;
+  gridRef: React.RefObject<HTMLDivElement | null>;
+  widgets: HomeWidgetConfig[];
+  activeId: HomeWidgetId | null;
+  previewLayout: HomeWidgetConfig | null;
+  onMoveStart: (e: React.PointerEvent, widget: HomeWidgetConfig) => void;
+  onResizeStart: (e: React.PointerEvent, widget: HomeWidgetConfig) => void;
+  onHide: (id: HomeWidgetId) => void;
+  renderContent: (widget: HomeWidgetConfig) => ReactNode;
+  emptyLabel: string;
+}) {
+  const showPreviewHere = previewLayout?.zone === zone;
+  return (
+    <div ref={gridRef} className="dashboard-grid relative min-h-[130px] rounded-xl bg-muted/30 p-2">
+      {widgets.length === 0 && !showPreviewHere && (
+        <p className="col-span-full py-8 text-center text-sm text-muted-foreground">{emptyLabel}</p>
+      )}
+      {widgets.map((widget) => (
+        <WidgetTile
+          key={widget.id}
+          widget={widget}
+          dimmed={activeId === widget.id}
+          onMoveStart={(e) => onMoveStart(e, widget)}
+          onResizeStart={(e) => onResizeStart(e, widget)}
+          onHide={() => onHide(widget.id)}
+        >
+          {renderContent(widget)}
+        </WidgetTile>
+      ))}
+      {showPreviewHere && (
+        <div
+          className="dashboard-tile pointer-events-none rounded-xl bg-focus/10 ring-2 ring-focus"
+          style={tileGridStyle(previewLayout)}
+        />
+      )}
+    </div>
+  );
+}
+
 export function DashboardCustomizeDialog({
   open,
   onOpenChange,
@@ -128,21 +186,38 @@ export function DashboardCustomizeDialog({
   onChange: (next: HomeWidgetConfig[]) => void;
   renderContent: (widget: HomeWidgetConfig) => ReactNode;
 }) {
-  const gridRef = useRef<HTMLDivElement>(null);
+  const topGridRef = useRef<HTMLDivElement>(null);
+  const bottomGridRef = useRef<HTMLDivElement>(null);
   const [ghost, setGhost] = useState<DragGhost | null>(null);
   const [activeId, setActiveId] = useState<HomeWidgetId | null>(null);
   const [previewLayout, setPreviewLayout] = useState<HomeWidgetConfig | null>(null);
 
-  const shown = widgets.filter((w) => w.enabled);
+  const shownTop = widgets.filter((w) => w.enabled && w.zone === "top");
+  const shownBottom = widgets.filter((w) => w.enabled && w.zone === "bottom");
   const hidden = widgets.filter((w) => !w.enabled);
+
+  function gridRefFor(zone: HomeWidgetZone) {
+    return zone === "top" ? topGridRef : bottomGridRef;
+  }
+
+  // Which of the two grids the pointer is currently over, if either — used
+  // both to know which grid's cell math applies and to let a tile visually
+  // move between zones mid-drag. Falls back to the widget's own zone when
+  // the pointer is over neither (e.g. in the gap between the two grids, or
+  // starting a drag from a Hidden chip, which isn't inside any grid).
+  function zoneUnderPoint(x: number, y: number, fallback: HomeWidgetZone): HomeWidgetZone {
+    const topRect = topGridRef.current?.getBoundingClientRect();
+    if (topRect && pointInRect(x, y, topRect)) return "top";
+    const bottomRect = bottomGridRef.current?.getBoundingClientRect();
+    if (bottomRect && pointInRect(x, y, bottomRect)) return "bottom";
+    return fallback;
+  }
 
   function startMove(e: React.PointerEvent, widget: HomeWidgetConfig, tileRect: DOMRect | null) {
     e.preventDefault();
-    const grid = gridRef.current;
-    if (!grid) return;
     const handle = e.currentTarget as HTMLElement;
     handle.setPointerCapture(e.pointerId);
-    const { colStep, rowStep } = getGridMetrics(grid);
+    const { colStep, rowStep } = getGridMetrics(gridRefFor(widget.zone).current ?? topGridRef.current!);
     const width = tileRect?.width ?? colStep * widget.colSpan;
     const height = tileRect?.height ?? rowStep * widget.rowSpan;
 
@@ -160,19 +235,21 @@ export function DashboardCustomizeDialog({
 
     function handleMove(ev: PointerEvent) {
       setGhost((prev) => (prev ? { ...prev, clientX: ev.clientX, clientY: ev.clientY } : prev));
-      const gridEl = gridRef.current;
+      const zone = zoneUnderPoint(ev.clientX, ev.clientY, widget.zone);
+      const gridEl = gridRefFor(zone).current;
       if (!gridEl) return;
       const { col, row } = pointToCell(gridEl, ev.clientX, ev.clientY);
-      setPreviewLayout({ ...widget, ...clampLayout({ col, row, colSpan: widget.colSpan, rowSpan: widget.rowSpan }) });
+      setPreviewLayout({ ...widget, zone, ...clampLayout({ col, row, colSpan: widget.colSpan, rowSpan: widget.rowSpan }) });
     }
     function handleUp(ev: PointerEvent) {
       handle.releasePointerCapture(e.pointerId);
       handle.removeEventListener("pointermove", handleMove);
       handle.removeEventListener("pointerup", handleUp);
-      const gridEl = gridRef.current;
+      const zone = zoneUnderPoint(ev.clientX, ev.clientY, widget.zone);
+      const gridEl = gridRefFor(zone).current;
       if (gridEl) {
         const { col, row } = pointToCell(gridEl, ev.clientX, ev.clientY);
-        onChange(moveWidgetTo(widgets, widget.id, col, row));
+        onChange(moveWidgetTo(widgets, widget.id, col, row, zone));
       }
       setGhost(null);
       setActiveId(null);
@@ -184,7 +261,7 @@ export function DashboardCustomizeDialog({
 
   function startResize(e: React.PointerEvent, widget: HomeWidgetConfig) {
     e.preventDefault();
-    const grid = gridRef.current;
+    const grid = gridRefFor(widget.zone).current;
     if (!grid) return;
     const handle = e.currentTarget as HTMLElement;
     handle.setPointerCapture(e.pointerId);
@@ -226,37 +303,45 @@ export function DashboardCustomizeDialog({
         <DialogHeader>
           <DialogTitle>Customize dashboard</DialogTitle>
           <DialogDescription>
-            Drag the grip to move a widget anywhere on the grid, drag the corner to resize it, or
-            drop it on Hidden to remove it.
+            Drag the grip to move a widget anywhere on either grid — the one above your courses or
+            the one below them — drag the corner to resize it, or drop it on Hidden to remove it.
           </DialogDescription>
         </DialogHeader>
 
-        <div ref={gridRef} className="dashboard-grid relative min-h-[130px] rounded-xl bg-muted/30 p-2">
-          {shown.length === 0 && !previewLayout && (
-            <p className="col-span-full py-8 text-center text-sm text-muted-foreground">
-              Nothing here — drag a widget up from Hidden.
-            </p>
-          )}
-          {shown.map((widget) => (
-            <WidgetTile
-              key={widget.id}
-              widget={widget}
-              dimmed={activeId === widget.id}
-              onMoveStart={(e) =>
-                startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
-              }
-              onResizeStart={(e) => startResize(e, widget)}
-              onHide={() => onChange(setWidgetEnabled(widgets, widget.id, false))}
-            >
-              {renderContent(widget)}
-            </WidgetTile>
-          ))}
-          {previewLayout && (
-            <div
-              className="dashboard-tile pointer-events-none rounded-xl bg-focus/10 ring-2 ring-focus"
-              style={tileGridStyle(previewLayout)}
-            />
-          )}
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">Above your courses</p>
+          <ZoneGrid
+            zone="top"
+            gridRef={topGridRef}
+            widgets={shownTop}
+            activeId={activeId}
+            previewLayout={previewLayout}
+            onMoveStart={(e, widget) =>
+              startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
+            }
+            onResizeStart={startResize}
+            onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
+            renderContent={renderContent}
+            emptyLabel="Nothing here — drag a widget up from Hidden."
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">Below your courses</p>
+          <ZoneGrid
+            zone="bottom"
+            gridRef={bottomGridRef}
+            widgets={shownBottom}
+            activeId={activeId}
+            previewLayout={previewLayout}
+            onMoveStart={(e, widget) =>
+              startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
+            }
+            onResizeStart={startResize}
+            onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
+            renderContent={renderContent}
+            emptyLabel="Nothing here — drag a widget down from Hidden or from the grid above."
+          />
         </div>
 
         <div className="space-y-2">

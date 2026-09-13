@@ -115,6 +115,14 @@ export default function ItemPage() {
       fetch(`/api/courses/${body.item.course_id}`)
         .then((r) => r.json())
         .then((courseBody) => setCourseName(courseBody.course?.name ?? null));
+      // Feeds the "Recent activity" dashboard widget — fire-and-forget, and
+      // only on this initial load, not the reloads loadItem() also does
+      // after a save/supplement (those aren't the viewer opening it again).
+      fetch("/api/recent-views", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "item", id: body.item.id }),
+      }).catch(() => {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.itemId]);

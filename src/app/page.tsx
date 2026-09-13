@@ -7,6 +7,8 @@ import {
   BookOpen,
   CalendarDays,
   Check,
+  Clock,
+  FileText,
   Flame,
   GripVertical,
   Layers,
@@ -15,11 +17,13 @@ import {
   Pencil,
   Plus,
   SlidersHorizontal,
+  Sparkles,
+  StickyNote,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
-import type { AppSettings, CalendarFeed, Course, DueFlashcardItem, HomeWidgetConfig } from "@/lib/models";
+import type { AppSettings, CalendarFeed, Course, DueFlashcardItem, HomeWidgetConfig, RecentView } from "@/lib/models";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { tileGridStyle } from "@/lib/dashboardGrid";
 import StudyHeatmap from "@/components/StudyHeatmap";
@@ -793,6 +797,118 @@ function AssignmentsWidget({
   );
 }
 
+function recentViewHref(view: RecentView): string {
+  if (view.type === "note") return `/vault/${view.id}`;
+  if (view.type === "document") return `/courses/${view.courseId}?document=${view.id}`;
+  return `/items/${view.id}`;
+}
+
+function RecentViewIcon({ type }: { type: RecentView["type"] }) {
+  const className = "size-3.5 shrink-0 text-muted-foreground";
+  if (type === "note") return <StickyNote className={className} />;
+  if (type === "document") return <FileText className={className} />;
+  return <Sparkles className={className} />;
+}
+
+// Coarse "how long ago" — this widget only ever needs a rough sense of
+// recency (minutes/hours/days), not a precise timestamp, so a small local
+// formatter is simpler than pulling in a date-relative-time library for it.
+function formatRelativeTime(utcString: string): string {
+  const then = new Date(utcString.replace(" ", "T") + "Z").getTime();
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(then).toLocaleDateString();
+}
+
+function RecentActivityWidget({ layout }: { layout: WidgetLayout }) {
+  const [views, setViews] = useState<RecentView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const compact = layout.colSpan <= 2 || layout.rowSpan === 1;
+
+  useEffect(() => {
+    fetch("/api/recent-views")
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) {
+          setError(body.error ?? "Couldn't load recent activity");
+          return;
+        }
+        setViews(body.views);
+      })
+      .catch(() => setError("Couldn't load recent activity"));
+  }, []);
+
+  const loading = views === null;
+  const list = views ?? [];
+
+  if (compact) {
+    const next = views?.[0];
+    return (
+      <Card className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+        <Clock className="size-5 text-focus" />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {!error && loading && <Skeleton className="h-4 w-16 rounded" />}
+        {!error && !loading && !next && <p className="text-xs text-muted-foreground">Nothing viewed yet.</p>}
+        {!error && next && (
+          <Link href={recentViewHref(next)} className="w-full hover:underline">
+            <p className="truncate text-sm font-medium">{next.title}</p>
+            <p className="text-xs text-muted-foreground">{formatRelativeTime(next.viewedAt)}</p>
+          </Link>
+        )}
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
+        <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
+          <Clock className="size-4 text-focus" />
+          Recent activity
+        </span>
+      </div>
+      <div className="scrollbar-hover min-h-0 flex-1 overflow-y-auto">
+        {error && <p className="px-4 py-6 text-sm text-destructive">{error}</p>}
+        {!error && loading && (
+          <div className="space-y-2 p-3">
+            <Skeleton className="h-8 rounded-md" />
+            <Skeleton className="h-8 rounded-md" />
+          </div>
+        )}
+        {!error && !loading && list.length === 0 && (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            Nothing viewed yet — open a note, document, or generated item to see it here.
+          </p>
+        )}
+        {!error && list.length > 0 && (
+          <ul className="divide-y">
+            {list.map((view) => (
+              <li key={`${view.type}-${view.id}`}>
+                <Link
+                  href={recentViewHref(view)}
+                  className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-muted/40"
+                >
+                  <RecentViewIcon type={view.type} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-medium">{view.title}</span>
+                    <span className="truncate text-xs text-muted-foreground">{view.courseName}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(view.viewedAt)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // useSearchParams (only used for the Google Calendar OAuth redirect toast
 // below) needs a Suspense boundary somewhere above it for static
 // generation — see the default export at the bottom of this file.
@@ -985,10 +1101,13 @@ function HomePageContent() {
         );
       case "assignments":
         return <AssignmentsWidget key="assignments" feeds={feeds} layout={layout} />;
+      case "recent":
+        return <RecentActivityWidget key="recent" layout={layout} />;
     }
   }
 
-  const shownWidgets = settings?.homeWidgets.filter((w) => w.enabled) ?? [];
+  const topWidgets = settings?.homeWidgets.filter((w) => w.enabled && w.zone === "top") ?? [];
+  const bottomWidgets = settings?.homeWidgets.filter((w) => w.enabled && w.zone === "bottom") ?? [];
 
   return (
     <div className="space-y-6">
@@ -1006,7 +1125,7 @@ function HomePageContent() {
               Customize
             </Button>
           </div>
-          {shownWidgets.length === 0 ? (
+          {topWidgets.length === 0 ? (
             <Card elevation="flat" className="items-center border py-8 text-center">
               <p className="text-sm text-muted-foreground">
                 Nothing here — add a widget from Customize.
@@ -1014,7 +1133,7 @@ function HomePageContent() {
             </Card>
           ) : (
             <div className="dashboard-grid">
-              {shownWidgets.map((w) => (
+              {topWidgets.map((w) => (
                 <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
                   {renderWidget(w)}
                 </div>
@@ -1071,6 +1190,23 @@ function HomePageContent() {
               onReorder={handleReorder}
               onCustomized={refresh}
             />
+          ))}
+        </div>
+      )}
+
+      {/* A second, independent widget zone below the course list — same
+          catalog as the one above, positioned separately (see
+          HomeWidgetConfig's `zone`). Only rendered once something's
+          actually there, unlike the top zone's empty-state card: an empty
+          box appearing under the courses list by default (before anyone's
+          ever touched Customize) would just be clutter for a feature most
+          people won't reach for right away. */}
+      {bottomWidgets.length > 0 && (
+        <div className="dashboard-grid">
+          {bottomWidgets.map((w) => (
+            <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
+              {renderWidget(w)}
+            </div>
           ))}
         </div>
       )}

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import Fuse from "fuse.js";
 import {
   db,
@@ -13,6 +13,7 @@ import {
   generated_items,
   notes,
   quiz_attempts,
+  recent_views,
   runTransaction,
 } from "./db";
 import { nowUtc } from "./time";
@@ -377,6 +378,119 @@ export async function setAssignmentCompleted(eventId: string, completed: boolean
   }
 }
 
+// --- Recent activity dashboard widget ---
+// "Last opened" tracking for notes/documents/generated items — see the
+// recent_views schema comment for why this is one upserted row per item
+// rather than an append-only visit log.
+
+export type RecentViewType = "note" | "document" | "item";
+
+export interface RecentView {
+  type: RecentViewType;
+  id: number;
+  title: string;
+  courseId: number;
+  courseName: string;
+  mode?: GenerationMode; // only set for type === "item"
+  viewedAt: string;
+}
+
+export async function clearRecentViews(): Promise<void> {
+  await db.delete(recent_views);
+}
+
+export async function recordRecentView(itemType: RecentViewType, itemId: number): Promise<void> {
+  const viewed_at = nowUtc();
+  await db
+    .insert(recent_views)
+    .values({ item_type: itemType, item_id: itemId, viewed_at })
+    .onConflictDoUpdate({
+      target: [recent_views.item_type, recent_views.item_id],
+      set: { viewed_at },
+    });
+}
+
+export async function listRecentViews(limit = 8): Promise<RecentView[]> {
+  // Overfetch: some rows may point at an item that's since been deleted —
+  // those are dropped below rather than backfilled, so asking for a few
+  // extra keeps the widget from coming up short of `limit` for no reason
+  // visible to the viewer.
+  const rows = await db
+    .select()
+    .from(recent_views)
+    .orderBy(desc(recent_views.viewed_at))
+    .limit(limit * 3);
+  if (rows.length === 0) return [];
+
+  const noteIds = rows.filter((r) => r.item_type === "note").map((r) => r.item_id);
+  const docIds = rows.filter((r) => r.item_type === "document").map((r) => r.item_id);
+  const itemIds = rows.filter((r) => r.item_type === "item").map((r) => r.item_id);
+
+  const [noteRows, docRows, itemRows] = await Promise.all([
+    noteIds.length
+      ? db
+          .select({ id: notes.id, title: notes.title, course_id: notes.course_id, course_name: courses.name })
+          .from(notes)
+          .leftJoin(courses, eq(notes.course_id, courses.id))
+          .where(inArray(notes.id, noteIds))
+      : Promise.resolve([]),
+    docIds.length
+      ? db
+          .select({ id: documents.id, title: documents.filename, course_id: documents.course_id, course_name: courses.name })
+          .from(documents)
+          .leftJoin(courses, eq(documents.course_id, courses.id))
+          .where(inArray(documents.id, docIds))
+      : Promise.resolve([]),
+    itemIds.length
+      ? db
+          .select({
+            id: generated_items.id,
+            title: generated_items.title,
+            course_id: generated_items.course_id,
+            course_name: courses.name,
+            mode: generated_items.mode,
+          })
+          .from(generated_items)
+          .leftJoin(courses, eq(generated_items.course_id, courses.id))
+          .where(inArray(generated_items.id, itemIds))
+      : Promise.resolve([]),
+  ]);
+
+  const noteMap = new Map(noteRows.map((r) => [r.id, r]));
+  const docMap = new Map(docRows.map((r) => [r.id, r]));
+  const itemMap = new Map(itemRows.map((r) => [r.id, r]));
+
+  const result: RecentView[] = [];
+  for (const row of rows) {
+    if (result.length >= limit) break;
+    if (row.item_type === "note") {
+      const n = noteMap.get(row.item_id);
+      if (n && n.course_id !== null) {
+        result.push({ type: "note", id: n.id, title: n.title, courseId: n.course_id, courseName: n.course_name ?? "", viewedAt: row.viewed_at });
+      }
+    } else if (row.item_type === "document") {
+      const d = docMap.get(row.item_id);
+      if (d) {
+        result.push({ type: "document", id: d.id, title: d.title, courseId: d.course_id, courseName: d.course_name ?? "", viewedAt: row.viewed_at });
+      }
+    } else if (row.item_type === "item") {
+      const i = itemMap.get(row.item_id);
+      if (i) {
+        result.push({
+          type: "item",
+          id: i.id,
+          title: i.title,
+          courseId: i.course_id,
+          courseName: i.course_name ?? "",
+          mode: i.mode as GenerationMode,
+          viewedAt: row.viewed_at,
+        });
+      }
+    }
+  }
+  return result;
+}
+
 // --- The Vault: personal Obsidian-style notes ---
 // User-authored markdown notes — deliberately separate from a course's
 // AI-generated "notes" GenerationMode (a per-course study-notes document;
@@ -587,12 +701,20 @@ export async function getDocumentLines(documentId: number): Promise<string[]> {
 // col/row/span → CSS translation, shared between the live dashboard
 // (page.tsx) and the editing UI (DashboardCustomizeDialog.tsx).
 
-export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments"] as const;
+export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments", "recent"] as const;
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
+
+// Two independent widget grids on the home page: "top" above the courses
+// list (the original single dashboard), "bottom" below it. Same widget
+// catalog in both — a widget only ever lives in one zone at a time, and
+// dragging it into the other grid in the customize dialog reassigns this.
+export const HOME_WIDGET_ZONES = ["top", "bottom"] as const;
+export type HomeWidgetZone = (typeof HOME_WIDGET_ZONES)[number];
 
 export interface HomeWidgetConfig {
   id: HomeWidgetId;
   enabled: boolean;
+  zone: HomeWidgetZone;
   col: number;
   row: number;
   colSpan: number;
@@ -600,13 +722,15 @@ export interface HomeWidgetConfig {
 }
 
 // A sensible starting layout: streak/due as compact tiles side by side,
-// heatmap and the agenda list each given a full-width row below.
+// heatmap and the agenda list each given a full-width row below — all in
+// the top zone; the bottom zone starts empty.
 const DEFAULT_HOME_WIDGETS: HomeWidgetConfig[] = [
-  { id: "streak", enabled: true, col: 0, row: 0, colSpan: 3, rowSpan: 1 },
-  { id: "due", enabled: true, col: 3, row: 0, colSpan: 3, rowSpan: 1 },
-  { id: "heatmap", enabled: true, col: 0, row: 1, colSpan: 6, rowSpan: 1 },
-  { id: "calendar", enabled: true, col: 0, row: 2, colSpan: 6, rowSpan: 1 },
-  { id: "assignments", enabled: true, col: 0, row: 3, colSpan: 6, rowSpan: 1 },
+  { id: "streak", enabled: true, zone: "top", col: 0, row: 0, colSpan: 3, rowSpan: 1 },
+  { id: "due", enabled: true, zone: "top", col: 3, row: 0, colSpan: 3, rowSpan: 1 },
+  { id: "heatmap", enabled: true, zone: "top", col: 0, row: 1, colSpan: 6, rowSpan: 1 },
+  { id: "calendar", enabled: true, zone: "top", col: 0, row: 2, colSpan: 6, rowSpan: 1 },
+  { id: "assignments", enabled: true, zone: "top", col: 0, row: 3, colSpan: 6, rowSpan: 1 },
+  { id: "recent", enabled: true, zone: "top", col: 0, row: 4, colSpan: 6, rowSpan: 2 },
 ];
 
 function defaultFor(id: HomeWidgetId): HomeWidgetConfig {
@@ -618,7 +742,9 @@ function defaultFor(id: HomeWidgetId): HomeWidgetConfig {
 // removed (dropped) — so adding/removing a widget in code never produces a
 // broken or stuck settings value for someone who already customized their
 // layout. Also tolerant of a config saved before col/row/span existed, or
-// with corrupted position data (falls back to that widget's default slot).
+// with corrupted position data (falls back to that widget's default slot),
+// and of one saved before zones existed (defaults to "top", preserving
+// exactly where it already was for anyone upgrading).
 function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
   if (!raw) return DEFAULT_HOME_WIDGETS;
   try {
@@ -630,8 +756,15 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
         .filter(
           (
             w
-          ): w is { id: HomeWidgetId; enabled: boolean; col?: unknown; row?: unknown; colSpan?: unknown; rowSpan?: unknown } =>
-            w && typeof w.id === "string" && HOME_WIDGET_IDS.includes(w.id as HomeWidgetId) && typeof w.enabled === "boolean"
+          ): w is {
+            id: HomeWidgetId;
+            enabled: boolean;
+            zone?: unknown;
+            col?: unknown;
+            row?: unknown;
+            colSpan?: unknown;
+            rowSpan?: unknown;
+          } => w && typeof w.id === "string" && HOME_WIDGET_IDS.includes(w.id as HomeWidgetId) && typeof w.enabled === "boolean"
         )
         .map((w) => {
           const hasValidLayout =
@@ -642,7 +775,19 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
           const layout = hasValidLayout
             ? (w as { col: number; row: number; colSpan: number; rowSpan: number })
             : defaultFor(w.id);
-          return [w.id, { id: w.id, enabled: w.enabled, col: layout.col, row: layout.row, colSpan: layout.colSpan, rowSpan: layout.rowSpan } satisfies HomeWidgetConfig];
+          const zone: HomeWidgetZone = w.zone === "bottom" ? "bottom" : "top";
+          return [
+            w.id,
+            {
+              id: w.id,
+              enabled: w.enabled,
+              zone,
+              col: layout.col,
+              row: layout.row,
+              colSpan: layout.colSpan,
+              rowSpan: layout.rowSpan,
+            } satisfies HomeWidgetConfig,
+          ];
         })
     );
     const missing = HOME_WIDGET_IDS.filter((id) => !known.has(id)).map((id) => defaultFor(id));

@@ -104,30 +104,35 @@ export function clampSpanAgainstNeighbors(
 }
 
 // Moves `id` so its top-left corner is at (col, row), keeping its own size.
-// If that lands on top of another enabled widget, they swap places (the
-// occupant takes the mover's old spot) rather than the drop being rejected
-// — the same "always succeeds, never just refuses" feel as Android's
-// widget grid.
+// If that lands on top of another enabled widget IN THE SAME ZONE, they
+// swap places (the occupant takes the mover's old spot and old zone) rather
+// than the drop being rejected — the same "always succeeds, never just
+// refuses" feel as Android's widget grid. Passing `zone` (e.g. dragging a
+// tile from the top grid into the bottom one in the customize dialog)
+// reassigns the widget there; omitting it keeps its current zone, so every
+// existing call site that never mentions zones is unaffected.
 export function moveWidgetTo(
   widgets: HomeWidgetConfig[],
   id: HomeWidgetId,
   col: number,
-  row: number
+  row: number,
+  zone?: HomeWidgetConfig["zone"]
 ): HomeWidgetConfig[] {
   const moving = widgets.find((w) => w.id === id);
   if (!moving) return widgets;
+  const targetZone = zone ?? moving.zone;
   const layout = clampLayout({ col, row, colSpan: moving.colSpan, rowSpan: moving.rowSpan });
-  const target: HomeWidgetConfig = { ...moving, ...layout, enabled: true };
-  const collision = widgets.find((w) => w.id !== id && w.enabled && boxesOverlap(target, w));
+  const target: HomeWidgetConfig = { ...moving, ...layout, zone: targetZone, enabled: true };
+  const collision = widgets.find((w) => w.id !== id && w.enabled && w.zone === targetZone && boxesOverlap(target, w));
   return widgets.map((w) => {
     if (w.id === id) return target;
-    if (collision && w.id === collision.id) return { ...w, col: moving.col, row: moving.row };
+    if (collision && w.id === collision.id) return { ...w, col: moving.col, row: moving.row, zone: moving.zone };
     return w;
   });
 }
 
 // Resizes `id` in place, shrinking as needed so it never overlaps another
-// enabled widget.
+// enabled widget in the same zone.
 export function resizeWidgetTo(
   widgets: HomeWidgetConfig[],
   id: HomeWidgetId,
@@ -136,7 +141,7 @@ export function resizeWidgetTo(
 ): HomeWidgetConfig[] {
   const target = widgets.find((w) => w.id === id);
   if (!target) return widgets;
-  const others = widgets.filter((w) => w.id !== id && w.enabled);
+  const others = widgets.filter((w) => w.id !== id && w.enabled && w.zone === target.zone);
   const clamped = clampSpanAgainstNeighbors(others, { col: target.col, row: target.row, colSpan, rowSpan });
   return widgets.map((w) => (w.id === id ? { ...w, ...clamped } : w));
 }

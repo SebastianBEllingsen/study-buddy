@@ -63,6 +63,12 @@ export default function NotePage() {
         fetch(`/api/courses/${body.note.course_id}`)
           .then((r) => r.json())
           .then((courseBody) => setCourseName(courseBody.course?.name ?? null));
+        // Feeds the "Recent activity" dashboard widget — fire-and-forget.
+        fetch("/api/recent-views", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "note", id: body.note.id }),
+        }).catch(() => {});
       })
       .catch(() => setNotFound(true));
   }, [params.noteId]);

@@ -175,3 +175,16 @@ CREATE TABLE IF NOT EXISTS completed_assignments (
   event_id TEXT PRIMARY KEY,
   completed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Current "last opened" STATE for the Recent activity dashboard widget — one
+-- row per (item_type, item_id), upserted in place on every view, same
+-- one-row-per-thing shape as flashcard_schedule above. Not an append-only
+-- log: the widget only ever needs the most recent visit to each item, never
+-- a full history, so there's nothing to gain from keeping every past visit
+-- (and every unbounded-growth cleanup problem that would come with it).
+CREATE TABLE IF NOT EXISTS recent_views (
+  item_type TEXT NOT NULL, -- 'note' | 'document' | 'item'
+  item_id INTEGER NOT NULL,
+  viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (item_type, item_id)
+);

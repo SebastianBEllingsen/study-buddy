@@ -222,3 +222,15 @@ export const completed_assignments = pgTable("completed_assignments", {
   event_id: text("event_id").primaryKey(),
   completed_at: text("completed_at").notNull(),
 });
+
+// "Last opened" state for the Recent activity widget — see the matching
+// comment in schema.sql.
+export const recent_views = pgTable(
+  "recent_views",
+  {
+    item_type: text("item_type").notNull(),
+    item_id: integer("item_id").notNull(),
+    viewed_at: text("viewed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.item_type, table.item_id] })]
+);
