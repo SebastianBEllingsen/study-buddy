@@ -7,6 +7,7 @@ import SettingsDialog from "@/components/SettingsDialog";
 import HelpDialog from "@/components/HelpDialog";
 import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
+import SWRProvider from "@/components/SWRProvider";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -84,31 +85,33 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AppThemeProvider>
-            {/* sticky rather than static so a page that fills the viewport
-                below it (see vault/[noteId]/page.tsx's full-bleed note view)
-                still always has the header in view, without restructuring
-                the whole app into a fixed-height/nested-scroll shell. */}
-            <header className="sticky top-0 z-40 shrink-0 border-b bg-card">
-              <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-                <Link href="/" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
-                  <BookOpen className="size-5" />
-                  Study Buddy
-                </Link>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
-                    <Calendar className="size-3.5" />
-                    Calendar
-                  </Button>
-                  <SearchDialog />
-                  <SettingsDialog />
-                  <HelpDialog />
+            <SWRProvider>
+              {/* sticky rather than static so a page that fills the viewport
+                  below it (see vault/[noteId]/page.tsx's full-bleed note view)
+                  still always has the header in view, without restructuring
+                  the whole app into a fixed-height/nested-scroll shell. */}
+              <header className="sticky top-0 z-40 shrink-0 border-b bg-card">
+                <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+                  <Link href="/" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
+                    <BookOpen className="size-5" />
+                    Study Buddy
+                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
+                      <Calendar className="size-3.5" />
+                      Calendar
+                    </Button>
+                    <SearchDialog />
+                    <SettingsDialog />
+                    <HelpDialog />
+                  </div>
                 </div>
-              </div>
-            </header>
-            <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
-              {children}
-            </main>
-            <Toaster />
+              </header>
+              <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+                {children}
+              </main>
+              <Toaster />
+            </SWRProvider>
           </AppThemeProvider>
         </ThemeProvider>
       </body>

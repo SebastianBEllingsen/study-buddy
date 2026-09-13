@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import { ArrowLeft, Link2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Note, NoteBacklink } from "@/lib/models";
@@ -39,9 +40,14 @@ export default function NotePage() {
   const router = useRouter();
   const highlight = searchParams.get("highlight");
 
-  const [detail, setDetail] = useState<NoteDetail | null>(null);
-  const [courseName, setCourseName] = useState<string | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  // Cached across navigation (see SWRProvider) — coming back to a note you
+  // had open a moment ago shows it instantly instead of blanking to the
+  // skeleton below and re-fetching from zero.
+  const { data: detail, error: notFound } = useSWR<NoteDetail>(`/api/notes/${params.noteId}`);
+  const { data: courseData } = useSWR<{ course: { name: string } | null }>(
+    detail ? `/api/courses/${detail.note.course_id}` : null
+  );
+  const courseName = courseData?.course?.name ?? null;
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -49,28 +55,26 @@ export default function NotePage() {
   const editorRef = useRef<NoteEditorHandle>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Seeds title/markdown from the fetched note the moment its data first
+  // arrives for THIS note id — render-phase sync (see CustomizeCourseDialog's
+  // seededFor) rather than a useEffect, so a background SWR revalidation
+  // (e.g. window refocus) never clobbers an in-progress edit sitting in
+  // these two fields between autosaves.
+  const [seededFor, setSeededFor] = useState<number | null>(null);
+  if (detail && detail.note.id !== seededFor) {
+    setTitle(detail.note.title);
+    setMarkdown(detail.note.markdown);
+    setSeededFor(detail.note.id);
+  }
+
   useEffect(() => {
-    fetch(`/api/notes/${params.noteId}`)
-      .then(async (r) => {
-        if (!r.ok) {
-          setNotFound(true);
-          return;
-        }
-        const body: NoteDetail = await r.json();
-        setDetail(body);
-        setTitle(body.note.title);
-        setMarkdown(body.note.markdown);
-        fetch(`/api/courses/${body.note.course_id}`)
-          .then((r) => r.json())
-          .then((courseBody) => setCourseName(courseBody.course?.name ?? null));
-        // Feeds the "Recent activity" dashboard widget — fire-and-forget.
-        fetch("/api/recent-views", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "note", id: body.note.id }),
-        }).catch(() => {});
-      })
-      .catch(() => setNotFound(true));
+    // Feeds the "Recent activity" dashboard widget — only on a genuine visit
+    // to a (possibly new) note id, not on every later revalidation.
+    fetch("/api/recent-views", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "note", id: Number(params.noteId) }),
+    }).catch(() => {});
   }, [params.noteId]);
 
   useEffect(() => {

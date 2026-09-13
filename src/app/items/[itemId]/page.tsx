@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import { Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedItem, QuizAttempt } from "@/lib/models";
@@ -63,10 +64,29 @@ export default function ItemPage() {
   // isn't, so it's ignored there (see QuizRunner/FlashcardViewer usage
   // below).
   const highlight = searchParams.get("highlight");
-  const [detail, setDetail] = useState<ItemDetail | null>(null);
-  const [courseName, setCourseName] = useState<string | null>(null);
+  // Cached across navigation (see SWRProvider) — revisiting an item you
+  // opened a minute ago shows it instantly from cache instead of blanking
+  // out to the skeleton below and re-fetching from zero.
+  const { data: detail, error: detailError, mutate: mutateItem } = useSWR<ItemDetail>(
+    `/api/items/${params.itemId}`
+  );
+  const { data: courseData } = useSWR<{ course: { name: string } | null }>(
+    detail ? `/api/courses/${detail.item.course_id}` : null
+  );
+  const courseName = courseData?.course?.name ?? null;
   const [supplementing, setSupplementing] = useState(false);
   const [noteMarkdown, setNoteMarkdown] = useState("");
+  // Seeds noteMarkdown from the fetched item the moment its data first
+  // arrives for THIS item id, same render-phase-sync pattern as
+  // CustomizeCourseDialog's seededFor (see its comment) — avoids both the
+  // extra render a useEffect-based sync would cost, and, more importantly
+  // here, re-seeding (and clobbering an in-progress edit) on every later SWR
+  // background revalidation, since this only fires once per item id.
+  const [notesSyncedFor, setNotesSyncedFor] = useState<number | null>(null);
+  if (detail?.item.mode === "notes" && detail.item.id !== notesSyncedFor) {
+    setNoteMarkdown((JSON.parse(detail.item.content_json) as NotesContent).markdown);
+    setNotesSyncedFor(detail.item.id);
+  }
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingCards, setEditingCards] = useState(false);
   const notesRef = useRef<HTMLDivElement>(null);
@@ -98,37 +118,22 @@ export default function ItemPage() {
     notesRef.current ? captureElementRegion(notesRef.current, rect) : Promise.resolve(null)
   );
 
-  function loadItem() {
-    return fetch(`/api/items/${params.itemId}`)
-      .then((r) => r.json())
-      .then((body: ItemDetail) => {
-        setDetail(body);
-        if (body.item.mode === "notes") {
-          setNoteMarkdown((JSON.parse(body.item.content_json) as NotesContent).markdown);
-        }
-        return body;
-      });
-  }
-
+  // These don't need the fetched detail at all — the item id from the URL
+  // is enough — so they fire independently of (and don't wait on) the SWR
+  // read above, and specifically don't re-fire on a background
+  // revalidation (e.g. window refocus): only on a genuine visit to a
+  // (possibly new) item id, same as the old effect keyed on params.itemId.
   useEffect(() => {
-    loadItem().then((body) => {
-      fetch(`/api/courses/${body.item.course_id}`)
-        .then((r) => r.json())
-        .then((courseBody) => setCourseName(courseBody.course?.name ?? null));
-      // Feeds the "Recent activity" dashboard widget — fire-and-forget, and
-      // only on this initial load, not the reloads loadItem() also does
-      // after a save/supplement (those aren't the viewer opening it again).
-      fetch("/api/recent-views", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "item", id: body.item.id }),
-      }).catch(() => {});
-      // Opening the item it's about counts as acknowledging its "just
-      // generated" notification (if it has one — this is a no-op otherwise),
-      // same as clicking the popup itself would.
-      fetch(`/api/generation-notifications/${body.item.id}`, { method: "DELETE" }).catch(() => {});
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Feeds the "Recent activity" dashboard widget.
+    fetch("/api/recent-views", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "item", id: Number(params.itemId) }),
+    }).catch(() => {});
+    // Opening the item it's about counts as acknowledging its "just
+    // generated" notification (if it has one — this is a no-op otherwise),
+    // same as clicking the popup itself would.
+    fetch(`/api/generation-notifications/${params.itemId}`, { method: "DELETE" }).catch(() => {});
   }, [params.itemId]);
 
   useEffect(() => {
@@ -150,7 +155,7 @@ export default function ItemPage() {
       toast.error(body.error ?? "Couldn't save changes");
       return false;
     }
-    await loadItem();
+    await mutateItem();
     toast.success("Saved");
     return true;
   }
@@ -189,13 +194,27 @@ export default function ItemPage() {
         toast.error(body.error ?? "Couldn't add the new documents");
         return;
       }
-      await loadItem();
+      await mutateItem();
       toast.success("Added new material from the uploaded documents");
     } catch {
       toast.error("Couldn't add the new documents");
     } finally {
       setSupplementing(false);
     }
+  }
+
+  if (detailError) {
+    return (
+      <div className="space-y-3">
+        <h1 className="font-heading text-2xl font-semibold">Item not found</h1>
+        <p className="text-sm text-muted-foreground">
+          It may have been deleted, or the link is out of date.
+        </p>
+        <Button variant="outline" size="sm" render={<Link href="/" />}>
+          Back to your courses
+        </Button>
+      </div>
+    );
   }
 
   if (!detail) {
@@ -316,7 +335,7 @@ export default function ItemPage() {
           <QuizRunner
             itemId={item.id}
             questions={(content as QuizContent).questions}
-            onSubmitted={() => loadItem()}
+            onSubmitted={() => mutateItem()}
             highlightQuery={highlight ?? undefined}
           />
           {attempts.length > 0 && (

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
@@ -519,10 +520,12 @@ function MonthGrid({
 // this file, matching src/app/page.tsx's HomePage/HomePageContent split.
 function CalendarPageContent() {
   const searchParams = useSearchParams();
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [feeds, setFeeds] = useState<CalendarFeed[] | null>(null);
-  const [events, setEvents] = useState<CalendarEvent[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // Cached across navigation (see SWRProvider) — leaving and coming back to
+  // /calendar shows the same month instantly instead of blanking to a
+  // skeleton and re-fetching settings/feeds/events from zero every time.
+  const { data: settings } = useSWR<AppSettings>("/api/settings");
+  const { data: feedsData } = useSWR<{ feeds: CalendarFeed[] }>("/api/calendar-feeds");
+  const feeds = feedsData?.feeds ?? null;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | undefined>(undefined);
   const [newEventDate, setNewEventDate] = useState<Date | undefined>(undefined);
@@ -544,49 +547,29 @@ function CalendarPageContent() {
     return Number.isNaN(parsed.getTime()) ? undefined : parsed;
   }, [dateParam]);
 
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then(setSettings);
-  }, []);
-
-  function loadFeeds() {
-    fetch("/api/calendar-feeds")
-      .then((r) => r.json())
-      .then((body: { feeds: CalendarFeed[] }) => setFeeds(body.feeds));
-  }
-
-  useEffect(loadFeeds, []);
-
-  function refreshEvents() {
-    // A generous explicit maxResults — this page browses month-by-month
-    // over the feeds' full year-ahead lookahead (see the API route's
-    // FEED_LOOKAHEAD_MS), and the route's default cap of 20 total events
-    // (across Google + every feed, merged and sorted by date) would
-    // otherwise silently starve later months once ~20 sooner events exist
-    // anywhere in that window — easy to hit with even one weekly-lecture
-    // feed. Both "My calendar" and "Assignments" derive their own view
-    // from this single fetch (see personalEvents/assignmentEvents below),
-    // so this can't ask the route to pre-filter by show_on_calendar the
-    // way the dashboard's Upcoming widget does — that would remove events
-    // the Assignments tab still needs to see.
-    fetch("/api/calendar/events?maxResults=1000")
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) {
-          setLoadError(body.error ?? "Couldn't load events");
-          return;
-        }
-        setLoadError(null);
-        setEvents(body.events);
-      })
-      .catch(() => setLoadError("Couldn't load events"));
-  }
-
-  useEffect(() => {
-    if (!settings?.googleCalendarConnected && !settings?.hasCalendarFeeds) return;
-    refreshEvents();
-  }, [settings?.googleCalendarConnected, settings?.hasCalendarFeeds]);
+  // A generous explicit maxResults — this page browses month-by-month over
+  // the feeds' full year-ahead lookahead (see the API route's
+  // FEED_LOOKAHEAD_MS), and the route's default cap of 20 total events
+  // (across Google + every feed, merged and sorted by date) would otherwise
+  // silently starve later months once ~20 sooner events exist anywhere in
+  // that window — easy to hit with even one weekly-lecture feed. Both "My
+  // calendar" and "Assignments" derive their own view from this single
+  // fetch (see personalEvents/assignmentEvents below), so this can't ask
+  // the route to pre-filter by show_on_calendar the way the dashboard's
+  // Upcoming widget does — that would remove events the Assignments tab
+  // still needs to see.
+  //
+  // Only fetched once settings confirm there's something to fetch — a null
+  // key tells useSWR to skip the request entirely rather than firing one
+  // that would just 400/return empty.
+  const shouldLoadEvents = !!(settings?.googleCalendarConnected || settings?.hasCalendarFeeds);
+  const {
+    data: eventsData,
+    error: eventsError,
+    mutate: refreshEvents,
+  } = useSWR<{ events: CalendarEvent[] }>(shouldLoadEvents ? "/api/calendar/events?maxResults=1000" : null);
+  const events = eventsData?.events ?? null;
+  const loadError = eventsError instanceof Error ? eventsError.message : null;
 
   function openNewEvent(date?: Date) {
     setEditingEvent(undefined);

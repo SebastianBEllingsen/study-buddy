@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import {
   BookOpen,
   CalendarDays,
@@ -526,33 +527,26 @@ function UpcomingEventsWidget({
   connected: boolean;
   layout: WidgetLayout;
 }) {
-  const [events, setEvents] = useState<UpcomingCalendarEvent[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const maxResults = upcomingMaxResultsFor(layout);
   // The list's date/time columns need more room than a narrow tile has —
   // below that width it falls back to just the next event, the same
   // compact-number-card look as the streak/due widgets.
   const compact = layout.colSpan <= 2;
 
-  useEffect(() => {
-    if (!connected) return;
-    // excludeHiddenFeeds: a feed toggled off "On calendar" in Settings
-    // shouldn't show up here either — done server-side (see
-    // api/calendar/events/route.ts) so it's applied BEFORE maxResults caps
-    // the result, not after, which could otherwise leave far fewer events
-    // visible than maxResults if hidden-feed events crowded the top of the
-    // sorted list.
-    fetch(`/api/calendar/events?maxResults=${maxResults}&excludeHiddenFeeds=true`)
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) {
-          setError(body.error ?? "Couldn't load events");
-          return;
-        }
-        setEvents(body.events);
-      })
-      .catch(() => setError("Couldn't load events"));
-  }, [connected, maxResults]);
+  // Cached across navigation (see SWRProvider), and revalidates on window
+  // focus — so a switch back to this tab after generating an event
+  // elsewhere (or just coming back from /calendar) catches up on its own.
+  // excludeHiddenFeeds: a feed toggled off "On calendar" in Settings
+  // shouldn't show up here either — done server-side (see
+  // api/calendar/events/route.ts) so it's applied BEFORE maxResults caps
+  // the result, not after, which could otherwise leave far fewer events
+  // visible than maxResults if hidden-feed events crowded the top of the
+  // sorted list.
+  const { data, error: fetchError } = useSWR<{ events: UpcomingCalendarEvent[] }>(
+    connected ? `/api/calendar/events?maxResults=${maxResults}&excludeHiddenFeeds=true` : null
+  );
+  const events = data?.events ?? null;
+  const error = fetchError instanceof Error ? fetchError.message : null;
 
   if (!connected) {
     return (
@@ -660,51 +654,41 @@ function AssignmentsWidget({
   feeds: CalendarFeed[] | null;
   layout: WidgetLayout;
 }) {
-  const [events, setEvents] = useState<UpcomingCalendarEvent[] | null>(null);
-  const [completedIds, setCompletedIds] = useState<Set<string> | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
+  const { data: eventsData, error: fetchError } = useSWR<{ events: UpcomingCalendarEvent[] }>(
+    "/api/calendar/events?maxResults=50"
+  );
+  const events = eventsData?.events ?? null;
+  const error = fetchError instanceof Error ? fetchError.message : null;
+
+  const { data: completedData, mutate: mutateCompleted } = useSWR<{ ids: string[] }>(
+    "/api/assignments/completed"
+  );
+  const completedIds = completedData ? new Set(completedData.ids) : null;
   const compact = layout.colSpan <= 2 || layout.rowSpan === 1;
-
-  useEffect(() => {
-    fetch("/api/calendar/events?maxResults=50")
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) {
-          setError(body.error ?? "Couldn't load assignments");
-          return;
-        }
-        setEvents(body.events);
-      })
-      .catch(() => setError("Couldn't load assignments"));
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/assignments/completed")
-      .then((r) => r.json())
-      .then((body: { ids: string[] }) => setCompletedIds(new Set(body.ids)));
-  }, []);
 
   async function toggleCompleted(eventId: string) {
     const wasCompleted = completedIds?.has(eventId) ?? false;
-    setCompletedIds((prev) => {
-      const next = new Set(prev);
-      if (wasCompleted) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
-    const res = await fetch("/api/assignments/completed", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventId, completed: !wasCompleted }),
-    });
-    if (!res.ok) {
+    const optimisticIds = new Set(completedData?.ids ?? []);
+    if (wasCompleted) optimisticIds.delete(eventId);
+    else optimisticIds.add(eventId);
+    try {
+      // Shows the optimistic result immediately; SWR rolls the cache back
+      // to what it was before if the request rejects, matching the manual
+      // set/rollback this used to do by hand.
+      await mutateCompleted(
+        fetch("/api/assignments/completed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId, completed: !wasCompleted }),
+        }).then((res) => {
+          if (!res.ok) throw new Error("Couldn't save that");
+          return { ids: Array.from(optimisticIds) };
+        }),
+        { optimisticData: { ids: Array.from(optimisticIds) }, rollbackOnError: true }
+      );
+    } catch {
       toast.error("Couldn't save that");
-      setCompletedIds((prev) => {
-        const next = new Set(prev);
-        if (wasCompleted) next.add(eventId);
-        else next.delete(eventId);
-        return next;
-      });
     }
   }
 
@@ -836,22 +820,11 @@ function formatRelativeTime(utcString: string): string {
 }
 
 function RecentActivityWidget({ layout }: { layout: WidgetLayout }) {
-  const [views, setViews] = useState<RecentView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
+  const { data, error: fetchError } = useSWR<{ views: RecentView[] }>("/api/recent-views");
+  const views = data?.views ?? null;
+  const error = fetchError instanceof Error ? fetchError.message : null;
   const compact = layout.colSpan <= 2 || layout.rowSpan === 1;
-
-  useEffect(() => {
-    fetch("/api/recent-views")
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) {
-          setError(body.error ?? "Couldn't load recent activity");
-          return;
-        }
-        setViews(body.views);
-      })
-      .catch(() => setError("Couldn't load recent activity"));
-  }, []);
 
   const loading = views === null;
   const list = views ?? [];
@@ -925,24 +898,19 @@ function RecentActivityWidget({ layout }: { layout: WidgetLayout }) {
 function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [courses, setCourses] = useState<Course[] | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [feeds, setFeeds] = useState<CalendarFeed[] | null>(null);
+  // Every one of these is cached across navigation and revalidates on
+  // window focus (see SWRProvider) — coming back to "/" shows the whole
+  // dashboard instantly from cache instead of every widget blanking out
+  // and re-fetching from zero, which was the actual "weird pop-in".
+  const { data: courses, mutate: refresh } = useSWR<Course[]>("/api/courses");
+  const { data: stats } = useSWR<Stats>("/api/stats");
+  const { data: settings, mutate: mutateSettings } = useSWR<AppSettings>("/api/settings");
+  const { data: feedsData } = useSWR<{ feeds: CalendarFeed[] }>("/api/calendar-feeds");
+  const feeds = feedsData?.feeds ?? null;
   const [dashboardCustomizeOpen, setDashboardCustomizeOpen] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState(false);
-
-  const refresh = useCallback(() => {
-    fetch("/api/courses")
-      .then((r) => r.json())
-      .then(setCourses);
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   // Landed back here from the Google Calendar OAuth redirect (see
   // api/calendar/oauth/callback/route.ts) — surface the result once, then
@@ -956,30 +924,6 @@ function HomePageContent() {
     router.replace("/", { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
-  useEffect(() => {
-    fetch("/api/stats")
-      .then((r) => r.json())
-      .then(setStats);
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then(setSettings);
-  }, []);
-
-  // Shared by both calendar-ish widgets below — the Upcoming widget filters
-  // by show_on_calendar, the Assignments widget by show_in_widget — so both
-  // widgets stay in sync with a single fetch instead of each polling
-  // /api/calendar-feeds on its own.
-  function loadFeeds() {
-    fetch("/api/calendar-feeds")
-      .then((r) => r.json())
-      .then((body: { feeds: CalendarFeed[] }) => setFeeds(body.feeds));
-  }
-
-  useEffect(loadFeeds, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -1043,7 +987,7 @@ function HomePageContent() {
   // Updates local state immediately (so the dashboard behind the customize
   // dialog reflects every drag/toggle live) and persists in the background.
   async function persistHomeWidgets(next: HomeWidgetConfig[]) {
-    setSettings((prev) => (prev ? { ...prev, homeWidgets: next } : prev));
+    mutateSettings((prev) => (prev ? { ...prev, homeWidgets: next } : prev), { revalidate: false });
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
@@ -1169,10 +1113,10 @@ function HomePageContent() {
 
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-semibold">Your courses</h1>
-        {courses !== null && courses.length > 0 && newCourseDialog}
+        {courses !== undefined && courses.length > 0 && newCourseDialog}
       </div>
 
-      {courses === null && (
+      {courses === undefined && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-xl" />

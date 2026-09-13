@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import {
-  ChevronDown,
   ChevronRight,
   ClipboardPaste,
+  FileText,
   Folder as FolderIcon,
   GripVertical,
   HelpCircle,
@@ -17,6 +18,7 @@ import {
   Pencil,
   Plus,
   Sparkles,
+  StickyNote,
   Trash2,
   Upload,
   Wand2,
@@ -103,11 +105,14 @@ const MODE_LABELS: Record<GenerationMode, string> = {
 };
 
 // Distinct icon + accent per mode — quiet differentiation (a tinted bottom
-// border on an otherwise plain outline button), not three loud buttons.
-const MODE_META: Record<GenerationMode, { icon: LucideIcon; borderClass: string }> = {
-  notes: { icon: NotebookPen, borderClass: "border-b-2 border-b-focus" },
-  quiz: { icon: HelpCircle, borderClass: "border-b-2 border-b-amber" },
-  flashcards: { icon: Layers, borderClass: "border-b-2 border-b-sage" },
+// border on an otherwise plain outline button), not three loud buttons. The
+// same icon/color reappears next to each generated item's title in
+// GeneratedItemList, so a quiz set looks like a quiz set at a glance
+// wherever it shows up on this page, not just on the generate buttons.
+const MODE_META: Record<GenerationMode, { icon: LucideIcon; borderClass: string; textClass: string }> = {
+  notes: { icon: NotebookPen, borderClass: "border-b-2 border-b-focus", textClass: "text-focus" },
+  quiz: { icon: HelpCircle, borderClass: "border-b-2 border-b-amber", textClass: "text-amber" },
+  flashcards: { icon: Layers, borderClass: "border-b-2 border-b-sage", textClass: "text-sage" },
 };
 
 const ALL_MATERIAL = "all";
@@ -290,7 +295,7 @@ function DocumentList({
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
   if (documents.length === 0) {
-    return <p className="text-sm text-muted-foreground">No PDFs here yet.</p>;
+    return <p className="py-0.5 text-sm text-muted-foreground/70">No PDFs here yet.</p>;
   }
 
   // Drops a dragged document (payload set by its own onDragStart below) onto
@@ -323,7 +328,7 @@ function DocumentList({
           key={doc.id}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => handleDrop(e, doc.id)}
-          className="flex items-center justify-between gap-2 px-1 py-1.5 text-sm"
+          className="group/row flex items-center justify-between gap-2 rounded-md px-1 py-2 text-sm hover:bg-muted/40"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             {editMode && (
@@ -345,7 +350,8 @@ function DocumentList({
               onDragStart={(e) => setDragPayload(e, { kind: "document", id: doc.id })}
               className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
             >
-              <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
+              <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+              <FileText className="size-3.5 shrink-0 text-muted-foreground/70" />
               <button
                 type="button"
                 onClick={() => onView(doc)}
@@ -418,7 +424,7 @@ function GeneratedItemList({
   const showModelBadge = useShowModelBadge();
 
   if (items.length === 0) {
-    return <p className="text-sm text-muted-foreground">Nothing generated here yet.</p>;
+    return <p className="py-0.5 text-sm text-muted-foreground/70">Nothing generated here yet.</p>;
   }
 
   // See DocumentList's handleDrop — same reorder-by-drop-on-a-sibling-row
@@ -440,12 +446,14 @@ function GeneratedItemList({
 
   return (
     <ul className="divide-y divide-border/60">
-      {items.map((item) => (
+      {items.map((item) => {
+        const ModeIcon = MODE_META[item.mode].icon;
+        return (
         <li
           key={item.id}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => handleDrop(e, item.id)}
-          className="flex items-center justify-between gap-2 px-1 py-1.5 text-sm"
+          className="group/row flex items-center justify-between gap-2 rounded-md px-1 py-2 text-sm hover:bg-muted/40"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             {editMode && (
@@ -464,7 +472,8 @@ function GeneratedItemList({
               onDragStart={(e) => setDragPayload(e, { kind: "item", id: item.id })}
               className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
             >
-              <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
+              <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+              <ModeIcon className={`size-3.5 shrink-0 ${MODE_META[item.mode].textClass}`} />
               <Link
                 href={`/items/${item.id}`}
                 // Anchors are natively draggable by default — without this,
@@ -511,7 +520,8 @@ function GeneratedItemList({
             />
           </div>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
@@ -532,7 +542,7 @@ function NoteList({
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
   if (notes.length === 0) {
-    return <p className="text-sm text-muted-foreground">No notes here yet.</p>;
+    return <p className="py-0.5 text-sm text-muted-foreground/70">No notes here yet.</p>;
   }
 
   // Same reorder-by-drop-on-a-sibling-row pattern as DocumentList/
@@ -558,14 +568,15 @@ function NoteList({
           key={note.id}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => handleDrop(e, note.id)}
-          className="flex items-center justify-between gap-2 px-1 py-1.5 text-sm"
+          className="group/row flex items-center justify-between gap-2 rounded-md px-1 py-2 text-sm hover:bg-muted/40"
         >
           <div
             draggable
             onDragStart={(e) => setDragPayload(e, { kind: "note", id: note.id })}
             className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
           >
-            <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
+            <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+            <StickyNote className="size-3.5 shrink-0 text-sage/70" />
             <Link
               href={`/vault/${note.id}`}
               draggable={false}
@@ -637,26 +648,47 @@ function NewNoteRow({ onCreate }: { onCreate: (title: string) => void }) {
   );
 }
 
+// Icon + accent per content type — the same visual language as MODE_META's
+// generate-button colors and the row-level icons below, so "this is a note"
+// reads the same way everywhere on the page instead of only as plain text.
 function CollapsibleSection({
   title,
+  icon: Icon,
+  accentClass = "text-muted-foreground",
   count,
   storageKey,
+  autoOpen = false,
   children,
 }: {
   title: string;
+  icon: LucideIcon;
+  accentClass?: string;
   count: number;
   storageKey: string;
+  // Forces this section open once when it turns true — e.g. a pending
+  // "just generated" notification lives inside it — even if the user had
+  // previously collapsed it. Only fires on that transition (and on mount,
+  // if already true), so it doesn't fight a manual re-collapse afterward
+  // while the notification is still pending.
+  autoOpen?: boolean;
   children: React.ReactNode;
 }) {
   const [open, onOpenChange] = useCollapsed(storageKey);
+  useEffect(() => {
+    if (autoOpen) onOpenChange(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+      <CollapsibleTrigger className="group/section -ml-1 flex items-center gap-1.5 rounded-md py-1 pl-1 text-sm font-medium hover:bg-muted/60">
+        <ChevronRight
+          className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+        />
+        <Icon className={`size-3.5 shrink-0 ${accentClass}`} />
         {title}
-        <span className="font-normal">({count})</span>
+        <span className="font-normal text-muted-foreground">{count}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1.5">{children}</CollapsibleContent>
+      <CollapsibleContent className="mt-1 pl-[1.375rem]">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
@@ -741,6 +773,23 @@ function FolderCard({
     ? []
     : folders.filter((f) => f.parent_folder_id === folder.id);
 
+  // A pending "just generated" notification for an item filed directly in
+  // this folder — or, one level down, in one of its subfolders (subfolders
+  // render inside THIS card's own CollapsibleContent, so their content
+  // never even mounts, notification and all, while this card is collapsed).
+  const hasNotifiedHere = items.some((item) => notifiedItemIds.has(item.id));
+  const hasNotifiedSubtree =
+    hasNotifiedHere ||
+    subfolders.some((sub) => itemsByFolder(sub.id).some((item) => notifiedItemIds.has(item.id)));
+
+  // Force this card open the moment its subtree has something to show for —
+  // same "don't fight a manual re-collapse afterward" rule as
+  // CollapsibleSection's own autoOpen.
+  useEffect(() => {
+    if (hasNotifiedSubtree) onOpenChange(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasNotifiedSubtree]);
+
   async function commitRename() {
     const trimmed = nameDraft.trim();
     setRenaming(false);
@@ -817,7 +866,7 @@ function FolderCard({
 
   return (
     <Card
-      className={`gap-3 py-3 transition-colors ${dragOver ? "ring-2 ring-primary" : ""}`}
+      className={`group gap-3 py-3 transition-colors ${dragOver ? "ring-2 ring-primary" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
@@ -831,15 +880,17 @@ function FolderCard({
               // See DocumentList's row for why: this wraps the folder name
               // text, so without select-none a drag starting there risks
               // being hijacked by native text selection instead.
-              className="flex min-w-0 flex-1 cursor-grab select-none items-center gap-2 active:cursor-grabbing"
+              className="flex min-w-0 flex-1 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
             >
-              <GripVertical className="size-4 shrink-0 text-muted-foreground" />
+              {/* Quiet by default, full-strength on hover/focus of the card —
+                  the handle stays discoverable without competing with the
+                  folder name for attention every time you just glance at
+                  the list. */}
+              <GripVertical className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-muted-foreground" />
               <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
-                {open ? (
-                  <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                )}
+                <ChevronRight
+                  className={`size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+                />
                 <span
                   className={`flex min-w-0 items-center gap-2 rounded transition-colors ${
                     nameDragOver ? "bg-primary/15 ring-1 ring-primary" : ""
@@ -869,22 +920,40 @@ function FolderCard({
                       className="h-6 max-w-40"
                     />
                   ) : (
-                    <span className="truncate">{folder.name}</span>
+                    <span className="truncate font-semibold">{folder.name}</span>
                   )}
                 </span>
-                <span className="flex shrink-0 items-center gap-2.5 font-normal text-xs text-muted-foreground">
-                  <span>
-                    {documents.length} doc{documents.length === 1 ? "" : "s"}
+                {/* Icon+count chips instead of "N docs, N generated, N
+                    notes" — same colors as the sections they summarize
+                    (see CollapsibleSection below), so the header alone tells
+                    you what's actually in here at a glance. Native title
+                    attributes keep the full word one hover away. */}
+                <span className="flex shrink-0 items-center gap-2.5 font-normal text-xs">
+                  <span
+                    className="flex items-center gap-1 text-muted-foreground"
+                    title={`${documents.length} document${documents.length === 1 ? "" : "s"}`}
+                  >
+                    <FileText className="size-3 shrink-0" />
+                    {documents.length}
                   </span>
-                  <span>
-                    {items.length} generated
+                  <span
+                    className="flex items-center gap-1 text-focus/80"
+                    title={`${items.length} generated`}
+                  >
+                    <Sparkles className="size-3 shrink-0" />
+                    {items.length}
                   </span>
-                  <span>
-                    {notes.length} note{notes.length === 1 ? "" : "s"}
+                  <span
+                    className="flex items-center gap-1 text-sage/80"
+                    title={`${notes.length} note${notes.length === 1 ? "" : "s"}`}
+                  >
+                    <StickyNote className="size-3 shrink-0" />
+                    {notes.length}
                   </span>
                   {subfolders.length > 0 && (
-                    <span>
-                      {subfolders.length} subfolder{subfolders.length === 1 ? "" : "s"}
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <FolderIcon className="size-3 shrink-0" />
+                      {subfolders.length}
                     </span>
                   )}
                 </span>
@@ -927,6 +996,7 @@ function FolderCard({
           <CardContent className="space-y-3 px-3">
             <CollapsibleSection
               title="Documents"
+              icon={FileText}
               count={documents.length}
               storageKey={collapseKey(folder.id, "documents")}
             >
@@ -945,8 +1015,11 @@ function FolderCard({
             </CollapsibleSection>
             <CollapsibleSection
               title="Generated"
+              icon={Sparkles}
+              accentClass="text-focus"
               count={items.length}
               storageKey={collapseKey(folder.id, "generated")}
+              autoOpen={hasNotifiedHere}
             >
               <GeneratedItemList
                 items={items}
@@ -964,6 +1037,8 @@ function FolderCard({
             </CollapsibleSection>
             <CollapsibleSection
               title="Notes"
+              icon={StickyNote}
+              accentClass="text-sage"
               count={notes.length}
               storageKey={collapseKey(folder.id, "notes")}
             >
@@ -980,7 +1055,7 @@ function FolderCard({
               </div>
             </CollapsibleSection>
             {subfolders.length > 0 && (
-              <div className="space-y-3 border-l pl-3">
+              <div className="space-y-3 border-l-2 border-dashed border-muted-foreground/15 pl-4">
                 {subfolders.map((sub) => (
                   <FolderCard
                     key={sub.id}
@@ -1104,19 +1179,38 @@ export default function CoursePage() {
   const searchParams = useSearchParams();
   const courseId = params.courseId;
 
-  const [detail, setDetail] = useState<CourseDetail | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  // Cached across navigation (see SWRProvider) — leaving this course and
+  // coming back shows it instantly instead of blanking to the skeleton
+  // below and re-fetching everything from zero.
+  const { data: detail, error: notFound, mutate: refresh } = useSWR<CourseDetail>(
+    `/api/courses/${courseId}`
+  );
   // The home dashboard's due-cards badge on this course's card is computed
   // from the same site-wide due list — fetching it here too (rather than a
   // course-scoped endpoint) guarantees this page always agrees with exactly
   // what triggered that badge, instead of two separate "due" computations
   // drifting apart.
-  const [dueItems, setDueItems] = useState<DueFlashcardItem[]>([]);
+  const { data: statsData, mutate: mutateStats } = useSWR<{
+    dueFlashcards: { items: DueFlashcardItem[] };
+    generationNotifications: GenerationNotification[];
+  }>("/api/stats");
+  const dueItems = useMemo(
+    () => (statsData?.dueFlashcards.items ?? []).filter((item) => item.courseId === Number(courseId)),
+    [statsData, courseId]
+  );
   // Pending "just generated" notifications for this course — only ever
   // non-empty when Settings' "jump to newly generated content
   // automatically" is off (see handleGenerate and the generate route).
-  const [notifications, setNotifications] = useState<GenerationNotification[]>([]);
-  const [autoOpenGeneratedItems, setAutoOpenGeneratedItems] = useState(true);
+  // Backed by the shared /api/stats cache (see mutateStats below) rather
+  // than its own local state, so dismissing one here is instantly reflected
+  // in the home dashboard's dot too, the moment you navigate back — no
+  // separate state to fall out of sync with it.
+  const notifications = useMemo(
+    () => (statsData?.generationNotifications ?? []).filter((n) => n.courseId === Number(courseId)),
+    [statsData, courseId]
+  );
+  const { data: settingsData } = useSWR<{ autoOpenGeneratedItems: boolean }>("/api/settings");
+  const autoOpenGeneratedItems = settingsData?.autoOpenGeneratedItems ?? true;
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -1179,49 +1273,13 @@ export default function CoursePage() {
     clearSelection();
   }
 
-  const refresh = useCallback(() => {
-    fetch(`/api/courses/${courseId}`)
-      .then(async (r) => {
-        if (!r.ok) {
-          setNotFound(true);
-          return;
-        }
-        const body: CourseDetail = await r.json();
-        setDetail(body);
-        setUploadDestination((prev) =>
-          prev || String(body.folders.find((f) => f.is_master)?.id ?? "")
-        );
-      })
-      .catch(() => setNotFound(true));
-  }, [courseId]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    fetch("/api/stats")
-      .then((r) => r.json())
-      .then(
-        (body: {
-          dueFlashcards: { items: DueFlashcardItem[] };
-          generationNotifications: GenerationNotification[];
-        }) => {
-          setDueItems(body.dueFlashcards.items.filter((item) => item.courseId === Number(courseId)));
-          setNotifications(
-            body.generationNotifications.filter((n) => n.courseId === Number(courseId))
-          );
-        }
-      )
-      .catch(() => {});
-  }, [courseId]);
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((body: { autoOpenGeneratedItems: boolean }) => setAutoOpenGeneratedItems(body.autoOpenGeneratedItems))
-      .catch(() => {});
-  }, []);
+  // Seeds the upload-destination dropdown to the master folder the first
+  // time detail has folders to seed it from — render-phase sync (see
+  // CustomizeCourseDialog's seededFor) rather than a useEffect; the
+  // `!uploadDestination` guard makes this a no-op on every later update.
+  if (detail && !uploadDestination) {
+    setUploadDestination(String(detail.folders.find((f) => f.is_master)?.id ?? ""));
+  }
 
   // itemId → how many of its cards are due — GeneratedItemList and the
   // banner below both key off this so a set's "N due" badge always matches
@@ -1232,9 +1290,18 @@ export default function CoursePage() {
   // Shared by the popup's own dismiss button, the course page's inline "x",
   // and (via the API route) opening the item itself — see
   // dismissGenerationNotification for why calling this more than once for
-  // the same item is harmless.
+  // the same item is harmless. Updates the shared /api/stats cache entry
+  // directly (rather than local state) so the home dashboard's dot for this
+  // course reflects the dismissal the instant you navigate back to it.
   function dismissNotification(itemId: number) {
-    setNotifications((prev) => prev.filter((n) => n.itemId !== itemId));
+    mutateStats(
+      (prev) =>
+        prev && {
+          ...prev,
+          generationNotifications: prev.generationNotifications.filter((n) => n.itemId !== itemId),
+        },
+      { revalidate: false }
+    );
     fetch(`/api/generation-notifications/${itemId}`, { method: "DELETE" }).catch(() => {});
   }
 
@@ -1675,10 +1742,22 @@ export default function CoursePage() {
       // banner/pill below) and on this course's card on the home page,
       // until it's opened or dismissed from any of those.
       refresh();
-      setNotifications((prev) => [
-        { itemId: body.id, title: body.title, mode: body.mode, courseId: body.course_id, courseName: detail?.course.name ?? "", createdAt: body.created_at },
-        ...prev,
-      ]);
+      const newNotification: GenerationNotification = {
+        itemId: body.id,
+        title: body.title,
+        mode: body.mode,
+        courseId: body.course_id,
+        courseName: detail?.course.name ?? "",
+        createdAt: body.created_at,
+      };
+      mutateStats(
+        (prev) =>
+          prev && {
+            ...prev,
+            generationNotifications: [newNotification, ...prev.generationNotifications],
+          },
+        { revalidate: false }
+      );
       toast(`${MODE_LABELS[mode]} ready`, {
         description: body.title,
         duration: Infinity,
@@ -1755,7 +1834,7 @@ export default function CoursePage() {
       <div className="space-y-1">
         {detail.course.cover_image && (
           <div
-            className="relative mb-2 h-32 overflow-hidden rounded-xl bg-cover bg-center sm:h-40"
+            className="relative mb-2 h-32 overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-black/5 sm:h-40"
             style={{ backgroundImage: `url(${detail.course.cover_image})` }}
           >
             <Button
@@ -1808,7 +1887,7 @@ export default function CoursePage() {
             ) : (
               detail.course.icon && <span className="text-2xl">{detail.course.icon}</span>
             ))}
-          <h1 className="font-heading text-2xl font-semibold">{detail.course.name}</h1>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">{detail.course.name}</h1>
           {!detail.course.cover_image && (
             <Button
               variant="ghost"
@@ -1888,19 +1967,30 @@ export default function CoursePage() {
       )}
 
       <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Folders</h2>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setAllFoldersOpen(true)}>
-              Expand all
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setAllFoldersOpen(false)}>
-              Collapse all
-            </Button>
-            <Button variant={editMode ? "secondary" : "outline"} size="sm" onClick={toggleEditMode}>
-              <ListChecks />
-              {editMode ? "Done" : "Select"}
-            </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-heading text-base font-semibold">Folders</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* View/selection controls — a quiet segmented cluster, visually
+                distinct from the content-adding actions to its right so the
+                row reads as two different kinds of control, not six
+                identical buttons in a row. */}
+            <div className="flex items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5">
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setAllFoldersOpen(true)}>
+                Expand all
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setAllFoldersOpen(false)}>
+                Collapse all
+              </Button>
+              <Button
+                variant={editMode ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={toggleEditMode}
+              >
+                <ListChecks />
+                {editMode ? "Done" : "Select"}
+              </Button>
+            </div>
             <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
               <DialogTrigger
                 render={<Button variant="outline" size="sm" />}
@@ -2225,10 +2315,14 @@ export default function CoursePage() {
         </div>
       </section>
 
-      <Card>
+      {/* The page's one primary call-to-action gets a touch of its own
+          identity — a tinted top edge and a soft background wash in the
+          same accent as the Sparkles icon — so it doesn't read as just
+          another plain bordered card among the folders above it. */}
+      <Card className="gap-3 overflow-hidden border-t-2 border-t-focus bg-gradient-to-b from-focus/[0.04] to-transparent py-4">
         <CardHeader>
-          <h2 className="flex items-center gap-2 text-sm font-medium">
-            <Sparkles className="size-4" />
+          <h2 className="flex items-center gap-2 font-heading text-base font-semibold">
+            <Sparkles className="size-4 text-focus" />
             Practice
           </h2>
         </CardHeader>
@@ -2284,11 +2378,11 @@ export default function CoursePage() {
                 <Button
                   key={mode}
                   variant="outline"
-                  className={MODE_META[mode].borderClass}
+                  className={`bg-card ${MODE_META[mode].borderClass}`}
                   onClick={() => handleGenerate(mode)}
                   disabled={!scopedHasExtracted || generating !== null}
                 >
-                  <Icon />
+                  <Icon className={MODE_META[mode].textClass} />
                   {generating === mode ? "Generating…" : MODE_LABELS[mode]}
                 </Button>
               );
