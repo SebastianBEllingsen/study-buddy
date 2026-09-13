@@ -698,7 +698,12 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     if (mode === "edit" && pendingEditCursorRef.current !== null) {
       const pos = pendingEditCursorRef.current;
       pendingEditCursorRef.current = null;
-      requestAnimationFrame(() => {
+      // setTimeout rather than requestAnimationFrame — rAF callbacks are
+      // paused entirely for a backgrounded/hidden tab (e.g. the user
+      // switches away right after clicking), which would silently strand
+      // this. React has already committed the DOM by the time this effect
+      // runs, so there's nothing rAF's paint-timing would add here anyway.
+      setTimeout(() => {
         const view = editorRef.current?.view;
         if (!view) return;
         const clamped = Math.max(0, Math.min(pos, view.state.doc.length));
@@ -711,7 +716,8 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     } else if (mode === "preview" && pendingPreviewAnchorRef.current) {
       const text = pendingPreviewAnchorRef.current;
       pendingPreviewAnchorRef.current = null;
-      requestAnimationFrame(() => {
+      // setTimeout, not requestAnimationFrame — see the note above.
+      setTimeout(() => {
         const el = previewScrollRef.current;
         if (el) scrollContainerToText(el, text);
       });
@@ -751,7 +757,9 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     if (mode !== "edit" || !pendingHighlightRef.current) return;
     const text = pendingHighlightRef.current;
     pendingHighlightRef.current = null;
-    requestAnimationFrame(() => {
+    // setTimeout rather than requestAnimationFrame — see the same swap
+    // above, same reasoning (rAF pauses entirely in a backgrounded tab).
+    setTimeout(() => {
       const view = editorRef.current?.view;
       if (view) highlightInEditor(view, text);
     });

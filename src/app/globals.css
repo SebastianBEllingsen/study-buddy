@@ -674,17 +674,26 @@ li .katex {
 /* Home dashboard widget grid (see lib/dashboardGrid.ts) — an Android-style
    free-form 6-column grid on larger screens, where each tile's position
    comes from CSS custom properties set inline per-tile. Below the `sm`
-   breakpoint there isn't room for real 2D placement, so tiles just stack
-   full-width in document order instead of trying to remap the desktop
-   grid coordinates onto fewer columns. GRID_COLS/ROW_HEIGHT_PX in
-   dashboardGrid.ts must match the values here. */
+   breakpoint there isn't room for real 2D placement (six columns of
+   explicit --tile-col coordinates don't remap onto one column), so column
+   placement collapses to a single full-width auto-flowing column there —
+   but row HEIGHT stays active at every width (grid-auto-rows +
+   `grid-row: span var(--tile-span-row)`, unscoped by the media query
+   below), auto-placing tiles one after another. Without that, a tile's
+   height fell back to its content's natural size below `sm`, which is what
+   let Upcoming/Assignments abandon their own internal scroll and dump every
+   item into the page instead, and made fixed-content tiles like the streak/
+   cards-due stat boxes size inconsistently from one viewport to the next.
+   GRID_COLS/ROW_HEIGHT_PX in dashboardGrid.ts must match the values here. */
 .dashboard-grid {
   display: grid;
   gap: 1rem;
   grid-template-columns: 1fr;
+  grid-auto-rows: 120px;
 }
 .dashboard-tile {
   grid-column: 1 / -1;
+  grid-row: span var(--tile-span-row);
   /* `1fr` tracks are really `minmax(auto, 1fr)` — without this, one tile
      with an unshrinkable descendant (e.g. nowrap text) can force its whole
      column wider than its siblings', which is what made tiles render at
@@ -695,7 +704,6 @@ li .katex {
 @media (min-width: 640px) {
   .dashboard-grid {
     grid-template-columns: repeat(6, 1fr);
-    grid-auto-rows: 120px;
   }
   .dashboard-tile {
     grid-column: var(--tile-col) / span var(--tile-span-col);
