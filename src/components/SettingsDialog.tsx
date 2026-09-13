@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
 import {
   AlertTriangle,
   Calendar,
   Database,
   Download,
+  Image as ImageIcon,
+  MoreHorizontal,
   Palette,
   Rss,
   Settings as SettingsIcon,
@@ -15,6 +18,9 @@ import {
 import { toast } from "sonner";
 import { useAppTheme, type AppTheme } from "@/components/AppThemeProvider";
 import ThemeToggle from "@/components/ThemeToggle";
+import { ImageCropDialog } from "@/components/ImageCropDialog";
+import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { ICON_ASPECT, ICON_OUTPUT, BACKGROUND_ASPECT, BACKGROUND_OUTPUT_WIDTH, BACKGROUND_OUTPUT_HEIGHT } from "@/lib/imageCropPresets";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -36,6 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { AiBackend, AppSettings } from "@/lib/models";
+import { FONT_CHOICES } from "@/lib/fontChoices";
 
 const AI_LABELS: Record<AiBackend, string> = {
   api: "Anthropic (API key)",
@@ -664,6 +671,285 @@ function AppearanceSection() {
           Changes the app&apos;s color palette and headings.
         </p>
       </div>
+      <div className="space-y-1.5">
+        <Label>Heading font</Label>
+        <FontPicker />
+        <p className="text-xs text-muted-foreground">
+          Independent of the theme above — picks which face headings use, whichever theme
+          you&apos;re on. Leave on &quot;Theme default&quot; to let the theme choose.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// A second, independent axis from the theme's own font (see globals.css's
+// data-app-font rules) — DB-backed like the rest of AppSettings rather than
+// localStorage like the theme itself, since it also needs to be correct in
+// the very first server-rendered response (see layout.tsx's
+// generateMetadata/data-app-font) for a flash-free load; the theme has no
+// such server-side read today, hence its own localStorage+blocking-script
+// mechanism instead.
+function FontPicker() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  const value = settings?.appFont ?? "theme";
+
+  async function handleChange(next: string) {
+    const appFont = next === "theme" ? null : next;
+    // Instant feedback in this tab without waiting on the save — same
+    // attribute layout.tsx sets server-side on the next full load.
+    if (appFont) document.documentElement.setAttribute("data-app-font", appFont);
+    else document.documentElement.removeAttribute("data-app-font");
+    mutate((prev) => (prev ? { ...prev, appFont } : prev), { revalidate: false });
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appFont }),
+    });
+    if (!res.ok) toast.error("Couldn't save font");
+  }
+
+  if (!settings) return null;
+
+  return (
+    <Select value={value} onValueChange={(v) => v && handleChange(v)}>
+      <SelectTrigger className="w-full">
+        <SelectValue>
+          {(v: string) => FONT_CHOICES.find((f) => f.key === v)?.label ?? "Theme default"}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="theme">Theme default</SelectItem>
+        {FONT_CHOICES.map((font) => (
+          <SelectItem key={font.key} value={font.key}>
+            {font.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function BrandingSection() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  const [nameDraft, setNameDraft] = useState("");
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
+  const iconInputRef = useRef<HTMLInputElement>(null);
+  const [backgroundCropFile, setBackgroundCropFile] = useState<File | null>(null);
+  const [backgroundCropOpen, setBackgroundCropOpen] = useState(false);
+  const [backgroundLibraryOpen, setBackgroundLibraryOpen] = useState(false);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
+
+  // Render-phase sync, not an effect — see CustomizeCourseDialog's
+  // seededFor for the same pattern. "settings" itself is a stable enough
+  // key here since this section only cares whether it's arrived yet.
+  if (settings && seededFor !== "settings") {
+    setNameDraft(settings.appName ?? "");
+    setSeededFor("settings");
+  }
+
+  async function saveBranding(fields: {
+    appName?: string | null;
+    appIcon?: string | null;
+    appIconImage?: string | null;
+    dashboardBackgroundImage?: string | null;
+  }) {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) {
+      toast.error("Couldn't save branding");
+      return;
+    }
+    const body: AppSettings = await res.json();
+    mutate(body, { revalidate: false });
+  }
+
+  function commitName() {
+    if (!settings) return;
+    const trimmed = nameDraft.trim();
+    if (trimmed === (settings.appName ?? "")) return;
+    saveBranding({ appName: trimmed || null });
+  }
+
+  if (!settings) return null;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+        <Sparkles className="size-3.5" />
+        Branding
+      </h3>
+      <div className="space-y-1.5">
+        <Label htmlFor="app-name">App name</Label>
+        <Input
+          id="app-name"
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          placeholder="Study Buddy"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>App icon</Label>
+        <input
+          ref={iconInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              setCropFile(file);
+              setCropOpen(true);
+            }
+            e.target.value = "";
+          }}
+        />
+        <div className="flex items-center gap-2">
+          {settings.appIconImage ? (
+            <div
+              className="relative size-10 shrink-0 rounded-md border bg-cover bg-center"
+              style={{ backgroundImage: `url(${settings.appIconImage})` }}
+            >
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                className="absolute -top-2 -right-2 size-5"
+                onClick={() => saveBranding({ appIconImage: null })}
+                aria-label="Remove app icon image"
+              >
+                <X className="size-3" />
+              </Button>
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => iconInputRef.current?.click()}>
+              <ImageIcon className="size-3.5" />
+              Upload image
+            </Button>
+          )}
+          <Input
+            value={settings.appIcon ?? ""}
+            onChange={(e) => saveBranding({ appIcon: e.target.value.trim() || null })}
+            placeholder="📚"
+            maxLength={8}
+            className="h-9 w-16 text-center text-lg"
+            aria-label="App icon emoji"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          An uploaded image (shown in the header and as the browser tab icon) takes priority over
+          the emoji when both are set.
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Dashboard backdrop</Label>
+        <p className="text-xs text-muted-foreground">
+          A large atmospheric background behind the home dashboard, like a game&apos;s library page.
+        </p>
+        <input
+          ref={backgroundInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              setBackgroundCropFile(file);
+              setBackgroundCropOpen(true);
+            }
+            e.target.value = "";
+          }}
+        />
+        {settings.dashboardBackgroundImage ? (
+          <div
+            className="relative h-24 rounded-lg border bg-cover bg-center"
+            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}
+          >
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              className="absolute top-1.5 left-1.5"
+              onClick={() => setBackgroundLibraryOpen(true)}
+              aria-label="Choose a different backdrop from previous uploads"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              className="absolute top-1.5 right-1.5"
+              onClick={() => saveBranding({ dashboardBackgroundImage: null })}
+              aria-label="Remove dashboard backdrop"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => backgroundInputRef.current?.click()}>
+              <ImageIcon className="size-3.5" />
+              Upload image
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setBackgroundLibraryOpen(true)}
+              aria-label="Choose a backdrop from previous uploads"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
+      <ImageCropDialog
+        open={cropOpen}
+        onOpenChange={(next) => {
+          setCropOpen(next);
+          if (!next) setCropFile(null);
+        }}
+        file={cropFile}
+        aspect={ICON_ASPECT}
+        outputWidth={ICON_OUTPUT}
+        outputHeight={ICON_OUTPUT}
+        outputFormat="png"
+        title="Position app icon"
+        onCropped={(dataUrl) => saveBranding({ appIconImage: dataUrl })}
+      />
+      <ImageCropDialog
+        open={backgroundCropOpen}
+        onOpenChange={(next) => {
+          setBackgroundCropOpen(next);
+          if (!next) setBackgroundCropFile(null);
+        }}
+        file={backgroundCropFile}
+        aspect={BACKGROUND_ASPECT}
+        outputWidth={BACKGROUND_OUTPUT_WIDTH}
+        outputHeight={BACKGROUND_OUTPUT_HEIGHT}
+        outputFormat="jpeg"
+        title="Position dashboard backdrop"
+        onCropped={(dataUrl) => {
+          saveBranding({ dashboardBackgroundImage: dataUrl });
+          fetch("/api/uploaded-images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: "background", dataUrl }),
+          }).catch(() => {});
+        }}
+      />
+      <ImageLibraryDialog
+        open={backgroundLibraryOpen}
+        onOpenChange={setBackgroundLibraryOpen}
+        kind="background"
+        onSelect={(dataUrl) => saveBranding({ dashboardBackgroundImage: dataUrl })}
+      />
     </div>
   );
 }
@@ -770,6 +1056,8 @@ export default function SettingsDialog() {
         <CalendarFeedsSection />
         <Separator />
         <StorageSection />
+        <Separator />
+        <BrandingSection />
         <Separator />
         <AppearanceSection />
         <Separator />

@@ -12,6 +12,8 @@ import NoteEditor, { type NoteEditorHandle } from "@/components/NoteEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ICON_CHOICES } from "@/lib/pickerChoices";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +45,7 @@ export default function NotePage() {
   // Cached across navigation (see SWRProvider) — coming back to a note you
   // had open a moment ago shows it instantly instead of blanking to the
   // skeleton below and re-fetching from zero.
-  const { data: detail, error: notFound } = useSWR<NoteDetail>(`/api/notes/${params.noteId}`);
+  const { data: detail, error: notFound, mutate } = useSWR<NoteDetail>(`/api/notes/${params.noteId}`);
   const { data: courseData } = useSWR<{ course: { name: string } | null }>(
     detail ? `/api/courses/${detail.note.course_id}` : null
   );
@@ -112,6 +114,16 @@ export default function NotePage() {
   function handleMarkdownChange(value: string) {
     setMarkdown(value);
     scheduleSave({ markdown: value });
+  }
+
+  async function handleIconChange(icon: string | null) {
+    if (!detail) return;
+    mutate({ ...detail, note: { ...detail.note, icon } }, { revalidate: false });
+    await fetch(`/api/notes/${params.noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ icon }),
+    });
   }
 
   async function handleDelete() {
@@ -193,12 +205,50 @@ export default function NotePage() {
           </div>
         </div>
 
-        <Input
-          value={title}
-          onChange={(e) => handleTitleChange(e.target.value)}
-          className="h-auto border-none px-0 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0"
-          placeholder="Untitled"
-        />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 text-xl"
+                  aria-label="Choose an icon for this note"
+                />
+              }
+            >
+              {detail.note.icon ?? "🗒️"}
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-3">
+              <div className="grid grid-cols-8 gap-1">
+                {ICON_CHOICES.map((choice) => (
+                  <button
+                    key={choice}
+                    type="button"
+                    onClick={() => handleIconChange(detail.note.icon === choice ? null : choice)}
+                    className={`flex size-6 items-center justify-center rounded-md text-sm transition-colors hover:bg-muted ${
+                      detail.note.icon === choice ? "bg-muted ring-1 ring-primary" : ""
+                    }`}
+                    aria-label={`Use ${choice} as icon`}
+                  >
+                    {choice}
+                  </button>
+                ))}
+              </div>
+              {detail.note.icon && (
+                <Button variant="ghost" size="sm" className="mt-2" onClick={() => handleIconChange(null)}>
+                  Remove icon
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
+          <Input
+            value={title}
+            onChange={(e) => handleTitleChange(e.target.value)}
+            className="h-auto min-w-0 flex-1 border-none px-0 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0"
+            placeholder="Untitled"
+          />
+        </div>
 
         <div className="min-h-0 flex-1 rounded-xl border">
           <NoteEditor ref={editorRef} value={markdown} onChange={handleMarkdownChange} />

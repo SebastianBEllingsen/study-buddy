@@ -127,6 +127,20 @@
       "when": 1789317262907,
       "tag": "0018_busy_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789333976875,
+      "tag": "0019_confused_magma",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789337919067,
+      "tag": "0020_luxuriant_master_mold",
+      "breakpoints": true
     }
   ]
 }

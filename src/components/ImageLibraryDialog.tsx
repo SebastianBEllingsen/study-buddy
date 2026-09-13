@@ -16,10 +16,10 @@ import {
 import type { UploadedImage, UploadedImageKind } from "@/lib/models";
 
 // A reusable "pick from what you've already uploaded" gallery — scoped to
-// one image kind (icon vs. cover; see UploadedImageKind), since the two
-// have different crop aspect ratios and picking one for the wrong slot
-// would look wrong. Currently opened from CustomizeCourseDialog's "…"
-// buttons; any future per-thing image customization can reuse this
+// one image kind (icon vs. cover vs. background; see UploadedImageKind),
+// since each has a different crop aspect ratio and picking one for the
+// wrong slot would look wrong. Currently opened from CustomizeCourseDialog's
+// "…" buttons; any future per-thing image customization can reuse this
 // unchanged by just pointing it at the same kind.
 export function ImageLibraryDialog({
   open,
@@ -70,8 +70,9 @@ export function ImageLibraryDialog({
     onOpenChange(false);
   }
 
-  const aspectClass = kind === "cover" ? "aspect-[3.2/1]" : "aspect-square";
-  const gridClass = kind === "cover" ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-4 sm:grid-cols-5";
+  const aspectClass = kind === "cover" ? "aspect-[3.2/1]" : kind === "background" ? "aspect-[2.1/1]" : "aspect-square";
+  const gridClass = kind === "icon" ? "grid-cols-4 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-3";
+  const kindLabel = kind === "cover" ? "banner" : kind === "background" ? "backdrop" : "badge";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -79,7 +80,7 @@ export function ImageLibraryDialog({
         <DialogHeader>
           <DialogTitle>Choose from previous uploads</DialogTitle>
           <DialogDescription>
-            Reuse a {kind === "cover" ? "banner" : "badge"} image you&apos;ve already uploaded
+            Reuse a {kindLabel} image you&apos;ve already uploaded
             elsewhere, or close this and upload a new one instead.
           </DialogDescription>
         </DialogHeader>

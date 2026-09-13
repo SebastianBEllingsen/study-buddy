@@ -6,9 +6,17 @@ import {
   setAutoOpenGeneratedItems,
   setGoogleClientCredentials,
   setHomeWidgets,
+  setAppBranding,
   HOME_WIDGET_IDS,
 } from "@/lib/models";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
+import { FONT_CHOICES } from "@/lib/fontChoices";
+import { isValidPageBackgroundImage } from "@/lib/dataUrlImage";
+
+// Same reasoning/cap family as course customization's icon image (see
+// api/courses/[courseId]/route.ts) — the app icon plays the same "small
+// square badge" role, just at the app level instead of per-course.
+const MAX_APP_ICON_IMAGE_LENGTH = 1_500_000;
 
 const VALID_BACKENDS: AiBackend[] = [
   "api",
@@ -107,6 +115,55 @@ export async function POST(request: Request) {
       );
     }
     await setHomeWidgets(widgets);
+  }
+
+  const branding: Parameters<typeof setAppBranding>[0] = {};
+  if ("appName" in body) {
+    if (body.appName !== null && (typeof body.appName !== "string" || body.appName.length > 60)) {
+      return Response.json({ error: "appName must be a string up to 60 characters, or null" }, { status: 400 });
+    }
+    branding.appName = typeof body.appName === "string" ? body.appName.trim() || null : null;
+  }
+  if ("appIcon" in body) {
+    // A handful of grapheme clusters at most — plenty for an emoji, even a
+    // multi-codepoint one — same bound as a course's own icon field.
+    if (body.appIcon !== null && (typeof body.appIcon !== "string" || body.appIcon.length > 16)) {
+      return Response.json({ error: "appIcon must be a short string, or null" }, { status: 400 });
+    }
+    branding.appIcon = body.appIcon;
+  }
+  if ("appIconImage" in body) {
+    if (
+      body.appIconImage !== null &&
+      (typeof body.appIconImage !== "string" ||
+        !body.appIconImage.startsWith("data:image/") ||
+        body.appIconImage.length > MAX_APP_ICON_IMAGE_LENGTH)
+    ) {
+      return Response.json({ error: "Invalid appIconImage" }, { status: 400 });
+    }
+    branding.appIconImage = body.appIconImage;
+  }
+  if ("appFont" in body) {
+    const validKeys = FONT_CHOICES.map((f) => f.key) as string[];
+    if (body.appFont !== null && !validKeys.includes(body.appFont)) {
+      return Response.json(
+        { error: `appFont must be one of: ${validKeys.join(", ")}, or null` },
+        { status: 400 }
+      );
+    }
+    branding.appFont = body.appFont;
+  }
+  if ("dashboardBackgroundImage" in body) {
+    if (
+      body.dashboardBackgroundImage !== null &&
+      !isValidPageBackgroundImage(body.dashboardBackgroundImage)
+    ) {
+      return Response.json({ error: "Invalid dashboard backdrop image" }, { status: 400 });
+    }
+    branding.dashboardBackgroundImage = body.dashboardBackgroundImage;
+  }
+  if (Object.keys(branding).length > 0) {
+    await setAppBranding(branding);
   }
 
   return Response.json(await getAppSettings());

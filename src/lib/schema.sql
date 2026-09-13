@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS recent_views (
 -- filesystem dependency, syncs cleanly with the Supabase backend.
 CREATE TABLE IF NOT EXISTS uploaded_images (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL, -- 'icon' | 'cover' — same aspect-ratio split as CustomizeCourseDialog
+  kind TEXT NOT NULL, -- 'icon' | 'cover' | 'background' — same aspect-ratio split as CustomizeCourseDialog
   data_url TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

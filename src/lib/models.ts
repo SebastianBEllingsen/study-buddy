@@ -36,6 +36,7 @@ export interface Course {
   color: string | null;
   cover_image: string | null;
   icon_image: string | null;
+  page_background_image: string | null;
   show_cover_on_card: boolean;
   show_icon_frame: boolean;
   created_at: string;
@@ -51,6 +52,8 @@ export interface Folder {
   // nesting only — a subfolder's own parent_folder_id is always null, and
   // createFolder rejects nesting a subfolder under another subfolder.
   parent_folder_id: number | null;
+  icon: string | null;
+  color: string | null;
   created_at: string;
 }
 
@@ -137,6 +140,11 @@ interface SettingsRow {
   google_token_expiry: string | null;
   home_widgets: string | null;
   auto_open_generated_items: boolean;
+  app_name: string | null;
+  app_icon: string | null;
+  app_icon_image: string | null;
+  app_font: string | null;
+  dashboard_background_image: string | null;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -155,6 +163,11 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       google_token_expiry: app_settings.google_token_expiry,
       home_widgets: app_settings.home_widgets,
       auto_open_generated_items: app_settings.auto_open_generated_items,
+      app_name: app_settings.app_name,
+      app_icon: app_settings.app_icon,
+      app_icon_image: app_settings.app_icon_image,
+      app_font: app_settings.app_font,
+      dashboard_background_image: app_settings.dashboard_background_image,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -224,6 +237,21 @@ export interface AppSettings {
   // generation_notifications row is created instead — see
   // createGenerationNotification and the generate route.
   autoOpenGeneratedItems: boolean;
+  // App-wide rebrand — all null means the built-in "Study Buddy" identity.
+  // appIcon is a single emoji; appIconImage is an uploaded image data URL
+  // (same icon/icon_image split as course customization) and takes priority
+  // over appIcon when both are set, matching that same priority order.
+  appName: string | null;
+  appIcon: string | null;
+  appIconImage: string | null;
+  // A key into the curated font list (see lib/fontChoices.ts — kept out of
+  // this server-only file so client components can import the list without
+  // pulling in the DB layer) — null means "use whichever font the active
+  // appearance theme already picks."
+  appFont: string | null;
+  // A Steam-library-style full-bleed backdrop behind the home dashboard —
+  // same idea/shape as a course's own page_background_image, just app-wide.
+  dashboardBackgroundImage: string | null;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -241,6 +269,11 @@ export async function getAppSettings(): Promise<AppSettings> {
     hasCalendarFeeds: feeds.length > 0,
     homeWidgets: parseHomeWidgets(row?.home_widgets ?? null),
     autoOpenGeneratedItems: row?.auto_open_generated_items ?? true,
+    appName: row?.app_name ?? null,
+    appIcon: row?.app_icon ?? null,
+    appIconImage: row?.app_icon_image ?? null,
+    appFont: row?.app_font ?? null,
+    dashboardBackgroundImage: row?.dashboard_background_image ?? null,
   };
 }
 
@@ -255,6 +288,28 @@ export async function setAutoOpenGeneratedItems(autoOpen: boolean): Promise<void
   await db
     .update(app_settings)
     .set({ auto_open_generated_items: autoOpen, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+// `undefined` fields are left untouched; pass `null` explicitly to clear a
+// field back to the built-in default, same convention as
+// updateCourseCustomization.
+export async function setAppBranding(fields: {
+  appName?: string | null;
+  appIcon?: string | null;
+  appIconImage?: string | null;
+  appFont?: string | null;
+  dashboardBackgroundImage?: string | null;
+}): Promise<void> {
+  const values: Record<string, string | null> = {};
+  if ("appName" in fields) values.app_name = fields.appName ?? null;
+  if ("appIcon" in fields) values.app_icon = fields.appIcon ?? null;
+  if ("appIconImage" in fields) values.app_icon_image = fields.appIconImage ?? null;
+  if ("appFont" in fields) values.app_font = fields.appFont ?? null;
+  if ("dashboardBackgroundImage" in fields) values.dashboard_background_image = fields.dashboardBackgroundImage ?? null;
+  await db
+    .update(app_settings)
+    .set({ ...values, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -514,7 +569,7 @@ export async function listRecentViews(limit = 8): Promise<RecentView[]> {
 // browsable so picking a badge/banner doesn't always mean uploading fresh
 // from disk.
 
-export type UploadedImageKind = "icon" | "cover";
+export type UploadedImageKind = "icon" | "cover" | "background";
 
 export interface UploadedImage {
   id: number;
@@ -563,6 +618,7 @@ export interface Note {
   position: number;
   title: string;
   markdown: string;
+  icon: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -626,6 +682,10 @@ export async function renameNote(id: number, title: string): Promise<void> {
 
 export async function updateNoteMarkdown(id: number, markdown: string): Promise<void> {
   await db.update(notes).set({ markdown, updated_at: nowUtc() }).where(eq(notes.id, id));
+}
+
+export async function updateNoteIcon(id: number, icon: string | null): Promise<void> {
+  await db.update(notes).set({ icon, updated_at: nowUtc() }).where(eq(notes.id, id));
 }
 
 // Lands at the end of the destination folder — same as moveDocument.
@@ -771,6 +831,11 @@ export interface HomeWidgetConfig {
   row: number;
   colSpan: number;
   rowSpan: number;
+  // A user-chosen display name overriding the widget's default title — e.g.
+  // renaming "Assignments" to "Reading list" once it's just tracking
+  // whatever feed(s) you've pointed it at. undefined/omitted falls back to
+  // that widget's built-in default label (see WIDGET_DEFAULT_LABELS).
+  label?: string;
 }
 
 // A sensible starting layout: streak/due as compact tiles side by side,
@@ -816,6 +881,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
             row?: unknown;
             colSpan?: unknown;
             rowSpan?: unknown;
+            label?: unknown;
           } => w && typeof w.id === "string" && HOME_WIDGET_IDS.includes(w.id as HomeWidgetId) && typeof w.enabled === "boolean"
         )
         .map((w) => {
@@ -828,6 +894,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
             ? (w as { col: number; row: number; colSpan: number; rowSpan: number })
             : defaultFor(w.id);
           const zone: HomeWidgetZone = w.zone === "bottom" ? "bottom" : "top";
+          const label = typeof w.label === "string" && w.label.trim() ? w.label.trim() : undefined;
           return [
             w.id,
             {
@@ -838,6 +905,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
               row: layout.row,
               colSpan: layout.colSpan,
               rowSpan: layout.rowSpan,
+              label,
             } satisfies HomeWidgetConfig,
           ];
         })
@@ -904,6 +972,7 @@ export async function updateCourseCustomization(
     color?: string | null;
     cover_image?: string | null;
     icon_image?: string | null;
+    page_background_image?: string | null;
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
   }
@@ -979,6 +1048,14 @@ export async function getMasterFolder(courseId: number): Promise<Folder> {
 
 export async function renameFolder(id: number, name: string): Promise<void> {
   await db.update(folders).set({ name }).where(eq(folders.id, id));
+}
+
+// Same `undefined`-skip/`null`-clears convention as updateCourseCustomization.
+export async function updateFolderCustomization(
+  id: number,
+  fields: { icon?: string | null; color?: string | null }
+): Promise<void> {
+  await db.update(folders).set(fields).where(eq(folders.id, id));
 }
 
 // Drag-and-drop "nest under this folder" — used by dropping one folder

@@ -1,15 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono, Source_Serif_4, Space_Grotesk, Spectral, IBM_Plex_Sans, Lato } from "next/font/google";
-import { BookOpen, Calendar } from "lucide-react";
+import { Calendar } from "lucide-react";
 import SearchDialog from "@/components/SearchDialog";
 import SettingsDialog from "@/components/SettingsDialog";
 import HelpDialog from "@/components/HelpDialog";
 import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
 import SWRProvider from "@/components/SWRProvider";
+import AppBranding from "@/components/AppBranding";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
+import { getAppSettings } from "@/lib/models";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -67,15 +69,24 @@ const lato = Lato({
 // AppThemeProvider.tsx, which keeps this list of valid values in sync.
 const APP_THEME_SCRIPT = `try{var t=localStorage.getItem('studybuddy-app-theme');if(t==='gamified'||t==='mono'||t==='sepia'||t==='blueprint'||t==='canvas')document.documentElement.setAttribute('data-app-theme',t)}catch(e){}`;
 
-export const metadata: Metadata = {
-  title: "Study Buddy",
-  description: "Generate notes, quizzes, and flashcards from your course PDFs.",
-};
+// Server-rendered (not just a client fetch) so a renamed/rebranded app
+// shows its real title and favicon on the very first response — see
+// AppBranding.tsx for how the header wordmark stays live after that.
+export async function generateMetadata(): Promise<Metadata> {
+  const settings = await getAppSettings();
+  return {
+    title: settings.appName || "Study Buddy",
+    description: "Generate notes, quizzes, and flashcards from your course PDFs.",
+    icons: settings.appIcon || settings.appIconImage ? { icon: "/api/app-icon" } : undefined,
+  };
+}
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const settings = await getAppSettings();
   return (
     <html
       lang="en"
+      data-app-font={settings.appFont ?? undefined}
       className={`${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable} ${spaceGrotesk.variable} ${spectral.variable} ${ibmPlexSans.variable} ${lato.variable} h-full antialiased`}
       suppressHydrationWarning
     >
@@ -92,10 +103,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                   the whole app into a fixed-height/nested-scroll shell. */}
               <header className="sticky top-0 z-40 shrink-0 border-b bg-card">
                 <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-                  <Link href="/" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
-                    <BookOpen className="size-5" />
-                    Study Buddy
-                  </Link>
+                  <AppBranding
+                    initial={{
+                      appName: settings.appName,
+                      appIcon: settings.appIcon,
+                      appIconImage: settings.appIconImage,
+                    }}
+                  />
                   <div className="flex items-center gap-2">
                     <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
                       <Calendar className="size-3.5" />

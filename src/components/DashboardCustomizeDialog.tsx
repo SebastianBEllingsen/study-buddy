@@ -2,7 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { EyeOff, GripVertical, Plus } from "lucide-react";
+import { EyeOff, GripVertical, Pencil, Plus } from "lucide-react";
 import { cn } from "cn";
 import type { HomeWidgetConfig, HomeWidgetId, HomeWidgetZone } from "@/lib/models";
 import { HOME_WIDGET_META } from "@/lib/homeWidgetMeta";
@@ -41,6 +41,77 @@ function pointInRect(x: number, y: number, rect: DOMRect): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+// A pencil button that swaps for an inline text field in place — e.g. the
+// Assignments widget renamed to "Reading list" once it's just tracking
+// whatever feed(s) it's pointed at, not literally assignments. Committing
+// an empty/unchanged value clears the override (falls back to the widget's
+// built-in default name) rather than saving a blank label.
+function RenameButton({
+  label,
+  defaultLabel,
+  onRename,
+  className,
+}: {
+  label: string;
+  defaultLabel: string;
+  onRename: (next: string | null) => void;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        placeholder={defaultLabel}
+        onChange={(e) => setDraft(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const trimmed = draft.trim();
+            onRename(trimmed && trimmed !== defaultLabel ? trimmed : null);
+            setEditing(false);
+          }
+          if (e.key === "Escape") {
+            setDraft(label);
+            setEditing(false);
+          }
+        }}
+        onBlur={() => {
+          const trimmed = draft.trim();
+          onRename(trimmed && trimmed !== defaultLabel ? trimmed : null);
+          setEditing(false);
+        }}
+        className={cn(
+          "h-6 w-28 rounded-md border bg-background px-1.5 text-xs shadow-sm focus:outline-none",
+          className
+        )}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setDraft(label);
+        setEditing(true);
+      }}
+      aria-label={`Rename ${label}`}
+      className={cn(
+        "flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-80 backdrop-blur-sm hover:opacity-100",
+        className
+      )}
+    >
+      <Pencil className="size-3.5" />
+    </button>
+  );
+}
+
 function WidgetTile({
   widget,
   children,
@@ -48,6 +119,7 @@ function WidgetTile({
   onMoveStart,
   onResizeStart,
   onHide,
+  onRename,
 }: {
   widget: HomeWidgetConfig;
   children: ReactNode;
@@ -55,8 +127,10 @@ function WidgetTile({
   onMoveStart: (e: React.PointerEvent) => void;
   onResizeStart: (e: React.PointerEvent) => void;
   onHide: () => void;
+  onRename: (label: string | null) => void;
 }) {
-  const { label } = HOME_WIDGET_META[widget.id];
+  const { label: defaultLabel } = HOME_WIDGET_META[widget.id];
+  const label = widget.label ?? defaultLabel;
   return (
     <div className={cn("dashboard-tile relative h-full touch-none", dimmed && "opacity-40")} style={tileGridStyle(widget)}>
       <div className="pointer-events-none h-full [&_a]:pointer-events-none">{children}</div>
@@ -76,6 +150,12 @@ function WidgetTile({
       >
         <EyeOff className="size-3.5" />
       </button>
+      <RenameButton
+        label={label}
+        defaultLabel={defaultLabel}
+        onRename={onRename}
+        className="absolute bottom-1.5 left-1.5"
+      />
       <button
         type="button"
         onPointerDown={onResizeStart}
@@ -94,12 +174,15 @@ function HiddenChip({
   widget,
   onMoveStart,
   onShow,
+  onRename,
 }: {
   widget: HomeWidgetConfig;
   onMoveStart: (e: React.PointerEvent) => void;
   onShow: () => void;
+  onRename: (label: string | null) => void;
 }) {
-  const { label, icon: Icon } = HOME_WIDGET_META[widget.id];
+  const { label: defaultLabel, icon: Icon } = HOME_WIDGET_META[widget.id];
+  const label = widget.label ?? defaultLabel;
   return (
     <div
       onPointerDown={onMoveStart}
@@ -107,6 +190,12 @@ function HiddenChip({
     >
       <Icon className="size-3.5" />
       {label}
+      <RenameButton
+        label={label}
+        defaultLabel={defaultLabel}
+        onRename={onRename}
+        className="size-4 bg-transparent p-0 opacity-100 backdrop-blur-none hover:bg-muted hover:text-foreground"
+      />
       <button
         type="button"
         onClick={onShow}
@@ -131,6 +220,7 @@ function ZoneGrid({
   onMoveStart,
   onResizeStart,
   onHide,
+  onRename,
   renderContent,
   emptyLabel,
 }: {
@@ -142,6 +232,7 @@ function ZoneGrid({
   onMoveStart: (e: React.PointerEvent, widget: HomeWidgetConfig) => void;
   onResizeStart: (e: React.PointerEvent, widget: HomeWidgetConfig) => void;
   onHide: (id: HomeWidgetId) => void;
+  onRename: (id: HomeWidgetId, label: string | null) => void;
   renderContent: (widget: HomeWidgetConfig) => ReactNode;
   emptyLabel: string;
 }) {
@@ -159,6 +250,7 @@ function ZoneGrid({
           onMoveStart={(e) => onMoveStart(e, widget)}
           onResizeStart={(e) => onResizeStart(e, widget)}
           onHide={() => onHide(widget.id)}
+          onRename={(label) => onRename(widget.id, label)}
         >
           {renderContent(widget)}
         </WidgetTile>
@@ -297,6 +389,10 @@ export function DashboardCustomizeDialog({
 
   const ghostWidget = ghost ? widgets.find((w) => w.id === ghost.id) : null;
 
+  function handleRename(id: HomeWidgetId, label: string | null) {
+    onChange(widgets.map((w) => (w.id === id ? { ...w, label: label ?? undefined } : w)));
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl">
@@ -327,6 +423,7 @@ export function DashboardCustomizeDialog({
               }
               onResizeStart={startResize}
               onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
+              onRename={handleRename}
               renderContent={renderContent}
               emptyLabel="Nothing here — drag a widget up from Hidden."
             />
@@ -345,6 +442,7 @@ export function DashboardCustomizeDialog({
               }
               onResizeStart={startResize}
               onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
+              onRename={handleRename}
               renderContent={renderContent}
               emptyLabel="Nothing here — drag a widget down from Hidden or from the grid above."
             />
@@ -360,6 +458,7 @@ export function DashboardCustomizeDialog({
                   widget={widget}
                   onMoveStart={(e) => startMove(e, widget, null)}
                   onShow={() => onChange(moveWidgetTo(widgets, widget.id, 0, 0))}
+                  onRename={(label) => handleRename(widget.id, label)}
                 />
               ))}
             </div>

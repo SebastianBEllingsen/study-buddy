@@ -523,9 +523,11 @@ function upcomingMaxResultsFor(layout: WidgetLayout): number {
 function UpcomingEventsWidget({
   connected,
   layout,
+  label,
 }: {
   connected: boolean;
   layout: WidgetLayout;
+  label?: string;
 }) {
   const maxResults = upcomingMaxResultsFor(layout);
   // The list's date/time columns need more room than a narrow tile has —
@@ -589,7 +591,7 @@ function UpcomingEventsWidget({
       <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <CalendarDays className="size-4 text-focus" />
-          Upcoming
+          {label ?? "Upcoming"}
         </span>
         <Link href="/calendar" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
           Open calendar
@@ -650,9 +652,11 @@ function UpcomingEventsWidget({
 function AssignmentsWidget({
   feeds,
   layout,
+  label,
 }: {
   feeds: CalendarFeed[] | null;
   layout: WidgetLayout;
+  label?: string;
 }) {
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data: eventsData, error: fetchError } = useSWR<{ events: UpcomingCalendarEvent[] }>(
@@ -697,7 +701,7 @@ function AssignmentsWidget({
       <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
         <ListChecks className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
         <p className="text-xs text-muted-foreground">
-          {compact ? "Add a feed" : "Add a calendar feed in Settings to track assignments here."}
+          {compact ? "Add a feed" : "Add a calendar feed in Settings to track it here."}
         </p>
       </Card>
     );
@@ -730,7 +734,7 @@ function AssignmentsWidget({
       <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <ListChecks className="size-4 text-focus" />
-          Assignments
+          {label ?? "Assignments"}
         </span>
       </div>
       <div className="scrollbar-hover min-h-0 flex-1 overflow-y-auto">
@@ -819,7 +823,7 @@ function formatRelativeTime(utcString: string): string {
   return new Date(then).toLocaleDateString();
 }
 
-function RecentActivityWidget({ layout }: { layout: WidgetLayout }) {
+function RecentActivityWidget({ layout, label }: { layout: WidgetLayout; label?: string }) {
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data, error: fetchError } = useSWR<{ views: RecentView[] }>("/api/recent-views");
   const views = data?.views ?? null;
@@ -852,7 +856,7 @@ function RecentActivityWidget({ layout }: { layout: WidgetLayout }) {
       <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <Clock className="size-4 text-focus" />
-          Recent activity
+          {label ?? "Recent activity"}
         </span>
       </div>
       <div className="scrollbar-hover min-h-0 flex-1 overflow-y-auto">
@@ -1058,12 +1062,13 @@ function HomePageContent() {
             key="calendar"
             connected={!!settings?.googleCalendarConnected || !!settings?.hasCalendarFeeds}
             layout={layout}
+            label={widget.label}
           />
         );
       case "assignments":
-        return <AssignmentsWidget key="assignments" feeds={feeds} layout={layout} />;
+        return <AssignmentsWidget key="assignments" feeds={feeds} layout={layout} label={widget.label} />;
       case "recent":
-        return <RecentActivityWidget key="recent" layout={layout} />;
+        return <RecentActivityWidget key="recent" layout={layout} label={widget.label} />;
     }
   }
 
@@ -1071,6 +1076,21 @@ function HomePageContent() {
   const bottomWidgets = settings?.homeWidgets.filter((w) => w.enabled && w.zone === "bottom") ?? [];
 
   return (
+    <>
+      {settings?.dashboardBackgroundImage && (
+        // Same full-bleed, Steam-library-style treatment as a course page's
+        // page_background_image — see courses/[courseId]/page.tsx — just
+        // purely atmospheric here (no title/breadcrumb overlaid) since
+        // "Your dashboard" already renders in normal flow right below it.
+        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
+          <div
+            className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
+            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}
+          >
+            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10" />
+          </div>
+        </div>
+      )}
     <div className="space-y-6">
       {settings && (
         <div className="space-y-2">
@@ -1172,6 +1192,7 @@ function HomePageContent() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

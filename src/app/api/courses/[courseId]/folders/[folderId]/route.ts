@@ -4,6 +4,7 @@ import {
   deleteFolder,
   nestFolder,
   renameFolder,
+  updateFolderCustomization,
 } from "@/lib/models";
 
 type Params = { params: Promise<{ courseId: string; folderId: string }> };
@@ -21,6 +22,24 @@ export async function PATCH(request: Request, { params }: Params) {
       }
       throw err;
     }
+    return Response.json({ ok: true });
+  }
+
+  if ("icon" in body || "color" in body) {
+    const customization: { icon?: string | null; color?: string | null } = {};
+    if ("icon" in body) {
+      if (body.icon !== null && (typeof body.icon !== "string" || body.icon.length > 16)) {
+        return Response.json({ error: "Invalid icon" }, { status: 400 });
+      }
+      customization.icon = body.icon;
+    }
+    if ("color" in body) {
+      if (body.color !== null && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
+        return Response.json({ error: "Invalid color" }, { status: 400 });
+      }
+      customization.color = body.color;
+    }
+    await updateFolderCustomization(Number(folderId), customization);
     return Response.json({ ok: true });
   }
 

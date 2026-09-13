@@ -8,7 +8,7 @@ import {
   renameCourse,
   updateCourseCustomization,
 } from "@/lib/models";
-import { isValidCoverImage, isValidIconImage } from "@/lib/dataUrlImage";
+import { isValidCoverImage, isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
 
 type Params = { params: Promise<{ courseId: string }> };
 
@@ -46,6 +46,7 @@ export async function PATCH(request: Request, { params }: Params) {
     color?: string | null;
     cover_image?: string | null;
     icon_image?: string | null;
+    page_background_image?: string | null;
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
   } = {};
@@ -74,6 +75,12 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid icon image" }, { status: 400 });
     }
     customization.icon_image = body.icon_image;
+  }
+  if ("page_background_image" in body) {
+    if (body.page_background_image !== null && !isValidPageBackgroundImage(body.page_background_image)) {
+      return Response.json({ error: "Invalid page background image" }, { status: 400 });
+    }
+    customization.page_background_image = body.page_background_image;
   }
   if ("show_cover_on_card" in body) {
     if (typeof body.show_cover_on_card !== "boolean") {

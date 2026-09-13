@@ -41,6 +41,7 @@ import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
+import { FolderCustomizePopover } from "@/components/FolderCustomizePopover";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -576,7 +577,11 @@ function NoteList({
             className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
           >
             <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
-            <StickyNote className="size-3.5 shrink-0 text-sage/70" />
+            {note.icon ? (
+              <span className="shrink-0 text-sm leading-none">{note.icon}</span>
+            ) : (
+              <StickyNote className="size-3.5 shrink-0 text-sage/70" />
+            )}
             <Link
               href={`/vault/${note.id}`}
               draggable={false}
@@ -718,6 +723,7 @@ function FolderCard({
   onCreateNote,
   onDeleteFolder,
   onRenameFolder,
+  onCustomizeFolder,
   onReorder,
   onReorderDocuments,
   onReorderItems,
@@ -749,6 +755,7 @@ function FolderCard({
   onCreateNote: (folderId: number, title: string) => void;
   onDeleteFolder: (folderId: number) => Promise<void>;
   onRenameFolder: (folderId: number, name: string) => Promise<void>;
+  onCustomizeFolder: (folderId: number, fields: { icon?: string | null; color?: string | null }) => void;
   onReorder: (draggedFolderId: number, targetFolderId: number) => void;
   onReorderDocuments: (folderId: number, orderedIds: number[]) => void;
   onReorderItems: (folderId: number, orderedIds: number[]) => void;
@@ -899,7 +906,14 @@ function FolderCard({
                   onDragLeave={() => setNameDragOver(false)}
                   onDrop={handleNameAreaDrop}
                 >
-                  <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+                  {folder.icon ? (
+                    <span className="shrink-0 text-sm leading-none">{folder.icon}</span>
+                  ) : (
+                    <FolderIcon
+                      className="size-4 shrink-0 text-muted-foreground"
+                      style={folder.color ? { color: folder.color } : undefined}
+                    />
+                  )}
                   {renaming ? (
                     <Input
                       autoFocus
@@ -972,6 +986,9 @@ function FolderCard({
                 >
                   <Plus className="size-3.5 text-muted-foreground" />
                 </Button>
+              )}
+              {!renaming && (
+                <FolderCustomizePopover folder={folder} onCustomize={onCustomizeFolder} />
               )}
               {!renaming && (
                 <Button
@@ -1083,6 +1100,7 @@ function FolderCard({
                     onCreateNote={onCreateNote}
                     onDeleteFolder={onDeleteFolder}
                     onRenameFolder={onRenameFolder}
+                    onCustomizeFolder={onCustomizeFolder}
                     onReorder={onReorder}
                     onReorderDocuments={onReorderDocuments}
                     onReorderItems={onReorderItems}
@@ -1524,6 +1542,18 @@ export default function CoursePage() {
     refresh();
   }
 
+  async function handleCustomizeFolder(
+    folderId: number,
+    fields: { icon?: string | null; color?: string | null }
+  ) {
+    await fetch(`/api/courses/${courseId}/folders/${folderId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    refresh();
+  }
+
   async function handleDeleteDocument(documentId: number) {
     await fetch(`/api/courses/${courseId}/documents/${documentId}`, { method: "DELETE" });
     refresh();
@@ -1830,7 +1860,67 @@ export default function CoursePage() {
     : null;
 
   return (
+    <>
+      {detail.course.page_background_image && (
+        // Full-bleed, Steam-library-style backdrop — breaks out of the
+        // centered max-w-5xl column on purpose (the only element on this
+        // page that does) so it reads as atmosphere behind the page rather
+        // than a banner inside it. Takes over the hero role that the small
+        // contained cover_image banner plays below when there's no backdrop,
+        // rather than showing both at once.
+        <div className="relative left-1/2 -mx-[50vw] right-1/2 w-screen">
+          <div
+            className="relative h-64 overflow-hidden bg-cover bg-center sm:h-80"
+            style={{ backgroundImage: `url(${detail.course.page_background_image})` }}
+          >
+            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-black/10" />
+            <div className="relative mx-auto flex h-full max-w-5xl flex-col justify-end gap-2 px-4 pb-5 sm:px-6">
+              <Breadcrumb>
+                <BreadcrumbList>
+                  <BreadcrumbItem>
+                    <BreadcrumbLink render={<Link href="/" />} className="text-white/70 hover:text-white">
+                      Study Buddy
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="text-white/50" />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage className="text-white/90">{detail.course.name}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </BreadcrumbList>
+              </Breadcrumb>
+              <div className="flex items-center gap-2">
+                {detail.course.icon_image ? (
+                  <div
+                    className={`size-9 shrink-0 bg-center ${
+                      detail.course.show_icon_frame
+                        ? "rounded-lg border border-white/20 bg-cover bg-white/10"
+                        : "bg-contain"
+                    }`}
+                    style={{ backgroundImage: `url(${detail.course.icon_image})` }}
+                  />
+                ) : (
+                  detail.course.icon && (
+                    <span className="text-2xl drop-shadow-sm">{detail.course.icon}</span>
+                  )
+                )}
+                <h1 className="font-heading text-2xl font-semibold tracking-tight text-white drop-shadow-sm sm:text-3xl">
+                  {detail.course.name}
+                </h1>
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onClick={() => setCustomizeOpen(true)}
+                  aria-label="Customize course"
+                >
+                  <Palette className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     <div className="space-y-8">
+      {!detail.course.page_background_image && (
       <div className="space-y-1">
         {detail.course.cover_image && (
           <div
@@ -1900,6 +1990,7 @@ export default function CoursePage() {
           )}
         </div>
       </div>
+      )}
 
       <CustomizeCourseDialog
         course={detail.course}
@@ -2305,6 +2396,7 @@ export default function CoursePage() {
                 onCreateNote={handleCreateNote}
                 onDeleteFolder={handleDeleteFolder}
                 onRenameFolder={handleRenameFolder}
+                onCustomizeFolder={handleCustomizeFolder}
                 onReorder={handleReorderFolders}
                 onReorderDocuments={handleReorderDocuments}
                 onReorderItems={handleReorderItems}
@@ -2399,5 +2491,6 @@ export default function CoursePage() {
         onTidied={refresh}
       />
     </div>
+    </>
   );
 }

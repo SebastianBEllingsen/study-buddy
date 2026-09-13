@@ -317,6 +317,22 @@ function migrate(database: Database.Database) {
   if (!hasColumn("courses", "show_icon_frame")) {
     database.exec("ALTER TABLE courses ADD COLUMN show_icon_frame INTEGER NOT NULL DEFAULT 1");
   }
+  // A big, Steam-library-style backdrop behind the whole course page —
+  // deliberately a separate field from cover_image (the small header
+  // banner): a good banner crop (wide, short) and a good full-page
+  // background crop (tall, atmospheric) are rarely the same crop of the
+  // same photo.
+  if (!hasColumn("courses", "page_background_image")) {
+    database.exec("ALTER TABLE courses ADD COLUMN page_background_image TEXT");
+  }
+
+  // Same emoji+accent-color customization as courses, one level down.
+  if (!hasColumn("folders", "icon")) {
+    database.exec("ALTER TABLE folders ADD COLUMN icon TEXT");
+  }
+  if (!hasColumn("folders", "color")) {
+    database.exec("ALTER TABLE folders ADD COLUMN color TEXT");
+  }
 
   if (!hasColumn("calendar_feeds", "show_on_calendar")) {
     database.exec("ALTER TABLE calendar_feeds ADD COLUMN show_on_calendar INTEGER NOT NULL DEFAULT 1");
@@ -333,6 +349,9 @@ function migrate(database: Database.Database) {
   }
   if (!hasColumn("notes", "position")) {
     database.exec("ALTER TABLE notes ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("notes", "icon")) {
+    database.exec("ALTER TABLE notes ADD COLUMN icon TEXT");
   }
   // Safe to run every startup — column is guaranteed to exist by this
   // point, whether from a fresh schema.sql or the ALTER TABLEs just above.
@@ -399,6 +418,28 @@ function migrate(database: Database.Database) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN auto_open_generated_items INTEGER NOT NULL DEFAULT 1"
     );
+  }
+  // App-wide rebrand: a custom name/icon (emoji and/or an uploaded image —
+  // same icon/icon_image split as course customization, see courses above)
+  // and a font pick independent of the appearance theme, so "which theme"
+  // and "which font" are two separate axes instead of the font being baked
+  // into the theme choice. All null = the built-in "Study Buddy" defaults.
+  if (!hasColumn("app_settings", "app_name")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN app_name TEXT");
+  }
+  if (!hasColumn("app_settings", "app_icon")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN app_icon TEXT");
+  }
+  if (!hasColumn("app_settings", "app_icon_image")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN app_icon_image TEXT");
+  }
+  if (!hasColumn("app_settings", "app_font")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN app_font TEXT");
+  }
+  // Same Steam-library-style full-page backdrop as a course page, applied
+  // to the home dashboard instead — see courses.page_background_image.
+  if (!hasColumn("app_settings", "dashboard_background_image")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN dashboard_background_image TEXT");
   }
 }
 

@@ -59,6 +59,11 @@ export const courses = pgTable("courses", {
   // directly on the course's own background instead of inside a box.
   // Defaults true so existing courses keep today's boxed look unchanged.
   show_icon_frame: boolean("show_icon_frame").notNull().default(true),
+  // A big, Steam-library-style backdrop behind the whole course page — a
+  // separate field from cover_image because a good banner crop (wide,
+  // short) and a good full-page background crop (tall, atmospheric) are
+  // rarely the same crop of the same photo.
+  page_background_image: text("page_background_image"),
   created_at: text("created_at").notNull(),
 });
 
@@ -90,6 +95,16 @@ export const app_settings = pgTable("app_settings", {
   // See generation_notifications below — off means a finished generation is
   // recorded there instead of navigating straight to it.
   auto_open_generated_items: boolean("auto_open_generated_items").notNull().default(true),
+  // App-wide rebrand — a custom name/icon (emoji and/or an uploaded image,
+  // same icon/icon_image split as course customization above) and a font
+  // pick independent of the appearance theme (data-app-theme), so "which
+  // theme" and "which font" are two separate axes rather than the font
+  // being baked into the theme choice. All null = the built-in defaults.
+  app_name: text("app_name"),
+  app_icon: text("app_icon"),
+  app_icon_image: text("app_icon_image"),
+  app_font: text("app_font"),
+  dashboard_background_image: text("dashboard_background_image"),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -105,6 +120,8 @@ export const folders = pgTable("folders", {
   parent_folder_id: integer("parent_folder_id").references((): AnyPgColumn => folders.id, {
     onDelete: "cascade",
   }),
+  icon: text("icon"),
+  color: text("color"),
   created_at: text("created_at").notNull(),
 });
 
@@ -223,6 +240,7 @@ export const notes = pgTable("notes", {
   position: integer("position").notNull().default(0),
   title: text("title").notNull(),
   markdown: text("markdown").notNull().default(""),
+  icon: text("icon"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });

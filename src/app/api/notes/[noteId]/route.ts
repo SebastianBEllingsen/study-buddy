@@ -1,4 +1,12 @@
-import { deleteNote, getNote, getNoteBacklinks, moveNote, renameNote, updateNoteMarkdown } from "@/lib/models";
+import {
+  deleteNote,
+  getNote,
+  getNoteBacklinks,
+  moveNote,
+  renameNote,
+  updateNoteIcon,
+  updateNoteMarkdown,
+} from "@/lib/models";
 
 type Params = { params: Promise<{ noteId: string }> };
 
@@ -28,6 +36,12 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     if (Number.isInteger(body?.folderId)) {
       await moveNote(id, body.folderId);
+    }
+    if ("icon" in body) {
+      if (body.icon !== null && (typeof body.icon !== "string" || body.icon.length > 16)) {
+        return Response.json({ error: "Invalid icon" }, { status: 400 });
+      }
+      await updateNoteIcon(id, body.icon);
     }
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Couldn't update note" }, { status: 409 });

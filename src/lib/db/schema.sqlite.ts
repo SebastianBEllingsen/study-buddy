@@ -36,6 +36,7 @@ export const courses = sqliteTable("courses", {
   icon_image: text("icon_image"),
   show_cover_on_card: integer("show_cover_on_card", { mode: "boolean" }).notNull().default(false),
   show_icon_frame: integer("show_icon_frame", { mode: "boolean" }).notNull().default(true),
+  page_background_image: text("page_background_image"),
   created_at: text("created_at").notNull(),
 });
 
@@ -61,6 +62,12 @@ export const app_settings = sqliteTable("app_settings", {
   auto_open_generated_items: integer("auto_open_generated_items", { mode: "boolean" })
     .notNull()
     .default(true),
+  // App-wide rebrand — see the matching columns/comment in schema.pg.ts.
+  app_name: text("app_name"),
+  app_icon: text("app_icon"),
+  app_icon_image: text("app_icon_image"),
+  app_font: text("app_font"),
+  dashboard_background_image: text("dashboard_background_image"),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -80,6 +87,8 @@ export const folders = sqliteTable("folders", {
   parent_folder_id: integer("parent_folder_id").references((): AnySQLiteColumn => folders.id, {
     onDelete: "cascade",
   }),
+  icon: text("icon"),
+  color: text("color"),
   created_at: text("created_at").notNull(),
 });
 
@@ -205,6 +214,7 @@ export const notes = sqliteTable("notes", {
   position: integer("position").notNull().default(0),
   title: text("title").notNull(),
   markdown: text("markdown").notNull().default(""),
+  icon: text("icon"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });

@@ -735,3 +735,33 @@ li .katex {
 .scrollbar-hover:hover::-webkit-scrollbar-thumb {
   background: var(--border);
 }
+
+/* A user's font pick (Settings → Appearance) is a second, independent axis
+   from the appearance theme above — every theme already redefines
+   --heading-font for its own look, so these rules have to come after all of
+   them in source order to win the (otherwise tied) specificity, letting any
+   font override any theme. Body text (--font-sans) is deliberately left
+   alone here, matching how the built-in themes already only ever restyle
+   headings, not paragraph text — see AppFontProvider.tsx for the blocking
+   script that sets data-app-font before first paint. */
+:root[data-app-font="sans"] {
+  --heading-font: var(--font-geist-sans);
+}
+:root[data-app-font="serif"] {
+  --heading-font: var(--font-source-serif);
+}
+:root[data-app-font="grotesk"] {
+  --heading-font: var(--font-space-grotesk);
+}
+:root[data-app-font="spectral"] {
+  --heading-font: var(--font-spectral);
+}
+:root[data-app-font="plex"] {
+  --heading-font: var(--font-ibm-plex-sans);
+}
+:root[data-app-font="lato"] {
+  --heading-font: var(--font-lato);
+}
+:root[data-app-font="mono"] {
+  --heading-font: var(--font-geist-mono);
+}

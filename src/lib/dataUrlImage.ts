@@ -23,6 +23,9 @@ export function parseDataUrlImage(
 // size.
 export const MAX_COVER_IMAGE_LENGTH = 2_000_000;
 export const MAX_ICON_IMAGE_LENGTH = 1_500_000;
+// A full-bleed page backdrop (Steam-library-style) covers far more pixels
+// than the small cover banner, so it gets its own, looser cap.
+export const MAX_PAGE_BACKGROUND_IMAGE_LENGTH = 4_000_000;
 
 export function isValidCoverImage(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_COVER_IMAGE_LENGTH;
@@ -30,4 +33,12 @@ export function isValidCoverImage(value: unknown): value is string {
 
 export function isValidIconImage(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_ICON_IMAGE_LENGTH;
+}
+
+export function isValidPageBackgroundImage(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.startsWith("data:image/") &&
+    value.length <= MAX_PAGE_BACKGROUND_IMAGE_LENGTH
+  );
 }

@@ -16,33 +16,18 @@ import {
 } from "@/components/ui/dialog";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { ICON_CHOICES, COLOR_CHOICES } from "@/lib/pickerChoices";
+import {
+  ICON_ASPECT,
+  ICON_OUTPUT,
+  COVER_ASPECT,
+  COVER_OUTPUT_WIDTH,
+  COVER_OUTPUT_HEIGHT,
+  BACKGROUND_ASPECT,
+  BACKGROUND_OUTPUT_WIDTH,
+  BACKGROUND_OUTPUT_HEIGHT,
+} from "@/lib/imageCropPresets";
 import type { Course, UploadedImageKind } from "@/lib/models";
-
-// Icon is the small square badge (home course card, course header); cover is
-// the wide Notion-style banner on the course detail page. Kept as separate
-// fields (see schema.pg.ts) because the same source photo usually needs a
-// different crop for each shape.
-const ICON_ASPECT = 1;
-const ICON_OUTPUT = 240;
-const COVER_ASPECT = 3.2;
-const COVER_OUTPUT_WIDTH = 1280;
-const COVER_OUTPUT_HEIGHT = Math.round(COVER_OUTPUT_WIDTH / COVER_ASPECT);
-
-const ICON_CHOICES = [
-  "📚", "📖", "✏️", "🧮", "🧪", "🔬", "🧬", "💻",
-  "🖥️", "🌐", "⚖️", "🏛️", "🎨", "🎵", "🗣️", "📈",
-  "💰", "🧠", "🩺", "⚙️", "🔐", "🚀", "🌍", "📐",
-];
-
-// The app's own accent palette (see globals.css) — keeps per-course color
-// picks harmonizing with the rest of the UI rather than clashing with it.
-// A native color input next to these covers anything more specific.
-const COLOR_CHOICES = [
-  { label: "Focus", value: "#2F6F68" },
-  { label: "Amber", value: "#C98A2C" },
-  { label: "Sage", value: "#4B8A63" },
-  { label: "Clay", value: "#C1554B" },
-];
 
 export function CustomizeCourseDialog({
   course,
@@ -59,14 +44,16 @@ export function CustomizeCourseDialog({
   const [color, setColor] = useState(course.color);
   const [coverImage, setCoverImage] = useState(course.cover_image);
   const [iconImage, setIconImage] = useState(course.icon_image);
+  const [backgroundImage, setBackgroundImage] = useState(course.page_background_image);
   const [showCoverOnCard, setShowCoverOnCard] = useState(course.show_cover_on_card);
   const [showIconFrame, setShowIconFrame] = useState(course.show_icon_frame);
   const [saving, setSaving] = useState(false);
-  const [cropTarget, setCropTarget] = useState<"icon" | "cover" | null>(null);
+  const [cropTarget, setCropTarget] = useState<"icon" | "cover" | "background" | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [libraryTarget, setLibraryTarget] = useState<UploadedImageKind | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const iconInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
 
   // Re-seeds drafts from the course the moment a fresh course id opens the
   // dialog, so a previous open's edits (or a cancel) never leak into a
@@ -80,6 +67,7 @@ export function CustomizeCourseDialog({
     setColor(course.color);
     setCoverImage(course.cover_image);
     setIconImage(course.icon_image);
+    setBackgroundImage(course.page_background_image);
     setShowCoverOnCard(course.show_cover_on_card);
     setShowIconFrame(course.show_icon_frame);
     setSeededFor(course.id);
@@ -88,6 +76,7 @@ export function CustomizeCourseDialog({
   function handleCropped(dataUrl: string) {
     if (cropTarget === "icon") setIconImage(dataUrl);
     else if (cropTarget === "cover") setCoverImage(dataUrl);
+    else if (cropTarget === "background") setBackgroundImage(dataUrl);
     if (cropTarget) {
       // Feeds the "Choose from previous uploads" gallery — fire-and-forget,
       // a failed write here shouldn't block using the image you just cropped.
@@ -102,6 +91,7 @@ export function CustomizeCourseDialog({
   function handlePickFromLibrary(dataUrl: string) {
     if (libraryTarget === "icon") setIconImage(dataUrl);
     else if (libraryTarget === "cover") setCoverImage(dataUrl);
+    else if (libraryTarget === "background") setBackgroundImage(dataUrl);
   }
 
   function handleRemoveCover() {
@@ -120,6 +110,7 @@ export function CustomizeCourseDialog({
           color,
           cover_image: coverImage,
           icon_image: iconImage,
+          page_background_image: backgroundImage,
           show_cover_on_card: showCoverOnCard,
           show_icon_frame: showIconFrame,
         }),
@@ -145,8 +136,8 @@ export function CustomizeCourseDialog({
         <DialogHeader>
           <DialogTitle>Customize course</DialogTitle>
           <DialogDescription>
-            Pick a badge image or emoji, add a cover banner, and choose a color, to make {course.name}{" "}
-            easier to spot at a glance.
+            Pick a badge image or emoji, add a cover banner and page backdrop, and choose a color, to
+            make {course.name} easier to spot at a glance.
           </DialogDescription>
         </DialogHeader>
 
@@ -320,6 +311,68 @@ export function CustomizeCourseDialog({
           </div>
 
           <div className="space-y-2">
+            <Label>Page backdrop</Label>
+            <p className="text-xs text-muted-foreground">
+              A large atmospheric background behind the whole course page, like a game&apos;s
+              library page — separate from the cover banner above.
+            </p>
+            <input
+              ref={backgroundInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setCropTarget("background");
+                  setCropFile(file);
+                }
+                e.target.value = "";
+              }}
+            />
+            {backgroundImage ? (
+              <div
+                className="relative h-24 rounded-lg border bg-cover bg-center"
+                style={{ backgroundImage: `url(${backgroundImage})` }}
+              >
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  className="absolute top-1.5 left-1.5"
+                  onClick={() => setLibraryTarget("background")}
+                  aria-label="Choose a different backdrop from previous uploads"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  className="absolute top-1.5 right-1.5"
+                  onClick={() => setBackgroundImage(null)}
+                  aria-label="Remove page backdrop"
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => backgroundInputRef.current?.click()}>
+                  <ImageIcon className="size-3.5" />
+                  Upload image
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setLibraryTarget("background")}
+                  aria-label="Choose a backdrop from previous uploads"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
             <Label>Color</Label>
             <div className="flex items-center gap-2">
               {COLOR_CHOICES.map((choice) => (
@@ -374,11 +427,17 @@ export function CustomizeCourseDialog({
           }
         }}
         file={cropFile}
-        aspect={cropTarget === "cover" ? COVER_ASPECT : ICON_ASPECT}
-        outputWidth={cropTarget === "cover" ? COVER_OUTPUT_WIDTH : ICON_OUTPUT}
-        outputHeight={cropTarget === "cover" ? COVER_OUTPUT_HEIGHT : ICON_OUTPUT}
+        aspect={cropTarget === "cover" ? COVER_ASPECT : cropTarget === "background" ? BACKGROUND_ASPECT : ICON_ASPECT}
+        outputWidth={cropTarget === "cover" ? COVER_OUTPUT_WIDTH : cropTarget === "background" ? BACKGROUND_OUTPUT_WIDTH : ICON_OUTPUT}
+        outputHeight={cropTarget === "cover" ? COVER_OUTPUT_HEIGHT : cropTarget === "background" ? BACKGROUND_OUTPUT_HEIGHT : ICON_OUTPUT}
         outputFormat={cropTarget === "icon" ? "png" : "jpeg"}
-        title={cropTarget === "cover" ? "Position cover banner" : "Position badge image"}
+        title={
+          cropTarget === "cover"
+            ? "Position cover banner"
+            : cropTarget === "background"
+              ? "Position page backdrop"
+              : "Position badge image"
+        }
         onCropped={handleCropped}
       />
       <ImageLibraryDialog
