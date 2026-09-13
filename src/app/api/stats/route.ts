@@ -1,9 +1,15 @@
-import { listDueFlashcardItems, listStudyDates, listStudyActivityCounts } from "@/lib/models";
+import {
+  listDueFlashcardItems,
+  listGenerationNotifications,
+  listStudyDates,
+  listStudyActivityCounts,
+} from "@/lib/models";
 import { computeStreak } from "@/lib/streak";
 
 export async function GET() {
-  const [items, studyDates, activity] = await Promise.all([
+  const [items, notifications, studyDates, activity] = await Promise.all([
     listDueFlashcardItems(),
+    listGenerationNotifications(),
     listStudyDates(),
     listStudyActivityCounts(),
   ]);
@@ -11,6 +17,7 @@ export async function GET() {
 
   return Response.json({
     dueFlashcards: { total, items },
+    generationNotifications: notifications,
     streak: computeStreak(studyDates),
     activity,
   });

@@ -395,6 +395,11 @@ function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "home_widgets")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN home_widgets TEXT");
   }
+  if (!hasColumn("app_settings", "auto_open_generated_items")) {
+    database.exec(
+      "ALTER TABLE app_settings ADD COLUMN auto_open_generated_items INTEGER NOT NULL DEFAULT 1"
+    );
+  }
 }
 
 function createConnection(): Database.Database {

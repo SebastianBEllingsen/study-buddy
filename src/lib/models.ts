@@ -11,6 +11,7 @@ import {
   flashcard_schedule,
   folders,
   generated_items,
+  generation_notifications,
   notes,
   quiz_attempts,
   recent_views,
@@ -135,6 +136,7 @@ interface SettingsRow {
   google_refresh_token: string | null;
   google_token_expiry: string | null;
   home_widgets: string | null;
+  auto_open_generated_items: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -152,6 +154,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       google_refresh_token: app_settings.google_refresh_token,
       google_token_expiry: app_settings.google_token_expiry,
       home_widgets: app_settings.home_widgets,
+      auto_open_generated_items: app_settings.auto_open_generated_items,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -216,6 +219,11 @@ export interface AppSettings {
   googleCalendarConnected: boolean;
   hasCalendarFeeds: boolean;
   homeWidgets: HomeWidgetConfig[];
+  // On (the default): finishing a generation navigates straight to it, same
+  // as before this setting existed. Off: it stays on the course page and a
+  // generation_notifications row is created instead — see
+  // createGenerationNotification and the generate route.
+  autoOpenGeneratedItems: boolean;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -232,6 +240,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     googleCalendarConnected: !!row?.google_refresh_token,
     hasCalendarFeeds: feeds.length > 0,
     homeWidgets: parseHomeWidgets(row?.home_widgets ?? null),
+    autoOpenGeneratedItems: row?.auto_open_generated_items ?? true,
   };
 }
 
@@ -239,6 +248,13 @@ export async function setShowModelBadge(show: boolean): Promise<void> {
   await db
     .update(app_settings)
     .set({ show_model_badge: show, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setAutoOpenGeneratedItems(autoOpen: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ auto_open_generated_items: autoOpen, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1809,4 +1825,54 @@ export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
     }
   }
   return due;
+}
+
+export interface GenerationNotification {
+  itemId: number;
+  title: string;
+  mode: GenerationMode;
+  courseId: number;
+  courseName: string;
+  createdAt: string;
+}
+
+// Only ever written when app_settings.auto_open_generated_items is off — see
+// the generate route, which is this function's one caller.
+export async function createGenerationNotification(itemId: number): Promise<void> {
+  await db
+    .insert(generation_notifications)
+    .values({ generated_item_id: itemId, created_at: nowUtc() })
+    .onConflictDoNothing();
+}
+
+// Idempotent — called both when the user explicitly dismisses one and when
+// they open the item it's for (see the items/[itemId] page's own effect), so
+// calling it again after it's already gone is a normal no-op, not an error.
+// Deleting the item itself clears its notification too, via this table's own
+// ON DELETE CASCADE — no separate call needed from deleteGeneratedItem.
+export async function dismissGenerationNotification(itemId: number): Promise<void> {
+  await db
+    .delete(generation_notifications)
+    .where(eq(generation_notifications.generated_item_id, itemId));
+}
+
+// One entry per still-pending notification, across every course — same
+// shape/join pattern as listDueFlashcardItems above, and combined with it on
+// the home page so a course's badge dot lights up for either reason.
+export async function listGenerationNotifications(): Promise<GenerationNotification[]> {
+  const rows = await db
+    .select()
+    .from(generation_notifications)
+    .innerJoin(generated_items, eq(generated_items.id, generation_notifications.generated_item_id))
+    .innerJoin(courses, eq(courses.id, generated_items.course_id))
+    .orderBy(desc(generation_notifications.created_at));
+
+  return rows.map((row) => ({
+    itemId: row.generated_items.id,
+    title: row.generated_items.title,
+    mode: row.generated_items.mode as GenerationMode,
+    courseId: row.generated_items.course_id,
+    courseName: row.courses.name,
+    createdAt: row.generation_notifications.created_at,
+  }));
 }

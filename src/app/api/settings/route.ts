@@ -3,6 +3,7 @@ import {
   setAiBackend,
   setProviderKey,
   setShowModelBadge,
+  setAutoOpenGeneratedItems,
   setGoogleClientCredentials,
   setHomeWidgets,
   HOME_WIDGET_IDS,
@@ -60,6 +61,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "showModelBadge must be a boolean" }, { status: 400 });
     }
     await setShowModelBadge(body.showModelBadge);
+  }
+
+  if (body?.autoOpenGeneratedItems !== undefined) {
+    if (typeof body.autoOpenGeneratedItems !== "boolean") {
+      return Response.json({ error: "autoOpenGeneratedItems must be a boolean" }, { status: 400 });
+    }
+    await setAutoOpenGeneratedItems(body.autoOpenGeneratedItems);
   }
 
   if (body?.googleClientId !== undefined || body?.googleClientSecret !== undefined) {

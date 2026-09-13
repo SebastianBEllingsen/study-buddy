@@ -678,23 +678,23 @@ function DisplaySection() {
       .then((body: AppSettings) => setSettings(body));
   }, []);
 
-  async function handleToggle(next: boolean) {
+  async function handleToggle(field: "showModelBadge" | "autoOpenGeneratedItems", next: boolean) {
     if (!settings) return;
-    setSettings({ ...settings, showModelBadge: next });
+    setSettings({ ...settings, [field]: next });
     setSaving(true);
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ showModelBadge: next }),
+        body: JSON.stringify({ [field]: next }),
       });
       if (!res.ok) {
         toast.error("Couldn't save display settings");
-        setSettings({ ...settings, showModelBadge: !next });
+        setSettings((prev) => (prev ? { ...prev, [field]: !next } : prev));
       }
     } catch {
       toast.error("Couldn't save display settings");
-      setSettings({ ...settings, showModelBadge: !next });
+      setSettings((prev) => (prev ? { ...prev, [field]: !next } : prev));
     } finally {
       setSaving(false);
     }
@@ -717,7 +717,23 @@ function DisplaySection() {
           className="size-4 shrink-0 accent-primary"
           checked={settings.showModelBadge}
           disabled={saving}
-          onChange={(e) => handleToggle(e.target.checked)}
+          onChange={(e) => handleToggle("showModelBadge", e.target.checked)}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          Jump to newly generated content automatically
+          <span className="block text-xs text-muted-foreground">
+            Off: stay put and get a dismissible notification instead — it also shows up on the
+            course until you open it or dismiss it.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.autoOpenGeneratedItems}
+          disabled={saving}
+          onChange={(e) => handleToggle("autoOpenGeneratedItems", e.target.checked)}
         />
       </label>
     </div>

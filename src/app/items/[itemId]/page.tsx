@@ -123,6 +123,10 @@ export default function ItemPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "item", id: body.item.id }),
       }).catch(() => {});
+      // Opening the item it's about counts as acknowledging its "just
+      // generated" notification (if it has one — this is a no-op otherwise),
+      // same as clicking the popup itself would.
+      fetch(`/api/generation-notifications/${body.item.id}`, { method: "DELETE" }).catch(() => {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.itemId]);

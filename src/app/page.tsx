@@ -23,7 +23,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
-import type { AppSettings, CalendarFeed, Course, DueFlashcardItem, HomeWidgetConfig, RecentView } from "@/lib/models";
+import type {
+  AppSettings,
+  CalendarFeed,
+  Course,
+  DueFlashcardItem,
+  GenerationNotification,
+  HomeWidgetConfig,
+  RecentView,
+} from "@/lib/models";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { tileGridStyle } from "@/lib/dashboardGrid";
 import StudyHeatmap from "@/components/StudyHeatmap";
@@ -110,14 +118,15 @@ function DeleteCourseButton({
 
 function CourseCard({
   course,
-  hasDue,
+  hasNotification,
   onRename,
   onDelete,
   onReorder,
   onCustomized,
 }: {
   course: Course;
-  hasDue: boolean;
+  // Cards due, or a pending generation popup not yet opened/dismissed.
+  hasNotification: boolean;
   onRename: (courseId: number, name: string) => Promise<void>;
   onDelete: (courseId: number) => Promise<void>;
   onReorder: (draggedCourseId: number, targetCourseId: number) => void;
@@ -169,7 +178,7 @@ function CourseCard({
       onDrop={handleDrop}
     >
       {showCoverOnCard && <div className="absolute inset-0 bg-black/55" />}
-      {hasDue && (
+      {hasNotification && (
         // Replaces a former border-l accent: a border sits outside the
         // scrim overlay's reach (box-model gap), so it always showed a
         // sliver of raw, unmuted cover-image color. This dot is painted
@@ -279,6 +288,7 @@ function CourseCard({
 
 interface Stats {
   dueFlashcards: { total: number; items: DueFlashcardItem[] };
+  generationNotifications: GenerationNotification[];
   streak: number;
   activity: Record<string, number>;
 }
@@ -1046,7 +1056,14 @@ function HomePageContent() {
     }
   }
 
-  const coursesWithDue = new Set(stats?.dueFlashcards.items.map((i) => i.courseId));
+  // The dot on a course's card — either it has cards due, or it has a
+  // pending "just generated" popup it hasn't been opened/dismissed yet (see
+  // Settings' "jump to newly generated content automatically" and the
+  // matching banner on the course page itself).
+  const coursesWithNotification = new Set([
+    ...(stats?.dueFlashcards.items.map((i) => i.courseId) ?? []),
+    ...(stats?.generationNotifications.map((n) => n.courseId) ?? []),
+  ]);
 
   const newCourseDialog = (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -1184,7 +1201,7 @@ function HomePageContent() {
             <CourseCard
               key={course.id}
               course={course}
-              hasDue={coursesWithDue.has(course.id)}
+              hasNotification={coursesWithNotification.has(course.id)}
               onRename={handleRename}
               onDelete={handleDelete}
               onReorder={handleReorder}

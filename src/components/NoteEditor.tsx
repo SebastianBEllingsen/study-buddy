@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, forwardRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -343,38 +343,6 @@ function highlightInEditor(view: EditorView, text: string) {
   }, 1500);
 }
 
-// Finds whatever text sits at the very top of `container`'s visible area —
-// used to carry reading position across the Edit/Preview switch, since the
-// two views are unrelated DOM trees with no shared notion of "line N".
-function findTopVisibleText(container: HTMLElement): string | null {
-  const containerTop = container.getBoundingClientRect().top;
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) {
-    const text = node.textContent?.trim();
-    if (!text || text.length < 3) continue;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    if (range.getBoundingClientRect().bottom > containerTop) return text.slice(0, 60);
-  }
-  return null;
-}
-
-// Scrolls `container` so the first text node containing `text` sits at its
-// top — the Preview-side half of the Edit/Preview position handoff above.
-function scrollContainerToText(container: HTMLElement, text: string) {
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) {
-    if (!node.textContent?.includes(text)) continue;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    const delta = range.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    container.scrollTop += delta;
-    return;
-  }
-}
-
 // Editor font size is a global, persisted-across-notes preference (like
 // Obsidian's "Editor font size" appearance setting) rather than per-note —
 // stored under one shared key, applied via a CSS variable both the
@@ -650,15 +618,13 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   const [fontSize, setFontSize] = useState<FontSizeKey>(readStoredFontSize);
   const pendingHighlightRef = useRef<string | null>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
-  // Edit → Preview: no equivalent of a text cursor once rendered, so we
-  // instead find whatever's visible at the top of the editor and scroll
-  // Preview to that same text.
-  const pendingPreviewAnchorRef = useRef<string | null>(null);
-  // Preview → Edit: the exact character offset to drop the cursor back at —
-  // set either straight from CodeMirror's own selection (leaving Edit, so
-  // coming straight back restores it exactly) or, coming from Preview,
-  // resolved by finding the top-of-viewport text back in the raw source.
-  const pendingEditCursorRef = useRef<number | null>(null);
+  // Edit and Preview are unrelated DOM trees (no shared notion of "line N"
+  // or character offset), so rather than trying to map a cursor position or
+  // a snippet of text from one into the other — which broke in enough edge
+  // cases (headings, formatting, repeated text) to make switching feel
+  // unreliable — this just carries over *how far down the document you were
+  // scrolled*, as a plain 0-1 fraction. Simpler, and never picks a wrong spot.
+  const pendingScrollFractionRef = useRef<number | null>(null);
 
   function loadTargets() {
     fetch("/api/link-targets")
@@ -670,58 +636,37 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
 
   function switchMode(next: "edit" | "preview") {
     if (next === mode) return;
-    if (mode === "edit") {
-      const view = editorRef.current?.view;
-      if (view) {
-        pendingEditCursorRef.current = view.state.selection.main.head;
-        // The line at the very top of the viewport is often a blank
-        // paragraph-separator ("" between two markdown blocks) — walk
-        // forward to the next line that actually has text to anchor on.
-        let topLine = view.state.doc.lineAt(view.lineBlockAtHeight(view.scrollDOM.scrollTop).from);
-        while (topLine.text.trim() === "" && topLine.number < view.state.doc.lines) {
-          topLine = view.state.doc.line(topLine.number + 1);
-        }
-        pendingPreviewAnchorRef.current = topLine.text.trim().slice(0, 60) || null;
-      }
-    } else {
-      const el = previewScrollRef.current;
-      const anchor = el && findTopVisibleText(el);
-      if (anchor) {
-        const idx = value.indexOf(anchor);
-        if (idx >= 0) pendingEditCursorRef.current = idx;
-      }
+    const el = mode === "edit" ? editorRef.current?.view?.scrollDOM : previewScrollRef.current;
+    if (el) {
+      const scrollable = el.scrollHeight - el.clientHeight;
+      pendingScrollFractionRef.current = scrollable > 0 ? el.scrollTop / scrollable : 0;
     }
     setMode(next);
   }
 
-  useEffect(() => {
-    if (mode === "edit" && pendingEditCursorRef.current !== null) {
-      const pos = pendingEditCursorRef.current;
-      pendingEditCursorRef.current = null;
-      // setTimeout rather than requestAnimationFrame — rAF callbacks are
-      // paused entirely for a backgrounded/hidden tab (e.g. the user
-      // switches away right after clicking), which would silently strand
-      // this. React has already committed the DOM by the time this effect
-      // runs, so there's nothing rAF's paint-timing would add here anyway.
-      setTimeout(() => {
-        const view = editorRef.current?.view;
-        if (!view) return;
-        const clamped = Math.max(0, Math.min(pos, view.state.doc.length));
-        view.dispatch({
-          selection: EditorSelection.cursor(clamped),
-          effects: EditorView.scrollIntoView(clamped, { y: "center" }),
-        });
-        view.focus();
-      });
-    } else if (mode === "preview" && pendingPreviewAnchorRef.current) {
-      const text = pendingPreviewAnchorRef.current;
-      pendingPreviewAnchorRef.current = null;
-      // setTimeout, not requestAnimationFrame — see the note above.
-      setTimeout(() => {
-        const el = previewScrollRef.current;
-        if (el) scrollContainerToText(el, text);
-      });
-    }
+  function applyPendingScrollFraction(el: HTMLElement) {
+    if (pendingScrollFractionRef.current === null) return;
+    const fraction = pendingScrollFractionRef.current;
+    pendingScrollFractionRef.current = null;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    el.scrollTop = fraction * scrollable;
+  }
+
+  // Switching into Preview: a plain div we render ourselves, so its ref is
+  // already attached by the time this runs — useLayoutEffect (not useEffect)
+  // means it happens before the browser paints, so there's no visible frame
+  // at the wrong scroll position first.
+  //
+  // Switching into Edit is handled separately, via CodeMirror's own
+  // onCreateEditor callback below — @uiw/react-codemirror builds the actual
+  // EditorView a render cycle after it mounts (container ref → setState →
+  // re-render), so editorRef.current?.view is still null when this effect
+  // would otherwise fire; onCreateEditor fires at the exact moment the view
+  // (and its real scrollHeight) actually exists.
+  useLayoutEffect(() => {
+    if (mode !== "preview") return;
+    const el = previewScrollRef.current;
+    if (el) applyPendingScrollFraction(el);
   }, [mode]);
 
   // Cmd/Ctrl+E toggles Edit/Preview from anywhere on the page — same binding
@@ -891,6 +836,11 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
               onChange={onChange}
               extensions={extensions}
               height="100%"
+              // Fires the instant the real EditorView exists (see the
+              // useLayoutEffect above for why that's not synchronous with
+              // this component's own mount) — apply any carried-over scroll
+              // position right then, before the first paint.
+              onCreateEditor={(view) => applyPendingScrollFraction(view.scrollDOM)}
               // @uiw/react-codemirror's own wrapper <div> (the thing height="100%"
               // above actually lands on is .cm-editor, one level in) otherwise gets
               // no height of its own and grows to fit all content — leaving

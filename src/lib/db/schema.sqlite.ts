@@ -56,6 +56,11 @@ export const app_settings = sqliteTable("app_settings", {
   google_token_expiry: text("google_token_expiry"),
   // JSON-encoded HomeWidgetConfig[] — see the matching column in schema.pg.ts.
   home_widgets: text("home_widgets"),
+  // See generation_notifications below — off means a finished generation is
+  // recorded there instead of navigating straight to it.
+  auto_open_generated_items: integer("auto_open_generated_items", { mode: "boolean" })
+    .notNull()
+    .default(true),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -164,6 +169,15 @@ export const flashcard_schedule = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.generated_item_id, table.card_index] })]
 );
+
+// One row per finished generation still awaiting acknowledgement — see the
+// matching comment in schema.sql.
+export const generation_notifications = sqliteTable("generation_notifications", {
+  generated_item_id: integer("generated_item_id")
+    .primaryKey()
+    .references(() => generated_items.id, { onDelete: "cascade" }),
+  created_at: text("created_at").notNull(),
+});
 
 // Read-only external ICS calendar subscriptions — table creation for SQLite
 // lives in schema.sql (not migrate()'s ALTER TABLE pattern, since this is a

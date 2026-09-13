@@ -87,6 +87,9 @@ export const app_settings = pgTable("app_settings", {
   // the default order/visibility", same convention as show_model_badge's
   // fallback but stored as JSON since it's an ordered list, not a scalar.
   home_widgets: text("home_widgets"),
+  // See generation_notifications below — off means a finished generation is
+  // recorded there instead of navigating straight to it.
+  auto_open_generated_items: boolean("auto_open_generated_items").notNull().default(true),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -185,6 +188,15 @@ export const flashcard_schedule = pgTable(
   },
   (table) => [primaryKey({ columns: [table.generated_item_id, table.card_index] })]
 );
+
+// One row per finished generation still awaiting acknowledgement — see the
+// matching comment in schema.sql.
+export const generation_notifications = pgTable("generation_notifications", {
+  generated_item_id: integer("generated_item_id")
+    .primaryKey()
+    .references(() => generated_items.id, { onDelete: "cascade" }),
+  created_at: text("created_at").notNull(),
+});
 
 // Read-only external ICS calendar subscriptions — see the matching table in
 // schema.sql (SQLite) and lib/calendarFeeds.ts for how these get fetched,

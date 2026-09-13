@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -27,9 +27,11 @@ import { toast } from "sonner";
 import type {
   Course,
   DocumentRow,
+  DueFlashcardItem,
   Folder,
   GeneratedItem,
   GenerationMode,
+  GenerationNotification,
   Note,
 } from "@/lib/models";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
@@ -391,6 +393,8 @@ function GeneratedItemList({
   items,
   folderId,
   folders,
+  dueByItemId,
+  notifiedItemIds,
   editMode,
   selected,
   onToggleSelect,
@@ -401,6 +405,8 @@ function GeneratedItemList({
   items: GeneratedItem[];
   folderId: number;
   folders: Folder[];
+  dueByItemId: Map<number, number>;
+  notifiedItemIds: Set<number>;
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (itemId: number) => void;
@@ -476,6 +482,16 @@ function GeneratedItemList({
                 {item.title}
               </Link>
               {showModelBadge && <ModelBadge info={item} />}
+              {!!dueByItemId.get(item.id) && (
+                <span className="shrink-0 rounded-full bg-amber/15 px-1.5 py-0.5 text-xs font-medium text-amber">
+                  {dueByItemId.get(item.id)} due
+                </span>
+              )}
+              {notifiedItemIds.has(item.id) && (
+                <span className="shrink-0 rounded-full bg-sage/15 px-1.5 py-0.5 text-xs font-medium text-sage">
+                  new
+                </span>
+              )}
               <span className="shrink-0 text-xs text-muted-foreground">
                 {new Date(item.created_at).toLocaleDateString()}
               </span>
@@ -651,6 +667,8 @@ function FolderCard({
   docsByFolder,
   itemsByFolder,
   notesByFolder,
+  dueByItemId,
+  notifiedItemIds,
   editMode,
   selectedDocs,
   selectedItems,
@@ -680,6 +698,8 @@ function FolderCard({
   docsByFolder: (folderId: number) => DocumentRow[];
   itemsByFolder: (folderId: number) => GeneratedItem[];
   notesByFolder: (folderId: number) => Note[];
+  dueByItemId: Map<number, number>;
+  notifiedItemIds: Set<number>;
   editMode: boolean;
   selectedDocs: Set<number>;
   selectedItems: Set<number>;
@@ -932,6 +952,8 @@ function FolderCard({
                 items={items}
                 folderId={folder.id}
                 folders={folders}
+                dueByItemId={dueByItemId}
+                notifiedItemIds={notifiedItemIds}
                 editMode={editMode}
                 selected={selectedItems}
                 onToggleSelect={onToggleSelectItem}
@@ -967,6 +989,8 @@ function FolderCard({
                     docsByFolder={docsByFolder}
                     itemsByFolder={itemsByFolder}
                     notesByFolder={notesByFolder}
+                    dueByItemId={dueByItemId}
+                    notifiedItemIds={notifiedItemIds}
                     editMode={editMode}
                     selectedDocs={selectedDocs}
                     selectedItems={selectedItems}
@@ -1082,6 +1106,17 @@ export default function CoursePage() {
 
   const [detail, setDetail] = useState<CourseDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
+  // The home dashboard's due-cards badge on this course's card is computed
+  // from the same site-wide due list — fetching it here too (rather than a
+  // course-scoped endpoint) guarantees this page always agrees with exactly
+  // what triggered that badge, instead of two separate "due" computations
+  // drifting apart.
+  const [dueItems, setDueItems] = useState<DueFlashcardItem[]>([]);
+  // Pending "just generated" notifications for this course — only ever
+  // non-empty when Settings' "jump to newly generated content
+  // automatically" is off (see handleGenerate and the generate route).
+  const [notifications, setNotifications] = useState<GenerationNotification[]>([]);
+  const [autoOpenGeneratedItems, setAutoOpenGeneratedItems] = useState(true);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -1163,6 +1198,45 @@ export default function CoursePage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then(
+        (body: {
+          dueFlashcards: { items: DueFlashcardItem[] };
+          generationNotifications: GenerationNotification[];
+        }) => {
+          setDueItems(body.dueFlashcards.items.filter((item) => item.courseId === Number(courseId)));
+          setNotifications(
+            body.generationNotifications.filter((n) => n.courseId === Number(courseId))
+          );
+        }
+      )
+      .catch(() => {});
+  }, [courseId]);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((body: { autoOpenGeneratedItems: boolean }) => setAutoOpenGeneratedItems(body.autoOpenGeneratedItems))
+      .catch(() => {});
+  }, []);
+
+  // itemId → how many of its cards are due — GeneratedItemList and the
+  // banner below both key off this so a set's "N due" badge always matches
+  // the count behind the home page's dot on this course's card.
+  const dueByItemId = useMemo(() => new Map(dueItems.map((item) => [item.itemId, item.dueCount])), [dueItems]);
+  const notifiedItemIds = useMemo(() => new Set(notifications.map((n) => n.itemId)), [notifications]);
+
+  // Shared by the popup's own dismiss button, the course page's inline "x",
+  // and (via the API route) opening the item itself — see
+  // dismissGenerationNotification for why calling this more than once for
+  // the same item is harmless.
+  function dismissNotification(itemId: number) {
+    setNotifications((prev) => prev.filter((n) => n.itemId !== itemId));
+    fetch(`/api/generation-notifications/${itemId}`, { method: "DELETE" }).catch(() => {});
+  }
 
   // The ?document=<id> query param is the source of truth for which
   // document's viewer is open — SearchDialog.tsx navigates straight to it
@@ -1592,7 +1666,26 @@ export default function CoursePage() {
         setError(body.error ?? "Generation failed");
         return;
       }
-      router.push(`/items/${body.id}`);
+      if (autoOpenGeneratedItems) {
+        router.push(`/items/${body.id}`);
+        return;
+      }
+      // Left in place on purpose (see Settings) — a dismissible popup
+      // instead, plus the same notification also shows up on this page (the
+      // banner/pill below) and on this course's card on the home page,
+      // until it's opened or dismissed from any of those.
+      refresh();
+      setNotifications((prev) => [
+        { itemId: body.id, title: body.title, mode: body.mode, courseId: body.course_id, courseName: detail?.course.name ?? "", createdAt: body.created_at },
+        ...prev,
+      ]);
+      toast(`${MODE_LABELS[mode]} ready`, {
+        description: body.title,
+        duration: Infinity,
+        closeButton: true,
+        action: { label: "View", onClick: () => router.push(`/items/${body.id}`) },
+        onDismiss: () => dismissNotification(body.id),
+      });
     } finally {
       setGenerating(null);
     }
@@ -1735,6 +1828,57 @@ export default function CoursePage() {
         onOpenChange={setCustomizeOpen}
         onSaved={refresh}
       />
+
+      {dueItems.length > 0 && (
+        // Directly answers what the home page's due-cards dot on this
+        // course's card was referencing — the exact set(s) and how many
+        // cards in each, not just "something's due somewhere in here".
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm">
+          <Layers className="size-3.5 shrink-0 text-amber" />
+          <span className="font-medium text-amber">
+            {dueItems.reduce((sum, item) => sum + item.dueCount, 0)} card
+            {dueItems.reduce((sum, item) => sum + item.dueCount, 0) === 1 ? "" : "s"} due:
+          </span>
+          {dueItems.map((item, i) => (
+            <span key={item.itemId} className="text-amber">
+              <Link href={`/items/${item.itemId}`} className="underline hover:no-underline">
+                {item.title}
+              </Link>{" "}
+              ({item.dueCount}){i < dueItems.length - 1 ? "," : ""}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {notifications.length > 0 && (
+        // "Jump to newly generated content automatically" (Settings) is off
+        // — this is where those land instead, until opened or dismissed
+        // (either here or from the popup itself). Same styling family as the
+        // due-cards banner above but sage, not amber, so the two read as
+        // distinct kinds of notice at a glance.
+        <div className="flex flex-col gap-1.5 rounded-lg border border-sage/30 bg-sage/10 px-3 py-2 text-sm">
+          {notifications.map((n) => (
+            <div key={n.itemId} className="flex items-center gap-1.5 text-sage">
+              <Sparkles className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                <Link href={`/items/${n.itemId}`} className="underline hover:no-underline">
+                  {n.title}
+                </Link>{" "}
+                is ready.
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-5 shrink-0 text-sage hover:text-sage"
+                aria-label={`Dismiss ${n.title}`}
+                onClick={() => dismissNotification(n.itemId)}
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {error && (
         <Alert variant="destructive">
@@ -2052,6 +2196,8 @@ export default function CoursePage() {
                 docsByFolder={docsByFolder}
                 itemsByFolder={itemsByFolder}
                 notesByFolder={notesByFolder}
+                dueByItemId={dueByItemId}
+                notifiedItemIds={notifiedItemIds}
                 editMode={editMode}
                 selectedDocs={selectedDocs}
                 selectedItems={selectedItems}

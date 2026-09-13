@@ -1,5 +1,6 @@
 import { generateForCourse, NoDocumentsError } from "@/lib/generate";
 import { describeAiError } from "@/lib/aiClient";
+import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
 
 type Params = { params: Promise<{ courseId: string; mode: string }> };
@@ -21,6 +22,12 @@ export async function POST(request: Request, { params }: Params) {
 
   try {
     const item = await generateForCourse(Number(courseId), mode as GenerationMode, folderId);
+    // Only when the user has opted out of being taken straight there —
+    // otherwise there's nothing left to notify about by the time they'd see it.
+    const { autoOpenGeneratedItems } = await getAppSettings();
+    if (!autoOpenGeneratedItems) {
+      await createGenerationNotification(item.id);
+    }
     return Response.json(item, { status: 201 });
   } catch (err) {
     if (err instanceof NoDocumentsError) {

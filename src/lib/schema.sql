@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS flashcard_schedule (
   PRIMARY KEY (generated_item_id, card_index)
 );
 
+-- One row per finished generation the user hasn't yet acted on (opened it,
+-- or explicitly dismissed) — only created at all when app_settings'
+-- auto_open_generated_items is off (see the generate route), since when it's
+-- on the user is taken straight there and there's nothing left to notify
+-- about. ON DELETE CASCADE means deleting the generated item itself (e.g.
+-- deleting a quiz before ever opening it) removes its notification too, with
+-- no extra cleanup code needed.
+CREATE TABLE IF NOT EXISTS generation_notifications (
+  generated_item_id INTEGER PRIMARY KEY REFERENCES generated_items(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Read-only external ICS calendar subscriptions (e.g. a university student
 -- portal's timetable feed, an LMS's assignment-due-dates feed) — merged
 -- into the Google Calendar events list at read time (see
