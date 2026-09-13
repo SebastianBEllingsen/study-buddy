@@ -214,3 +214,12 @@ export const recent_views = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.item_type, table.item_id] })]
 );
+
+// Reusable icon/cover image library — see the matching comment in
+// schema.sql.
+export const uploaded_images = sqliteTable("uploaded_images", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  kind: text("kind").notNull(),
+  data_url: text("data_url").notNull(),
+  created_at: text("created_at").notNull(),
+});

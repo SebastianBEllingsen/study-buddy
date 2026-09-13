@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppTheme, type AppTheme } from "@/components/AppThemeProvider";
+import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -635,6 +636,16 @@ function AppearanceSection() {
         <Palette className="size-3.5" />
         Appearance
       </h3>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          Light / dark mode
+          <span className="block text-xs text-muted-foreground">
+            Independent of the theme below — switches which of its light or dark variant is
+            shown.
+          </span>
+        </span>
+        <ThemeToggle />
+      </label>
       <div className="space-y-1.5">
         <Label>Theme</Label>
         <Select value={theme} onValueChange={(v) => v && setTheme(v as AppTheme)}>
@@ -650,8 +661,7 @@ function AppearanceSection() {
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Changes the app&apos;s color palette and headings. Light/dark still switches
-          independently with the sun/moon button in the header.
+          Changes the app&apos;s color palette and headings.
         </p>
       </div>
     </div>

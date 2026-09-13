@@ -4,9 +4,9 @@ import { Geist, Geist_Mono, Source_Serif_4, Space_Grotesk, Spectral, IBM_Plex_Sa
 import { BookOpen, Calendar } from "lucide-react";
 import SearchDialog from "@/components/SearchDialog";
 import SettingsDialog from "@/components/SettingsDialog";
+import HelpDialog from "@/components/HelpDialog";
 import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
-import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -101,7 +101,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                   </Button>
                   <SearchDialog />
                   <SettingsDialog />
-                  <ThemeToggle />
+                  <HelpDialog />
                 </div>
               </div>
             </header>

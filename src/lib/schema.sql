@@ -188,3 +188,19 @@ CREATE TABLE IF NOT EXISTS recent_views (
   viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (item_type, item_id)
 );
+
+-- A reusable library of every icon/cover image ever cropped and uploaded
+-- (CustomizeCourseDialog today; any future per-thing image customization
+-- can point at the same library) — append-only, so a "pick from what
+-- you've used before" gallery has something to browse instead of only ever
+-- offering a fresh upload from disk. Stored inline as a data URL, same
+-- choice as courses.cover_image/icon_image (see the comment there): no
+-- filesystem dependency, syncs cleanly with the Supabase backend.
+CREATE TABLE IF NOT EXISTS uploaded_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL, -- 'icon' | 'cover' — same aspect-ratio split as CustomizeCourseDialog
+  data_url TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_kind ON uploaded_images(kind);

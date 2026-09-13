@@ -8,20 +8,9 @@ import {
   renameCourse,
   updateCourseCustomization,
 } from "@/lib/models";
+import { isValidCoverImage, isValidIconImage } from "@/lib/dataUrlImage";
 
 type Params = { params: Promise<{ courseId: string }> };
-
-// Cover/icon images are stored inline as a data URL (see schema.pg.ts's
-// cover_image/icon_image columns) — capped well below what a phone camera
-// photo would produce, since the client resizes/compresses before upload;
-// this is a backstop against a request built some other way. The icon is
-// square and much smaller than the wide banner, so it gets its own, tighter
-// cap — raised from the original 500,000 because a badge that needs a
-// transparent background is exported as lossless PNG (see
-// ImageCropDialog's outputFormat), which runs noticeably larger than the
-// JPEG that a same-size opaque badge used to produce.
-const MAX_COVER_IMAGE_LENGTH = 2_000_000;
-const MAX_ICON_IMAGE_LENGTH = 1_500_000;
 
 export async function GET(_request: Request, { params }: Params) {
   const { courseId } = await params;
@@ -75,23 +64,13 @@ export async function PATCH(request: Request, { params }: Params) {
     customization.color = body.color;
   }
   if ("cover_image" in body) {
-    if (
-      body.cover_image !== null &&
-      (typeof body.cover_image !== "string" ||
-        !body.cover_image.startsWith("data:image/") ||
-        body.cover_image.length > MAX_COVER_IMAGE_LENGTH)
-    ) {
+    if (body.cover_image !== null && !isValidCoverImage(body.cover_image)) {
       return Response.json({ error: "Invalid cover image" }, { status: 400 });
     }
     customization.cover_image = body.cover_image;
   }
   if ("icon_image" in body) {
-    if (
-      body.icon_image !== null &&
-      (typeof body.icon_image !== "string" ||
-        !body.icon_image.startsWith("data:image/") ||
-        body.icon_image.length > MAX_ICON_IMAGE_LENGTH)
-    ) {
+    if (body.icon_image !== null && !isValidIconImage(body.icon_image)) {
       return Response.json({ error: "Invalid icon image" }, { status: 400 });
     }
     customization.icon_image = body.icon_image;

@@ -15,6 +15,7 @@ import {
   quiz_attempts,
   recent_views,
   runTransaction,
+  uploaded_images,
 } from "./db";
 import { nowUtc } from "./time";
 import type { QuizContent, FlashcardsContent, NotesContent } from "./types";
@@ -489,6 +490,41 @@ export async function listRecentViews(limit = 8): Promise<RecentView[]> {
     }
   }
   return result;
+}
+
+// --- Reusable icon/cover image library ---
+// Every image ever cropped and uploaded via CustomizeCourseDialog (or any
+// future per-thing image customization — see the schema.sql comment),
+// browsable so picking a badge/banner doesn't always mean uploading fresh
+// from disk.
+
+export type UploadedImageKind = "icon" | "cover";
+
+export interface UploadedImage {
+  id: number;
+  kind: UploadedImageKind;
+  dataUrl: string;
+  createdAt: string;
+}
+
+export async function listUploadedImages(kind: UploadedImageKind, limit = 40): Promise<UploadedImage[]> {
+  const rows = await db
+    .select()
+    .from(uploaded_images)
+    .where(eq(uploaded_images.kind, kind))
+    .orderBy(desc(uploaded_images.created_at), desc(uploaded_images.id))
+    .limit(limit);
+  return rows.map((r) => ({ id: r.id, kind: r.kind as UploadedImageKind, dataUrl: r.data_url, createdAt: r.created_at }));
+}
+
+export async function recordUploadedImage(kind: UploadedImageKind, dataUrl: string): Promise<UploadedImage> {
+  const created_at = nowUtc();
+  const [row] = await db.insert(uploaded_images).values({ kind, data_url: dataUrl, created_at }).returning();
+  return { id: row.id, kind, dataUrl, createdAt: created_at };
+}
+
+export async function deleteUploadedImage(id: number): Promise<void> {
+  await db.delete(uploaded_images).where(eq(uploaded_images.id, id));
 }
 
 // --- The Vault: personal Obsidian-style notes ---

@@ -154,45 +154,53 @@ export function ImageCropDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>Drag to reposition, and zoom to fit what you want in frame.</DialogDescription>
         </DialogHeader>
 
-        <div
-          ref={setViewportEl}
-          className="relative touch-none overflow-hidden rounded-lg border bg-muted select-none"
-          style={{ aspectRatio: aspect }}
-          onPointerDown={handlePointerDown}
-        >
-          {imgEl && dispWidth > 0 && (
-            // eslint-disable-next-line @next/next/no-img-element -- blob: URL of a locally-picked file, not a next/image-optimizable asset
-            <img
-              src={imgEl.src}
-              alt=""
-              draggable={false}
-              className="pointer-events-none absolute top-0 left-0 max-w-none cursor-grab select-none"
-              style={{
-                width: dispWidth,
-                height: dispHeight,
-                transform: `translate(${displayOffset.x}px, ${displayOffset.y}px)`,
-              }}
-            />
-          )}
-        </div>
+        {/* A square (icon) or wide (cover) crop frame sized off the
+            dialog's own width can end up taller than a short viewport has
+            room for — same fixed-header/scrolling-body split as the other
+            dialogs (see CustomizeCourseDialog), so the frame and zoom
+            slider stay reachable by scrolling instead of running off the
+            screen with the footer's Save button unreachable. */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
+          <div
+            ref={setViewportEl}
+            className="relative touch-none overflow-hidden rounded-lg border bg-muted select-none"
+            style={{ aspectRatio: aspect }}
+            onPointerDown={handlePointerDown}
+          >
+            {imgEl && dispWidth > 0 && (
+              // eslint-disable-next-line @next/next/no-img-element -- blob: URL of a locally-picked file, not a next/image-optimizable asset
+              <img
+                src={imgEl.src}
+                alt=""
+                draggable={false}
+                className="pointer-events-none absolute top-0 left-0 max-w-none cursor-grab select-none"
+                style={{
+                  width: dispWidth,
+                  height: dispHeight,
+                  transform: `translate(${displayOffset.x}px, ${displayOffset.y}px)`,
+                }}
+              />
+            )}
+          </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Zoom</span>
-          <input
-            type="range"
-            min={MIN_ZOOM}
-            max={MAX_ZOOM}
-            step={0.01}
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className="w-full accent-primary"
-          />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Zoom</span>
+            <input
+              type="range"
+              min={MIN_ZOOM}
+              max={MAX_ZOOM}
+              step={0.01}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              className="w-full accent-primary"
+            />
+          </div>
         </div>
 
         <DialogFooter>

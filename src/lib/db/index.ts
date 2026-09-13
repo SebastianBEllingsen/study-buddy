@@ -90,6 +90,7 @@ export let calendar_feeds = initial.schema.calendar_feeds;
 export let notes = initial.schema.notes;
 export let completed_assignments = initial.schema.completed_assignments;
 export let recent_views = initial.schema.recent_views;
+export let uploaded_images = initial.schema.uploaded_images;
 
 // Re-resolves the active backend from the current on-disk/env config and
 // swaps every binding above in place. Called by
@@ -114,6 +115,7 @@ export async function reconnect(): Promise<{ ok: boolean; error: string | null }
   notes = next.schema.notes;
   completed_assignments = next.schema.completed_assignments;
   recent_views = next.schema.recent_views;
+  uploaded_images = next.schema.uploaded_images;
   return { ok: lastConnectionError === null, error: lastConnectionError };
 }
 

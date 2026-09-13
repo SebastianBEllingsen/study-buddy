@@ -11,3 +11,23 @@ export function parseDataUrlImage(
   if (!match) return null;
   return { mimeType: match[1], base64: match[2] };
 }
+
+// Caps for images stored inline in a DB row rather than handed to an AI
+// call — courses.cover_image/icon_image (CustomizeCourseDialog) and the
+// uploaded_images library both crop client-side to one of these two shapes
+// (see ImageCropDialog's ICON_*/COVER_* constants) before ever reaching the
+// server, so these are a backstop against a request built some other way,
+// not the normal path. The icon gets a looser cap than its small size
+// implies because a badge needing a transparent background is exported as
+// lossless PNG, which runs noticeably larger than an opaque JPEG the same
+// size.
+export const MAX_COVER_IMAGE_LENGTH = 2_000_000;
+export const MAX_ICON_IMAGE_LENGTH = 1_500_000;
+
+export function isValidCoverImage(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_COVER_IMAGE_LENGTH;
+}
+
+export function isValidIconImage(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_ICON_IMAGE_LENGTH;
+}

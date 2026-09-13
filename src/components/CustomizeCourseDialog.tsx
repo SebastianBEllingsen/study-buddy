@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { Image as ImageIcon, X } from "lucide-react";
+import { Image as ImageIcon, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
-import type { Course } from "@/lib/models";
+import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import type { Course, UploadedImageKind } from "@/lib/models";
 
 // Icon is the small square badge (home course card, course header); cover is
 // the wide Notion-style banner on the course detail page. Kept as separate
@@ -63,6 +64,7 @@ export function CustomizeCourseDialog({
   const [saving, setSaving] = useState(false);
   const [cropTarget, setCropTarget] = useState<"icon" | "cover" | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
+  const [libraryTarget, setLibraryTarget] = useState<UploadedImageKind | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const iconInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,6 +88,20 @@ export function CustomizeCourseDialog({
   function handleCropped(dataUrl: string) {
     if (cropTarget === "icon") setIconImage(dataUrl);
     else if (cropTarget === "cover") setCoverImage(dataUrl);
+    if (cropTarget) {
+      // Feeds the "Choose from previous uploads" gallery — fire-and-forget,
+      // a failed write here shouldn't block using the image you just cropped.
+      fetch("/api/uploaded-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: cropTarget, dataUrl }),
+      }).catch(() => {});
+    }
+  }
+
+  function handlePickFromLibrary(dataUrl: string) {
+    if (libraryTarget === "icon") setIconImage(dataUrl);
+    else if (libraryTarget === "cover") setCoverImage(dataUrl);
   }
 
   function handleRemoveCover() {
@@ -125,7 +141,7 @@ export function CustomizeCourseDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Customize course</DialogTitle>
           <DialogDescription>
@@ -134,7 +150,13 @@ export function CustomizeCourseDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        {/* Badge/emoji picker + cover + color easily add up to more height
+            than a short (e.g. half-screen-height) window has to give — same
+            fixed-header/scrolling-body split as EditFlashcardsDialog and
+            DashboardCustomizeDialog, so the dialog stays fully reachable
+            instead of running off both the top and bottom of the
+            viewport with no way to scroll to the rest of it. */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
           <div className="space-y-2">
             <Label>Badge image</Label>
             <input
@@ -186,6 +208,14 @@ export function CustomizeCourseDialog({
                   Upload image
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setLibraryTarget("icon")}
+                aria-label="Choose a badge image from previous uploads"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
             </div>
             {iconImage && (
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -246,6 +276,15 @@ export function CustomizeCourseDialog({
                 <Button
                   variant="secondary"
                   size="icon-sm"
+                  className="absolute top-1.5 left-1.5"
+                  onClick={() => setLibraryTarget("cover")}
+                  aria-label="Choose a different cover from previous uploads"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
                   className="absolute top-1.5 right-1.5"
                   onClick={handleRemoveCover}
                   aria-label="Remove cover banner"
@@ -254,10 +293,20 @@ export function CustomizeCourseDialog({
                 </Button>
               </div>
             ) : (
-              <Button variant="outline" size="sm" onClick={() => coverInputRef.current?.click()}>
-                <ImageIcon className="size-3.5" />
-                Upload image
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => coverInputRef.current?.click()}>
+                  <ImageIcon className="size-3.5" />
+                  Upload image
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setLibraryTarget("cover")}
+                  aria-label="Choose a cover from previous uploads"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              </div>
             )}
             {coverImage && (
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -331,6 +380,14 @@ export function CustomizeCourseDialog({
         outputFormat={cropTarget === "icon" ? "png" : "jpeg"}
         title={cropTarget === "cover" ? "Position cover banner" : "Position badge image"}
         onCropped={handleCropped}
+      />
+      <ImageLibraryDialog
+        open={libraryTarget !== null}
+        onOpenChange={(next) => {
+          if (!next) setLibraryTarget(null);
+        }}
+        kind={libraryTarget ?? "icon"}
+        onSelect={handlePickFromLibrary}
       />
     </>
   );

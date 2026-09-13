@@ -299,7 +299,7 @@ export function DashboardCustomizeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Customize dashboard</DialogTitle>
           <DialogDescription>
@@ -308,54 +308,61 @@ export function DashboardCustomizeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Above your courses</p>
-          <ZoneGrid
-            zone="top"
-            gridRef={topGridRef}
-            widgets={shownTop}
-            activeId={activeId}
-            previewLayout={previewLayout}
-            onMoveStart={(e, widget) =>
-              startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
-            }
-            onResizeStart={startResize}
-            onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
-            renderContent={renderContent}
-            emptyLabel="Nothing here — drag a widget up from Hidden."
-          />
-        </div>
+        {/* Two grids plus the Hidden tray easily run taller than the
+            viewport (especially with several widgets), so this scrolls in
+            place — same fixed-header/scrolling-body split as
+            EditFlashcardsDialog — instead of the dialog itself overflowing
+            past the screen edge. */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Above your courses</p>
+            <ZoneGrid
+              zone="top"
+              gridRef={topGridRef}
+              widgets={shownTop}
+              activeId={activeId}
+              previewLayout={previewLayout}
+              onMoveStart={(e, widget) =>
+                startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
+              }
+              onResizeStart={startResize}
+              onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
+              renderContent={renderContent}
+              emptyLabel="Nothing here — drag a widget up from Hidden."
+            />
+          </div>
 
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Below your courses</p>
-          <ZoneGrid
-            zone="bottom"
-            gridRef={bottomGridRef}
-            widgets={shownBottom}
-            activeId={activeId}
-            previewLayout={previewLayout}
-            onMoveStart={(e, widget) =>
-              startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
-            }
-            onResizeStart={startResize}
-            onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
-            renderContent={renderContent}
-            emptyLabel="Nothing here — drag a widget down from Hidden or from the grid above."
-          />
-        </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Below your courses</p>
+            <ZoneGrid
+              zone="bottom"
+              gridRef={bottomGridRef}
+              widgets={shownBottom}
+              activeId={activeId}
+              previewLayout={previewLayout}
+              onMoveStart={(e, widget) =>
+                startMove(e, widget, (e.currentTarget as HTMLElement).closest<HTMLElement>(".dashboard-tile")?.getBoundingClientRect() ?? null)
+              }
+              onResizeStart={startResize}
+              onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
+              renderContent={renderContent}
+              emptyLabel="Nothing here — drag a widget down from Hidden or from the grid above."
+            />
+          </div>
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Hidden</p>
-          <div className="flex min-h-11 flex-wrap gap-2 rounded-xl border border-dashed p-2">
-            {hidden.length === 0 && <p className="py-1 text-xs text-muted-foreground">Nothing hidden.</p>}
-            {hidden.map((widget) => (
-              <HiddenChip
-                key={widget.id}
-                widget={widget}
-                onMoveStart={(e) => startMove(e, widget, null)}
-                onShow={() => onChange(moveWidgetTo(widgets, widget.id, 0, 0))}
-              />
-            ))}
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Hidden</p>
+            <div className="flex min-h-11 flex-wrap gap-2 rounded-xl border border-dashed p-2">
+              {hidden.length === 0 && <p className="py-1 text-xs text-muted-foreground">Nothing hidden.</p>}
+              {hidden.map((widget) => (
+                <HiddenChip
+                  key={widget.id}
+                  widget={widget}
+                  onMoveStart={(e) => startMove(e, widget, null)}
+                  onShow={() => onChange(moveWidgetTo(widgets, widget.id, 0, 0))}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </DialogContent>
