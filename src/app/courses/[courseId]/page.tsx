@@ -498,9 +498,15 @@ function GeneratedItemList({
                 </span>
               )}
               {notifiedItemIds.has(item.id) && (
-                <span className="shrink-0 rounded-full bg-sage/15 px-1.5 py-0.5 text-xs font-medium text-sage">
-                  new
-                </span>
+                // Same dot, same color, as the one on this course's card on
+                // the home page — this is specifically what that dot was
+                // referencing, so it reads as the same notification, not a
+                // second unrelated one.
+                <span
+                  aria-label="New — not yet opened"
+                  title="New — not yet opened"
+                  className="size-2 shrink-0 rounded-full bg-focus"
+                />
               )}
               <span className="shrink-0 text-xs text-muted-foreground">
                 {new Date(item.created_at).toLocaleDateString()}

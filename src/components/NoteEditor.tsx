@@ -176,6 +176,92 @@ function wikilinkPills(targets: LinkTargets, onNavigate: (href: string) => void)
   );
 }
 
+class MarkdownLinkWidget extends WidgetType {
+  constructor(
+    readonly text: string,
+    readonly url: string
+  ) {
+    super();
+  }
+
+  eq(other: MarkdownLinkWidget): boolean {
+    return other.text === this.text && other.url === this.url;
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement("span");
+    span.className = "cm-md-link";
+    span.title = "Click to edit — Ctrl/Cmd-click to open";
+    span.textContent = this.text;
+    span.addEventListener("mousedown", (e) => {
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        window.open(this.url, "_blank", "noopener,noreferrer");
+      }
+    });
+    return span;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+// Obsidian-style concealment for ordinary markdown links — [text](url) shows
+// just the styled text with the destination hidden, except on whatever
+// line/span the cursor is touching, where the raw syntax reappears so it
+// stays editable. Same idea as wikilinkPills above, but driven by
+// CodeMirror's own markdown syntax tree (a real "Link" node) instead of a
+// regex — [[...]] isn't valid CommonMark link syntax at all, so the two
+// never see the same text.
+function markdownLinkPills(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    const sel = view.state.selection.main;
+    const tree = syntaxTree(view.state);
+    for (const { from, to } of view.visibleRanges) {
+      tree.iterate({
+        from,
+        to,
+        enter: (node) => {
+          if (node.name !== "Link") return;
+          const reveal = sel.from <= node.to && sel.to >= node.from;
+          if (reveal) return;
+          // Read the label/URL off their own mark nodes rather than
+          // assuming fixed offsets from node.from — CommonMark allows
+          // whitespace inside "( url )", so "]"/"(" aren't always a fixed
+          // distance from the destination.
+          const closeBracket = node.node.getChildren("LinkMark")[1];
+          const urlNode = node.node.getChild("URL");
+          if (!closeBracket || !urlNode) return;
+          const text = view.state.sliceDoc(node.from + 1, closeBracket.from);
+          const url = view.state.sliceDoc(urlNode.from, urlNode.to);
+          if (!text || !url) return;
+          ranges.push(
+            Decoration.replace({ widget: new MarkdownLinkWidget(text, url) }).range(node.from, node.to)
+          );
+        },
+      });
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+
 // Obsidian-style "Live Preview": headings/bold/italic/strikethrough/inline
 // code render styled, with their raw markup characters (##, **, _, `, ~~)
 // concealed — except on whatever line/span the cursor is currently touching,
@@ -399,6 +485,14 @@ const editorTheme = EditorView.theme({
   ".cm-wikilink-missing": {
     backgroundColor: "color-mix(in srgb, var(--clay) 12%, transparent)",
     color: "var(--clay)",
+  },
+  // Ordinary [text](url) links — plain underlined text, not a pill/badge
+  // like .cm-wikilink, matching how these read in Preview and in Obsidian.
+  ".cm-md-link": {
+    color: "var(--focus)",
+    textDecoration: "underline",
+    textDecorationColor: "color-mix(in srgb, var(--focus) 45%, transparent)",
+    cursor: "pointer",
   },
   ".cm-highlight-flash": {
     backgroundColor: "color-mix(in srgb, var(--amber) 40%, transparent)",
@@ -730,6 +824,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       EditorView.lineWrapping,
       autocompletion({ override: [noteLinkCompletionSource(targets)] }),
       wikilinkPills(targets, onNavigate),
+      markdownLinkPills(),
       liveMarkdownFormatting(),
       highlightField,
       editorTheme,
