@@ -1075,13 +1075,56 @@ function HomePageContent() {
   const topWidgets = settings?.homeWidgets.filter((w) => w.enabled && w.zone === "top") ?? [];
   const bottomWidgets = settings?.homeWidgets.filter((w) => w.enabled && w.zone === "bottom") ?? [];
 
+  const hasBanner = !!settings?.dashboardBackgroundImage;
+  const bannerStyle = settings?.dashboardBannerStyle ?? "overlap";
+
+  const dashboardSection = settings && (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">Your dashboard</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 px-2 text-xs"
+          onClick={() => setDashboardCustomizeOpen(true)}
+        >
+          <SlidersHorizontal className="size-3.5" />
+          Customize
+        </Button>
+      </div>
+      {topWidgets.length === 0 ? (
+        <Card elevation="flat" className="items-center border py-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            Nothing here — add a widget from Customize.
+          </p>
+        </Card>
+      ) : (
+        <div className="dashboard-grid">
+          {topWidgets.map((w) => (
+            <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
+              {renderWidget(w)}
+            </div>
+          ))}
+        </div>
+      )}
+      <DashboardCustomizeDialog
+        open={dashboardCustomizeOpen}
+        onOpenChange={setDashboardCustomizeOpen}
+        widgets={settings.homeWidgets}
+        onChange={persistHomeWidgets}
+        renderContent={renderWidget}
+      />
+    </div>
+  );
+
   return (
     <>
-      {settings?.dashboardBackgroundImage && (
+      {hasBanner && bannerStyle === "overlap" && (
         // Same full-bleed, Steam-library-style treatment as a course page's
-        // page_background_image — see courses/[courseId]/page.tsx — just
-        // purely atmospheric here (no title/breadcrumb overlaid) since
-        // "Your dashboard" already renders in normal flow right below it.
+        // page_background_image — see courses/[courseId]/page.tsx. The
+        // dashboard section right below gets pulled up into this image's
+        // bottom edge (see the negative margin below) rather than just
+        // sitting underneath it — see Settings' "Banner style".
         <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
           <div
             className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
@@ -1092,43 +1135,27 @@ function HomePageContent() {
         </div>
       )}
     <div className="space-y-6">
-      {settings && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">Your dashboard</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 px-2 text-xs"
-              onClick={() => setDashboardCustomizeOpen(true)}
-            >
-              <SlidersHorizontal className="size-3.5" />
-              Customize
-            </Button>
-          </div>
-          {topWidgets.length === 0 ? (
-            <Card elevation="flat" className="items-center border py-8 text-center">
-              <p className="text-sm text-muted-foreground">
-                Nothing here — add a widget from Customize.
-              </p>
-            </Card>
-          ) : (
-            <div className="dashboard-grid">
-              {topWidgets.map((w) => (
-                <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
-                  {renderWidget(w)}
-                </div>
-              ))}
-            </div>
-          )}
-          <DashboardCustomizeDialog
-            open={dashboardCustomizeOpen}
-            onOpenChange={setDashboardCustomizeOpen}
-            widgets={settings.homeWidgets}
-            onChange={persistHomeWidgets}
-            renderContent={renderWidget}
+      {hasBanner && bannerStyle === "backdrop" ? (
+        // The banner spans the whole dashboard section — heading through
+        // every widget row, not just its top edge — so it has to size
+        // itself to however tall that content ends up being (one widget row
+        // or three) rather than a fixed height: this wrapper is "relative"
+        // and the image is "absolute inset-0", so it just fills whatever
+        // box dashboardSection's own normal-flow layout establishes.
+        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}
           />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-background/70 to-background" />
+          <div className="relative mx-auto max-w-5xl px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
+            {dashboardSection}
+          </div>
         </div>
+      ) : (
+        // "overlap" (or no banner at all, where this negative margin is
+        // simply never applied) — see the comment on the banner block above.
+        <div className={hasBanner ? "relative -mt-12 sm:-mt-16" : undefined}>{dashboardSection}</div>
       )}
 
       <div className="flex items-center justify-between">

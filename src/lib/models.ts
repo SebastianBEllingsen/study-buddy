@@ -145,6 +145,7 @@ interface SettingsRow {
   app_icon_image: string | null;
   app_font: string | null;
   dashboard_background_image: string | null;
+  dashboard_banner_style: string | null;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -168,6 +169,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       app_icon_image: app_settings.app_icon_image,
       app_font: app_settings.app_font,
       dashboard_background_image: app_settings.dashboard_background_image,
+      dashboard_banner_style: app_settings.dashboard_banner_style,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -252,6 +254,13 @@ export interface AppSettings {
   // A Steam-library-style full-bleed backdrop behind the home dashboard —
   // same idea/shape as a course's own page_background_image, just app-wide.
   dashboardBackgroundImage: string | null;
+  // How the dashboard widgets sit relative to that backdrop, when there is
+  // one — "overlap" (default): the widget grid shifts up so its top row
+  // dips into the bottom of the banner, like a Steam/Netflix hero banner.
+  // "backdrop": the banner spans the full dashboard section (heading +
+  // every widget row), with all of it rendered on top throughout, not just
+  // the top edge. Meaningless with no dashboardBackgroundImage set.
+  dashboardBannerStyle: "overlap" | "backdrop";
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -274,6 +283,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     appIconImage: row?.app_icon_image ?? null,
     appFont: row?.app_font ?? null,
     dashboardBackgroundImage: row?.dashboard_background_image ?? null,
+    dashboardBannerStyle: row?.dashboard_banner_style === "backdrop" ? "backdrop" : "overlap",
   };
 }
 
@@ -300,6 +310,7 @@ export async function setAppBranding(fields: {
   appIconImage?: string | null;
   appFont?: string | null;
   dashboardBackgroundImage?: string | null;
+  dashboardBannerStyle?: "overlap" | "backdrop" | null;
 }): Promise<void> {
   const values: Record<string, string | null> = {};
   if ("appName" in fields) values.app_name = fields.appName ?? null;
@@ -307,6 +318,7 @@ export async function setAppBranding(fields: {
   if ("appIconImage" in fields) values.app_icon_image = fields.appIconImage ?? null;
   if ("appFont" in fields) values.app_font = fields.appFont ?? null;
   if ("dashboardBackgroundImage" in fields) values.dashboard_background_image = fields.dashboardBackgroundImage ?? null;
+  if ("dashboardBannerStyle" in fields) values.dashboard_banner_style = fields.dashboardBannerStyle ?? null;
   await db
     .update(app_settings)
     .set({ ...values, updated_at: nowUtc() })

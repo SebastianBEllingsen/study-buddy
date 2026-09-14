@@ -78,6 +78,11 @@ const STORAGE_LABELS: Record<StorageMode, string> = {
   supabase: "Supabase (synced)",
 };
 
+const BANNER_STYLE_LABELS: Record<AppSettings["dashboardBannerStyle"], string> = {
+  overlap: "Widgets overlap it",
+  backdrop: "Full backdrop",
+};
+
 function AiSection() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [backend, setBackendState] = useState<AiBackend>("api");
@@ -767,6 +772,7 @@ function BrandingSection() {
     appIcon?: string | null;
     appIconImage?: string | null;
     dashboardBackgroundImage?: string | null;
+    dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
   }) {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -918,6 +924,28 @@ function BrandingSection() {
             >
               <MoreHorizontal className="size-3.5" />
             </Button>
+          </div>
+        )}
+        {settings.dashboardBackgroundImage && (
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <span className="text-xs text-muted-foreground">Banner style</span>
+            <Select
+              value={settings.dashboardBannerStyle}
+              onValueChange={(value: AppSettings["dashboardBannerStyle"] | null) =>
+                value && saveBranding({ dashboardBannerStyle: value })
+              }
+            >
+              <SelectTrigger className="h-8 w-40 text-xs">
+                <SelectValue>{(v: AppSettings["dashboardBannerStyle"]) => BANNER_STYLE_LABELS[v] ?? v}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(BANNER_STYLE_LABELS) as AppSettings["dashboardBannerStyle"][]).map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {BANNER_STYLE_LABELS[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>

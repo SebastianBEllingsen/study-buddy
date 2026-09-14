@@ -4,7 +4,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSt
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxTree } from "@codemirror/language";
 import {
   autocompletion,
@@ -15,12 +15,14 @@ import {
   Decoration,
   type DecorationSet,
   EditorView,
+  keymap,
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
 import {
   EditorSelection,
+  Prec,
   StateEffect,
   StateField,
   type Extension,
@@ -262,6 +264,59 @@ function markdownLinkPills(): Extension {
   );
 }
 
+// Matches a list item's marker — leading indent, the bullet/number itself,
+// and the whitespace after it — i.e. exactly the prefix a wrapped line
+// should align under. Used only to measure that prefix's width, never to
+// touch the text itself (unlike concealment elsewhere in this file, list
+// markers stay visible; only where a *wrapped* continuation lands changes).
+const LIST_MARKER_RE = /^(\s*)([-*+]|\d{1,9}[.)])(\s+)/;
+
+// A long list item currently wraps flush to the editor's left edge, same as
+// any other paragraph — Obsidian (and Preview's own <ul>/<ol> via
+// globals.css) instead hang-indents a wrapped line under the item's text, so
+// it doesn't read as a new, unrelated line. CSS can do this natively via a
+// negative text-indent (pulls the line's first visual row back by the
+// marker's width) paired with matching padding-left (pushes every row,
+// wrapped ones included, out by that same width) — only the amount has to
+// be computed per line, since marker width varies ("- " vs "12. " vs a
+// nested "  - "). See the matching --cm-line-indent variable in editorTheme.
+function listHangingIndent(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    for (const { from, to } of view.visibleRanges) {
+      for (let pos = from; pos <= to; ) {
+        const line = view.state.doc.lineAt(pos);
+        const match = LIST_MARKER_RE.exec(line.text);
+        if (match) {
+          const width = match[0].length;
+          ranges.push(
+            Decoration.line({
+              attributes: { style: `--cm-line-indent: ${width}ch; text-indent: -${width}ch;` },
+            }).range(line.from)
+          );
+        }
+        pos = line.to + 1;
+      }
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = build(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+
 // Obsidian-style "Live Preview": headings/bold/italic/strikethrough/inline
 // code render styled, with their raw markup characters (##, **, _, `, ~~)
 // concealed — except on whatever line/span the cursor is currently touching,
@@ -460,7 +515,15 @@ const editorTheme = EditorView.theme({
     padding: "1rem 0",
     caretColor: "var(--foreground)",
   },
-  ".cm-line": { padding: "0 1.25rem" },
+  ".cm-line": {
+    padding: "0 1.25rem",
+    // --cm-line-indent is 0 on ordinary lines and set per-line (to the list
+    // marker's own width) by listHangingIndent above — declared after the
+    // padding shorthand so it overrides just the left side, same base gutter
+    // otherwise.
+    "--cm-line-indent": "0px",
+    paddingLeft: "calc(1.25rem + var(--cm-line-indent))",
+  },
   "&.cm-focused": { outline: "none" },
   // @codemirror/view's base theme hardcodes the blinking caret to black
   // (only swapping to a light gray under its own internal "dark" facet,
@@ -821,10 +884,18 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       // language so strikethrough (~~text~~) actually shows up in the syntax
       // tree for liveMarkdownFormatting() to conceal, same as headings/bold.
       markdown({ base: markdownLanguage }),
+      // markdown() parses the syntax tree but doesn't bind any keys itself —
+      // without this, Enter falls through to basicSetup's default binding
+      // (plain newline, nothing list-aware), so a new line after "1. " or
+      // "- " starts unindented instead of continuing the list/quote the same
+      // way Obsidian's editor does. Prec.highest so it's checked before that
+      // default Enter binding rather than after it.
+      Prec.highest(keymap.of(markdownKeymap)),
       EditorView.lineWrapping,
       autocompletion({ override: [noteLinkCompletionSource(targets)] }),
       wikilinkPills(targets, onNavigate),
       markdownLinkPills(),
+      listHangingIndent(),
       liveMarkdownFormatting(),
       highlightField,
       editorTheme,

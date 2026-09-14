@@ -125,9 +125,9 @@ const MODE_LABELS: Record<GenerationMode, string> = {
 export async function generateForCourse(
   courseId: number,
   mode: GenerationMode,
-  folderId?: number | null
+  options?: { folderId?: number | null; documentIds?: number[] | null }
 ) {
-  const context = await buildCourseContext(courseId, folderId);
+  const context = await buildCourseContext(courseId, options);
   if (context.documentIds.length === 0) {
     throw new NoDocumentsError();
   }

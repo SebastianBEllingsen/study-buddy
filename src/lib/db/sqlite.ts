@@ -441,6 +441,9 @@ function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "dashboard_background_image")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN dashboard_background_image TEXT");
   }
+  if (!hasColumn("app_settings", "dashboard_banner_style")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN dashboard_banner_style TEXT");
+  }
 }
 
 function createConnection(): Database.Database {

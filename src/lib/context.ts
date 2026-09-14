@@ -28,9 +28,13 @@ export interface CourseContext {
  * a mandatory courseId — there is no "all documents" query anywhere else, so
  * one course's material structurally cannot leak into another's prompt.
  *
- * folderId narrows further to a single folder within the course; omitted (or
- * null), it uses every folder in the course. Either way the boundary never
- * crosses a course — folderId only narrows, it never widens past courseId.
+ * options.folderId narrows to a single folder within the course; options.
+ * documentIds narrows to an exact, hand-picked set of documents instead
+ * (independent of folder — a custom pick can span several). documentIds
+ * wins if both are given. Neither ever widens past courseId: documentIds is
+ * always intersected with this course's own extracted documents, so passing
+ * an id from a different course just silently drops it rather than leaking
+ * that document's text in here.
  *
  * Picking a parent folder pools it with its own subfolders (documents filed
  * directly in the parent, plus every one of its subfolders) — picking a
@@ -40,16 +44,32 @@ export interface CourseContext {
  */
 export async function buildCourseContext(
   courseId: number,
-  folderId?: number | null
+  options?: { folderId?: number | null; documentIds?: number[] | null }
 ): Promise<CourseContext> {
   const course = await getCourse(courseId);
   if (!course) {
     throw new Error(`Course ${courseId} not found`);
   }
 
+  const folderId = options?.folderId ?? null;
+  const requestedDocumentIds = options?.documentIds ?? null;
+
+  const extracted = (await listDocumentsForCourse(courseId)).filter(
+    (d) => d.status === "extracted" && d.extracted_text
+  );
+
   let scopeLabel = "All material";
-  let folderIds: number[] | null = null;
-  if (folderId != null) {
+  let documents: DocumentRow[];
+  // A hand-picked selection means the result isn't filed under any single
+  // folder — generateForCourse falls back to the course's default folder,
+  // same as the "All course material" (folderId null) case below.
+  let resolvedFolderId: number | null = null;
+
+  if (requestedDocumentIds && requestedDocumentIds.length > 0) {
+    const idSet = new Set(requestedDocumentIds);
+    documents = extracted.filter((d) => idSet.has(d.id));
+    scopeLabel = `${documents.length} selected document${documents.length === 1 ? "" : "s"}`;
+  } else if (folderId != null) {
     const folder = await getFolder(folderId);
     if (!folder || folder.course_id !== courseId) {
       throw new Error(`Folder ${folderId} not found in course ${courseId}`);
@@ -57,16 +77,13 @@ export async function buildCourseContext(
     const subfolderIds = (await listFoldersForCourse(courseId))
       .filter((f) => f.parent_folder_id === folderId)
       .map((f) => f.id);
-    folderIds = [folderId, ...subfolderIds];
+    const folderIds = [folderId, ...subfolderIds];
+    documents = extracted.filter((d) => folderIds.includes(d.folder_id));
     scopeLabel = subfolderIds.length > 0 ? `${folder.name} (incl. subfolders)` : folder.name;
+    resolvedFolderId = folderId;
+  } else {
+    documents = extracted;
   }
-
-  const documents = (await listDocumentsForCourse(courseId)).filter(
-    (d) =>
-      d.status === "extracted" &&
-      d.extracted_text &&
-      (folderIds == null || folderIds.includes(d.folder_id))
-  );
 
   const combinedText = combineDocumentText(documents);
 
@@ -75,7 +92,7 @@ export async function buildCourseContext(
   return {
     courseId,
     courseName: course.name,
-    folderId: folderId ?? null,
+    folderId: resolvedFolderId,
     scopeLabel,
     documentIds: documents.map((d) => d.id),
     combinedText,

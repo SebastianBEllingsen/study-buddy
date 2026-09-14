@@ -272,6 +272,112 @@ function FolderSelect({
   );
 }
 
+// Lets generation source from an exact, hand-picked set of documents instead
+// of a whole folder — independent of folder boundaries, so a pick can span
+// several. Draft state so Cancel discards changes; only Apply commits back
+// to the Practice card's own selection.
+function DocumentPickerDialog({
+  open,
+  onOpenChange,
+  documents,
+  folders,
+  selected,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  documents: DocumentRow[];
+  folders: Folder[];
+  selected: Set<number>;
+  onApply: (ids: Set<number>) => void;
+}) {
+  const [draft, setDraft] = useState<Set<number>>(selected);
+  // Re-seeds the draft from the committed selection each time the dialog
+  // opens — render-phase sync (see FolderCard's own seededFor-style guards
+  // elsewhere in this app) rather than a useEffect.
+  const [seeded, setSeeded] = useState(false);
+  if (open && !seeded) {
+    setDraft(new Set(selected));
+    setSeeded(true);
+  } else if (!open && seeded) {
+    setSeeded(false);
+  }
+
+  function toggle(id: number) {
+    setDraft((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const byFolder = new Map<number, DocumentRow[]>();
+  for (const doc of documents) {
+    const list = byFolder.get(doc.folder_id) ?? [];
+    list.push(doc);
+    byFolder.set(doc.folder_id, list);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Choose documents</DialogTitle>
+          <DialogDescription>
+            Generate from exactly these, regardless of which folder each is filed in.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
+          {documents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No documents in this course yet.</p>
+          ) : (
+            [...byFolder.entries()].map(([folderId, docs]) => (
+              <div key={folderId} className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">
+                  {folders.find((f) => f.id === folderId)?.name ?? "Unsorted"}
+                </p>
+                {docs.map((doc) => (
+                  <label
+                    key={doc.id}
+                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${
+                      doc.status === "extracted" ? "cursor-pointer hover:bg-muted" : "opacity-50"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={draft.has(doc.id)}
+                      disabled={doc.status !== "extracted"}
+                      onCheckedChange={() => toggle(doc.id)}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{doc.filename}</span>
+                    {doc.status !== "extracted" && (
+                      <span className="shrink-0 text-xs text-muted-foreground">{doc.status}</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            disabled={draft.size === 0}
+            onClick={() => {
+              onApply(draft);
+              onOpenChange(false);
+            }}
+          >
+            Use {draft.size} document{draft.size === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function DocumentList({
   documents,
   folderId,
@@ -1271,6 +1377,12 @@ export default function CoursePage() {
 
   const [generating, setGenerating] = useState<GenerationMode | null>(null);
   const [scope, setScope] = useState<string>(ALL_MATERIAL);
+  // A hand-picked document selection (see DocumentPickerDialog) takes over
+  // from `scope` above whenever it's non-empty — the two are mutually
+  // exclusive ways of answering the same "From" question, not a folder plus
+  // extra documents on top of it.
+  const [generationDocIds, setGenerationDocIds] = useState<Set<number>>(new Set());
+  const [docPickerOpen, setDocPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -1772,7 +1884,11 @@ export default function CoursePage() {
       const res = await fetch(`/api/courses/${courseId}/generate/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderId: scope === ALL_MATERIAL ? null : Number(scope) }),
+        body: JSON.stringify(
+          generationDocIds.size > 0
+            ? { documentIds: [...generationDocIds] }
+            : { folderId: scope === ALL_MATERIAL ? null : Number(scope) }
+        ),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -1858,11 +1974,13 @@ export default function CoursePage() {
   const pooledFolderIds = (folderId: number) => [folderId, ...subfolderIdsOf(folderId)];
 
   const scopedHasExtracted =
-    scope === ALL_MATERIAL
-      ? detail.documents.some((d) => d.status === "extracted")
-      : pooledFolderIds(Number(scope)).some((id) =>
-          docsByFolder(id).some((d) => d.status === "extracted")
-        );
+    generationDocIds.size > 0
+      ? detail.documents.some((d) => generationDocIds.has(d.id) && d.status === "extracted")
+      : scope === ALL_MATERIAL
+        ? detail.documents.some((d) => d.status === "extracted")
+        : pooledFolderIds(Number(scope)).some((id) =>
+            docsByFolder(id).some((d) => d.status === "extracted")
+          );
 
   const viewedDoc = detail.documents.find((d) => d.id === viewingDocumentId);
   const viewingDocument = viewedDoc
@@ -2435,45 +2553,93 @@ export default function CoursePage() {
           </h2>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Label className="text-sm text-muted-foreground">From</Label>
-            <Select value={scope} onValueChange={(v) => setScope(v ?? ALL_MATERIAL)}>
-              <SelectTrigger size="sm">
-                <SelectValue>
-                  {(v: string) => {
-                    if (v === ALL_MATERIAL) return "All course material";
-                    const folder = detail.folders.find((f) => String(f.id) === v);
-                    if (!folder) return v;
-                    const hasSubfolders = subfolderIdsOf(folder.id).length > 0;
-                    return hasSubfolders ? `${folder.name} (incl. subfolders)` : folder.name;
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_MATERIAL}>All course material</SelectItem>
-                {detail.folders
-                  .filter((folder) => folder.parent_folder_id == null)
-                  .map((folder) => {
-                    const subfolders = detail.folders.filter(
-                      (f) => f.parent_folder_id === folder.id
-                    );
-                    return (
-                      <SelectGroup key={folder.id}>
-                        <SelectItem value={String(folder.id)}>
-                          {folder.name}
-                          {subfolders.length > 0 ? " (incl. subfolders)" : ""}
-                        </SelectItem>
-                        {subfolders.map((sub) => (
-                          <SelectItem key={sub.id} value={String(sub.id)} className="pl-6">
-                            {sub.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    );
-                  })}
-              </SelectContent>
-            </Select>
+            {generationDocIds.size > 0 ? (
+              // A hand-picked document selection replaces the folder Select
+              // entirely rather than sitting alongside it — the two answer
+              // the same "From" question, so showing both would suggest
+              // they combine, which they don't (see generationDocIds' own
+              // comment above).
+              <>
+                <Badge variant="secondary" className="gap-1">
+                  {generationDocIds.size} document{generationDocIds.size === 1 ? "" : "s"} selected
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setDocPickerOpen(true)}
+                >
+                  Change
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7"
+                  aria-label="Clear document selection"
+                  onClick={() => setGenerationDocIds(new Set())}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </>
+            ) : (
+              <>
+                <Select value={scope} onValueChange={(v) => setScope(v ?? ALL_MATERIAL)}>
+                  <SelectTrigger size="sm">
+                    <SelectValue>
+                      {(v: string) => {
+                        if (v === ALL_MATERIAL) return "All course material";
+                        const folder = detail.folders.find((f) => String(f.id) === v);
+                        if (!folder) return v;
+                        const hasSubfolders = subfolderIdsOf(folder.id).length > 0;
+                        return hasSubfolders ? `${folder.name} (incl. subfolders)` : folder.name;
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_MATERIAL}>All course material</SelectItem>
+                    {detail.folders
+                      .filter((folder) => folder.parent_folder_id == null)
+                      .map((folder) => {
+                        const subfolders = detail.folders.filter(
+                          (f) => f.parent_folder_id === folder.id
+                        );
+                        return (
+                          <SelectGroup key={folder.id}>
+                            <SelectItem value={String(folder.id)}>
+                              {folder.name}
+                              {subfolders.length > 0 ? " (incl. subfolders)" : ""}
+                            </SelectItem>
+                            {subfolders.map((sub) => (
+                              <SelectItem key={sub.id} value={String(sub.id)} className="pl-6">
+                                {sub.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        );
+                      })}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs text-muted-foreground"
+                  onClick={() => setDocPickerOpen(true)}
+                >
+                  or choose documents
+                </Button>
+              </>
+            )}
           </div>
+          <DocumentPickerDialog
+            open={docPickerOpen}
+            onOpenChange={setDocPickerOpen}
+            documents={detail.documents}
+            folders={detail.folders}
+            selected={generationDocIds}
+            onApply={setGenerationDocIds}
+          />
           {!scopedHasExtracted && (
             <p className="text-sm text-muted-foreground">
               Upload at least one PDF that extracts successfully in this scope before generating.

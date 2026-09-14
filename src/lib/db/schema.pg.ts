@@ -105,6 +105,10 @@ export const app_settings = pgTable("app_settings", {
   app_icon_image: text("app_icon_image"),
   app_font: text("app_font"),
   dashboard_background_image: text("dashboard_background_image"),
+  // "overlap" | "backdrop" | null (null == "overlap") — see the matching
+  // column/comment in schema.sqlite.ts and the AppSettings.dashboardBannerStyle
+  // doc comment in models.ts.
+  dashboard_banner_style: text("dashboard_banner_style"),
   updated_at: text("updated_at").notNull(),
 });
 

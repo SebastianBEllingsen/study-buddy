@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { ArrowLeft, Link2, Trash2 } from "lucide-react";
+import { ArrowLeft, Link2, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Note, NoteBacklink } from "@/lib/models";
 import { stripNoteLinkSyntax } from "@/lib/noteLinks";
@@ -202,6 +202,20 @@ export default function NotePage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            {/* The "← Course" link above doubles as a way back, but it reads
+                as "go to this course" rather than "close this note" — this
+                is the same destination, just in the conventional top-right
+                spot so it's recognizable as a close action on its own,
+                regardless of how you arrived here (search, a link from
+                another note, recent activity, ...). */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close note"
+              onClick={() => router.push(`/courses/${detail.note.course_id}`)}
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </Button>
           </div>
         </div>
 
@@ -245,7 +259,10 @@ export default function NotePage() {
           <Input
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
-            className="h-auto min-w-0 flex-1 border-none px-0 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0"
+            // px-1.5, not px-0 — flush against the icon read as cramped (a
+            // 6px flex gap alone, at text-2xl) rather than intentionally
+            // heading-like.
+            className="h-auto min-w-0 flex-1 border-none px-1.5 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0"
             placeholder="Untitled"
           />
         </div>

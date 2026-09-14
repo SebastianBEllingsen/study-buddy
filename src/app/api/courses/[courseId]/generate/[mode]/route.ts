@@ -19,9 +19,12 @@ export async function POST(request: Request, { params }: Params) {
     typeof body?.folderId === "number" && Number.isInteger(body.folderId)
       ? body.folderId
       : null;
+  const documentIds = Array.isArray(body?.documentIds)
+    ? body.documentIds.filter((id: unknown): id is number => typeof id === "number" && Number.isInteger(id))
+    : null;
 
   try {
-    const item = await generateForCourse(Number(courseId), mode as GenerationMode, folderId);
+    const item = await generateForCourse(Number(courseId), mode as GenerationMode, { folderId, documentIds });
     // Only when the user has opted out of being taken straight there —
     // otherwise there's nothing left to notify about by the time they'd see it.
     const { autoOpenGeneratedItems } = await getAppSettings();

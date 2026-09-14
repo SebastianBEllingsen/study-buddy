@@ -162,6 +162,15 @@ export async function POST(request: Request) {
     }
     branding.dashboardBackgroundImage = body.dashboardBackgroundImage;
   }
+  if ("dashboardBannerStyle" in body) {
+    if (body.dashboardBannerStyle !== "overlap" && body.dashboardBannerStyle !== "backdrop" && body.dashboardBannerStyle !== null) {
+      return Response.json(
+        { error: "dashboardBannerStyle must be \"overlap\", \"backdrop\", or null" },
+        { status: 400 }
+      );
+    }
+    branding.dashboardBannerStyle = body.dashboardBannerStyle;
+  }
   if (Object.keys(branding).length > 0) {
     await setAppBranding(branding);
   }
