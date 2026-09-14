@@ -13,6 +13,7 @@ import type {
   GenerationMode,
   FlashcardResult,
   AiBackend,
+  ChatRole,
 } from "../models";
 
 // Postgres-flavored mirror of schema.sqlite.ts — same logical shape, same
@@ -275,5 +276,23 @@ export const uploaded_images = pgTable("uploaded_images", {
   id: serial("id").primaryKey(),
   kind: text("kind").notNull(),
   data_url: text("data_url").notNull(),
+  created_at: text("created_at").notNull(),
+});
+
+// General-purpose AI chat assistant — see the matching comment in schema.sql.
+export const chat_conversations = pgTable("chat_conversations", {
+  id: serial("id").primaryKey(),
+  title: text("title"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+export const chat_messages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  conversation_id: integer("conversation_id")
+    .notNull()
+    .references(() => chat_conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull().$type<ChatRole>(),
+  content: text("content").notNull(),
   created_at: text("created_at").notNull(),
 });

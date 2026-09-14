@@ -4,6 +4,7 @@ import { Geist, Geist_Mono, Source_Serif_4, Space_Grotesk, Spectral, IBM_Plex_Sa
 import { Calendar } from "lucide-react";
 import SearchDialog from "@/components/SearchDialog";
 import SettingsDialog from "@/components/SettingsDialog";
+import ChatDialog from "@/components/ChatDialog";
 import HelpDialog from "@/components/HelpDialog";
 import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
@@ -116,6 +117,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                       Calendar
                     </Button>
                     <SearchDialog />
+                    <ChatDialog />
                     <SettingsDialog />
                     <HelpDialog />
                   </div>

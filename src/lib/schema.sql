@@ -216,3 +216,24 @@ CREATE TABLE IF NOT EXISTS uploaded_images (
 );
 
 CREATE INDEX IF NOT EXISTS idx_uploaded_images_kind ON uploaded_images(kind);
+
+-- A general-purpose AI chat assistant, independent of any course/document —
+-- see components/ChatDialog.tsx and lib/chat.ts. One row per conversation;
+-- chat_messages' ON DELETE CASCADE means deleting a conversation cleans up
+-- its messages too, no extra code needed.
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT, -- NULL until the first exchange sets it — see lib/chat.ts
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id INTEGER NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  role TEXT NOT NULL, -- 'user' | 'assistant'
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id ON chat_messages(conversation_id);

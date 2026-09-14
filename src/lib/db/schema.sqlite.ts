@@ -11,6 +11,7 @@ import type {
   GenerationMode,
   FlashcardResult,
   AiBackend,
+  ChatRole,
 } from "../models";
 
 // Mirrors src/lib/schema.sql's tables. Field names are snake_case (matching
@@ -249,5 +250,23 @@ export const uploaded_images = sqliteTable("uploaded_images", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   kind: text("kind").notNull(),
   data_url: text("data_url").notNull(),
+  created_at: text("created_at").notNull(),
+});
+
+// General-purpose AI chat assistant — see the matching comment in schema.sql.
+export const chat_conversations = sqliteTable("chat_conversations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+export const chat_messages = sqliteTable("chat_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  conversation_id: integer("conversation_id")
+    .notNull()
+    .references(() => chat_conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull().$type<ChatRole>(),
+  content: text("content").notNull(),
   created_at: text("created_at").notNull(),
 });

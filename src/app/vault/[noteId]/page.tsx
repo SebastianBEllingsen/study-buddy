@@ -261,13 +261,21 @@ export default function NotePage() {
             onChange={(e) => handleTitleChange(e.target.value)}
             // px-1.5, not px-0 — flush against the icon read as cramped (a
             // 6px flex gap alone, at text-2xl) rather than intentionally
-            // heading-like.
-            className="h-auto min-w-0 flex-1 border-none px-1.5 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0"
+            // heading-like. bg-transparent dark:bg-transparent overrides the
+            // base Input's own dark:bg-input/30 — without it this still
+            // reads as a form field (a visible tinted box) rather than
+            // plain heading text sitting on the page, dark mode especially.
+            className="h-auto min-w-0 flex-1 border-none bg-transparent px-1.5 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0 dark:bg-transparent"
             placeholder="Untitled"
           />
         </div>
 
-        <div className="min-h-0 flex-1 rounded-xl border">
+        {/* No border/rounded box here on purpose — Obsidian's own note view
+            has no visible card around the text either, just a thin
+            border-b under its breadcrumb bar (see NoteEditor's own toolbar
+            row) and then the page itself. A bordered container around this
+            read as a widget embedded in the page rather than the page. */}
+        <div className="min-h-0 flex-1">
           <NoteEditor ref={editorRef} value={markdown} onChange={handleMarkdownChange} />
         </div>
 

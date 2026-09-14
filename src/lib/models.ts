@@ -7,6 +7,8 @@ import {
   completed_assignments,
   courses,
   documents,
+  chat_conversations,
+  chat_messages,
   flashcard_reviews,
   flashcard_schedule,
   folders,
@@ -1964,4 +1966,107 @@ export async function listGenerationNotifications(): Promise<GenerationNotificat
     courseName: row.courses.name,
     createdAt: row.generation_notifications.created_at,
   }));
+}
+
+// --- AI chat assistant ---
+// A general-purpose chatbot independent of any course/document — see
+// components/ChatDialog.tsx and lib/chat.ts (which builds the actual model
+// call from a conversation's messages).
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatConversation {
+  id: number;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversationId: number;
+  role: ChatRole;
+  content: string;
+  createdAt: string;
+}
+
+function toChatConversation(row: typeof chat_conversations.$inferSelect): ChatConversation {
+  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+function toChatMessage(row: typeof chat_messages.$inferSelect): ChatMessage {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    role: row.role,
+    content: row.content,
+    createdAt: row.created_at,
+  };
+}
+
+export async function createChatConversation(): Promise<ChatConversation> {
+  const now = nowUtc();
+  const [row] = await db
+    .insert(chat_conversations)
+    .values({ created_at: now, updated_at: now })
+    .returning();
+  return toChatConversation(row);
+}
+
+// Newest-active-first — same ordering ChatGPT/Claude's own history list uses.
+export async function listChatConversations(): Promise<ChatConversation[]> {
+  const rows = await db.select().from(chat_conversations).orderBy(desc(chat_conversations.updated_at));
+  return rows.map(toChatConversation);
+}
+
+export async function getChatConversation(
+  id: number
+): Promise<{ conversation: ChatConversation; messages: ChatMessage[] } | undefined> {
+  const [row] = await db.select().from(chat_conversations).where(eq(chat_conversations.id, id)).limit(1);
+  if (!row) return undefined;
+  const messageRows = await db
+    .select()
+    .from(chat_messages)
+    .where(eq(chat_messages.conversation_id, id))
+    .orderBy(asc(chat_messages.id));
+  return { conversation: toChatConversation(row), messages: messageRows.map(toChatMessage) };
+}
+
+export async function deleteChatConversation(id: number): Promise<void> {
+  // chat_messages references this ON DELETE CASCADE — no separate cleanup.
+  await db.delete(chat_conversations).where(eq(chat_conversations.id, id));
+}
+
+// Appends one message and bumps the conversation's updated_at (what
+// listChatConversations sorts by) in the same call — every append is
+// "activity" on the conversation, not just user ones. The very first user
+// message also seeds the conversation's title (truncated — a short label
+// for the history list, not the full first message), same as ChatGPT/
+// Claude's own auto-titling; later messages never touch it.
+export async function addChatMessage(
+  conversationId: number,
+  role: ChatRole,
+  content: string
+): Promise<ChatMessage> {
+  const now = nowUtc();
+  const [message] = await db
+    .insert(chat_messages)
+    .values({ conversation_id: conversationId, role, content, created_at: now })
+    .returning();
+
+  const updates: { updated_at: string; title?: string } = { updated_at: now };
+  if (role === "user") {
+    const [existing] = await db
+      .select({ title: chat_conversations.title })
+      .from(chat_conversations)
+      .where(eq(chat_conversations.id, conversationId))
+      .limit(1);
+    if (existing && existing.title === null) {
+      const trimmed = content.trim().slice(0, 60);
+      updates.title = trimmed.length < content.trim().length ? `${trimmed}…` : trimmed;
+    }
+  }
+  await db.update(chat_conversations).set(updates).where(eq(chat_conversations.id, conversationId));
+
+  return toChatMessage(message);
 }
