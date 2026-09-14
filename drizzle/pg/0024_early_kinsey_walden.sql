@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "ai_grading_enabled" boolean DEFAULT false NOT NULL;

@@ -94,6 +94,7 @@ export let uploaded_images = initial.schema.uploaded_images;
 export let generation_notifications = initial.schema.generation_notifications;
 export let chat_conversations = initial.schema.chat_conversations;
 export let chat_messages = initial.schema.chat_messages;
+export let quiz_generation_presets = initial.schema.quiz_generation_presets;
 
 // Re-resolves the active backend from the current on-disk/env config and
 // swaps every binding above in place. Called by
@@ -122,6 +123,7 @@ export async function reconnect(): Promise<{ ok: boolean; error: string | null }
   generation_notifications = next.schema.generation_notifications;
   chat_conversations = next.schema.chat_conversations;
   chat_messages = next.schema.chat_messages;
+  quiz_generation_presets = next.schema.quiz_generation_presets;
   return { ok: lastConnectionError === null, error: lastConnectionError };
 }
 

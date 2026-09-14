@@ -2,10 +2,24 @@ import { generateForCourse, NoDocumentsError } from "@/lib/generate";
 import { describeAiError } from "@/lib/aiClient";
 import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
+import type { QuizGenerationSettings } from "@/lib/types";
 
 type Params = { params: Promise<{ courseId: string; mode: string }> };
 
 const VALID_MODES: GenerationMode[] = ["notes", "quiz", "flashcards"];
+
+function parseQuizSettings(value: unknown): QuizGenerationSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const v = value as Record<string, unknown>;
+  const singleChoice = !!v.singleChoice;
+  const multipleChoice = !!v.multipleChoice;
+  const shortAnswer = !!v.shortAnswer;
+  // Falls back to "no settings" (generateQuiz's own unrestricted default)
+  // rather than a request with every type off, which would leave the
+  // prompt with nothing to ask for.
+  if (!singleChoice && !multipleChoice && !shortAnswer) return undefined;
+  return { singleChoice, multipleChoice, shortAnswer };
+}
 
 export async function POST(request: Request, { params }: Params) {
   const { courseId, mode } = await params;
@@ -22,9 +36,14 @@ export async function POST(request: Request, { params }: Params) {
   const documentIds = Array.isArray(body?.documentIds)
     ? body.documentIds.filter((id: unknown): id is number => typeof id === "number" && Number.isInteger(id))
     : null;
+  const quizSettings = parseQuizSettings(body?.quizSettings);
 
   try {
-    const item = await generateForCourse(Number(courseId), mode as GenerationMode, { folderId, documentIds });
+    const item = await generateForCourse(Number(courseId), mode as GenerationMode, {
+      folderId,
+      documentIds,
+      quizSettings,
+    });
     // Only when the user has opted out of being taken straight there —
     // otherwise there's nothing left to notify about by the time they'd see it.
     const { autoOpenGeneratedItems } = await getAppSettings();

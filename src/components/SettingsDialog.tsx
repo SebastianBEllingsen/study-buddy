@@ -1004,7 +1004,10 @@ function DisplaySection() {
       .then((body: AppSettings) => setSettings(body));
   }, []);
 
-  async function handleToggle(field: "showModelBadge" | "autoOpenGeneratedItems", next: boolean) {
+  async function handleToggle(
+    field: "showModelBadge" | "autoOpenGeneratedItems" | "aiGradingEnabled",
+    next: boolean
+  ) {
     if (!settings) return;
     setSettings({ ...settings, [field]: next });
     setSaving(true);
@@ -1060,6 +1063,24 @@ function DisplaySection() {
           checked={settings.autoOpenGeneratedItems}
           disabled={saving}
           onChange={(e) => handleToggle("autoOpenGeneratedItems", e.target.checked)}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          AI grading for quiz short-answer questions
+          <span className="block text-xs text-muted-foreground">
+            Off (default): graded locally by keyword match against the model answer — no API call,
+            no partial credit. On: the AI judges each answer and gives written feedback, same as
+            before this setting existed. Multiple-choice questions are always graded locally
+            either way.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.aiGradingEnabled}
+          disabled={saving}
+          onChange={(e) => handleToggle("aiGradingEnabled", e.target.checked)}
         />
       </label>
     </div>

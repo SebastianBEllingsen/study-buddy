@@ -53,21 +53,22 @@ export function sanitizeNotesContent(content: NotesContent): NotesContent {
 export function sanitizeQuizContent(content: QuizContent): QuizContent {
   assertQuizContentShape(content);
   return {
-    questions: content.questions.map((q) =>
-      q.type === "mcq"
-        ? {
-            ...q,
-            question: stripOrphanMathDelimiters(q.question),
-            explanation: stripOrphanMathDelimiters(q.explanation),
-            options: q.options.map(stripOrphanMathDelimiters),
-          }
-        : {
-            ...q,
-            question: stripOrphanMathDelimiters(q.question),
-            explanation: stripOrphanMathDelimiters(q.explanation),
-            modelAnswer: stripOrphanMathDelimiters(q.modelAnswer),
-          }
-    ),
+    questions: content.questions.map((q) => {
+      if (q.type === "mcq" || q.type === "multi_select") {
+        return {
+          ...q,
+          question: stripOrphanMathDelimiters(q.question),
+          explanation: stripOrphanMathDelimiters(q.explanation),
+          options: q.options.map(stripOrphanMathDelimiters),
+        };
+      }
+      return {
+        ...q,
+        question: stripOrphanMathDelimiters(q.question),
+        explanation: stripOrphanMathDelimiters(q.explanation),
+        modelAnswer: stripOrphanMathDelimiters(q.modelAnswer),
+      };
+    }),
   };
 }
 

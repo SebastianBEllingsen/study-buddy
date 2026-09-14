@@ -4,6 +4,7 @@ import {
   setProviderKey,
   setShowModelBadge,
   setAutoOpenGeneratedItems,
+  setAiGradingEnabled,
   setGoogleClientCredentials,
   setHomeWidgets,
   setAppBranding,
@@ -76,6 +77,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "autoOpenGeneratedItems must be a boolean" }, { status: 400 });
     }
     await setAutoOpenGeneratedItems(body.autoOpenGeneratedItems);
+  }
+
+  if (body?.aiGradingEnabled !== undefined) {
+    if (typeof body.aiGradingEnabled !== "boolean") {
+      return Response.json({ error: "aiGradingEnabled must be a boolean" }, { status: 400 });
+    }
+    await setAiGradingEnabled(body.aiGradingEnabled);
   }
 
   if (body?.googleClientId !== undefined || body?.googleClientSecret !== undefined) {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { Pencil, Sparkles } from "lucide-react";
+import { Download, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedItem, QuizAttempt } from "@/lib/models";
 import type { QuizContent, FlashcardsContent, NotesContent } from "@/lib/types";
@@ -262,6 +262,18 @@ export default function ItemPage() {
         <h1 className="flex flex-wrap items-center gap-2 font-heading text-2xl font-semibold">
           {item.title}
           {showModelBadge && <ModelBadge info={item} />}
+          {item.mode === "quiz" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs font-normal text-muted-foreground"
+              nativeButton={false}
+              render={<a href={`/api/items/${item.id}/download`} />}
+            >
+              <Download className="size-3.5" />
+              Download
+            </Button>
+          )}
         </h1>
       </div>
 

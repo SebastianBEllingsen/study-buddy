@@ -89,6 +89,7 @@ export async function fetchFeedEvents(
         start: instance.isFullDay ? toDateOnly(instance.start) : instance.start.toISOString(),
         end: instance.isFullDay ? toDateOnly(instance.end) : instance.end.toISOString(),
         allDay: instance.isFullDay,
+        location: textValue(instance.event.location) || null,
         // Like DESCRIPTION, a URL with parameters (Canvas emits
         // "URL;VALUE=URI:...") parses as a {val, params} object rather
         // than a plain string — textValue() already handles both shapes.

@@ -9,7 +9,7 @@ import {
 } from "./models";
 import type { GenerationMode, GeneratedItem } from "./models";
 import { estimateTokens, CHUNK_THRESHOLD_TOKENS, chunkText } from "./chunking";
-import type { QuizContent, FlashcardsContent, NotesContent, QuizQuestion } from "./types";
+import type { QuizContent, FlashcardsContent, NotesContent, QuizQuestion, QuizGenerationSettings } from "./types";
 import {
   quizSystemPrompt,
   quizUserPrompt,
@@ -39,10 +39,11 @@ export class NoDocumentsError extends Error {
 async function generateQuiz(
   courseName: string,
   text: string,
-  alreadyCovered?: string
+  alreadyCovered?: string,
+  settings?: QuizGenerationSettings
 ): Promise<QuizContent> {
   const content = await generateStructured<QuizContent>({
-    system: quizSystemPrompt(courseName),
+    system: quizSystemPrompt(courseName, settings),
     user: quizUserPrompt(text, alreadyCovered),
     maxTokens: 8000,
   });
@@ -52,10 +53,11 @@ async function generateQuiz(
 async function generateQuizChunked(
   courseName: string,
   chunks: string[],
-  alreadyCovered?: string
+  alreadyCovered?: string,
+  settings?: QuizGenerationSettings
 ): Promise<QuizContent> {
   const perChunk = await Promise.all(
-    chunks.map((chunk) => generateQuiz(courseName, chunk, alreadyCovered))
+    chunks.map((chunk) => generateQuiz(courseName, chunk, alreadyCovered, settings))
   );
   return { questions: perChunk.flatMap((c) => c.questions) };
 }
@@ -125,7 +127,7 @@ const MODE_LABELS: Record<GenerationMode, string> = {
 export async function generateForCourse(
   courseId: number,
   mode: GenerationMode,
-  options?: { folderId?: number | null; documentIds?: number[] | null }
+  options?: { folderId?: number | null; documentIds?: number[] | null; quizSettings?: QuizGenerationSettings }
 ) {
   const context = await buildCourseContext(courseId, options);
   if (context.documentIds.length === 0) {
@@ -139,8 +141,8 @@ export async function generateForCourse(
   switch (mode) {
     case "quiz":
       content = chunks
-        ? await generateQuizChunked(context.courseName, chunks)
-        : await generateQuiz(context.courseName, context.combinedText);
+        ? await generateQuizChunked(context.courseName, chunks, undefined, options?.quizSettings)
+        : await generateQuiz(context.courseName, context.combinedText, undefined, options?.quizSettings);
       break;
     case "flashcards":
       content = chunks
@@ -287,7 +289,9 @@ export class NoMissedQuestionsError extends Error {
 }
 
 function correctAnswerText(q: QuizQuestion): string {
-  return q.type === "mcq" ? q.options[q.correctIndex] : q.modelAnswer;
+  if (q.type === "mcq") return q.options[q.correctIndex];
+  if (q.type === "multi_select") return q.correctIndices.map((i) => q.options[i]).join(", ");
+  return q.modelAnswer;
 }
 
 // A fresh, separate quiz item generated from just the questions missed on a

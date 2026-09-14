@@ -114,6 +114,7 @@ export interface CalendarEvent {
   end: string;
   allDay: boolean;
   htmlLink: string | null;
+  location: string | null;
   // "google" for events from this module; a calendar_feeds row's own
   // label for events merged in from lib/calendarFeeds.ts (see
   // api/calendar/events/route.ts) — lets the UI show read-only feed
@@ -128,6 +129,7 @@ function fromGoogleEvent(event: {
   start?: { date?: string | null; dateTime?: string | null } | null;
   end?: { date?: string | null; dateTime?: string | null } | null;
   htmlLink?: string | null;
+  location?: string | null;
 }): CalendarEvent | null {
   if (!event.id || !event.start || !event.end) return null;
   const allDay = !!event.start.date;
@@ -142,6 +144,7 @@ function fromGoogleEvent(event: {
     end,
     allDay,
     htmlLink: event.htmlLink ?? null,
+    location: event.location ?? null,
     source: "google",
   };
 }

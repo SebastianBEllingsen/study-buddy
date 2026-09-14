@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
@@ -40,20 +41,20 @@ function QuestionCard({
   itemId: number;
   index: number;
   question: QuizQuestion;
-  answer: number | string;
+  answer: number | string | number[];
   result?: ResultEntry;
   disabled: boolean;
-  onAnswerChange: (value: number | string) => void;
+  onAnswerChange: (value: number | string | number[]) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Only ever includes what's currently visible on screen: the question (and
-  // options, for MCQ) always; the correct answer/explanation only once
-  // `result` exists — i.e. only after that's already shown in the Alert
-  // below. Never the answer key before the student has seen it.
+  // options, for MCQ/multi-select) always; the correct answer/explanation
+  // only once `result` exists — i.e. only after that's already shown in the
+  // Alert below. Never the answer key before the student has seen it.
   function getWholeContext() {
     let text = q.question;
-    if (q.type === "mcq") {
+    if (q.type === "mcq" || q.type === "multi_select") {
       text += `\nOptions: ${q.options.join(" | ")}`;
     }
     if (result) {
@@ -83,6 +84,30 @@ function QuestionCard({
               </Label>
             ))}
           </RadioGroup>
+        ) : q.type === "multi_select" ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">Select all that apply.</p>
+            <div className="space-y-2">
+              {q.options.map((option, optIndex) => {
+                const selected = Array.isArray(answer) ? answer : [];
+                const checked = selected.includes(optIndex);
+                return (
+                  <Label key={optIndex} className="flex items-center gap-2 text-sm font-normal">
+                    <Checkbox
+                      checked={checked}
+                      disabled={disabled}
+                      onCheckedChange={() =>
+                        onAnswerChange(
+                          checked ? selected.filter((i) => i !== optIndex) : [...selected, optIndex]
+                        )
+                      }
+                    />
+                    <MathText text={option} />
+                  </Label>
+                );
+              })}
+            </div>
+          </div>
         ) : (
           <Textarea
             rows={3}
@@ -171,8 +196,8 @@ export default function QuizRunner({
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const [answers, setAnswers] = useState<(number | string)[]>(
-    questions.map(() => "")
+  const [answers, setAnswers] = useState<(number | string | number[])[]>(
+    questions.map((q) => (q.type === "multi_select" ? [] : ""))
   );
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<{ score: number; results: ResultEntry[] } | null>(
@@ -180,7 +205,7 @@ export default function QuizRunner({
   );
   const [retrying, setRetrying] = useState(false);
 
-  function setAnswer(index: number, value: number | string) {
+  function setAnswer(index: number, value: number | string | number[]) {
     setAnswers((prev) => {
       const next = [...prev];
       next[index] = value;

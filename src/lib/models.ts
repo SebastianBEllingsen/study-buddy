@@ -16,12 +16,13 @@ import {
   generation_notifications,
   notes,
   quiz_attempts,
+  quiz_generation_presets,
   recent_views,
   runTransaction,
   uploaded_images,
 } from "./db";
 import { nowUtc } from "./time";
-import type { QuizContent, FlashcardsContent, NotesContent } from "./types";
+import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
 import { computeDueCardIndices } from "./spacedRepetition";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
@@ -148,6 +149,7 @@ interface SettingsRow {
   app_font: string | null;
   dashboard_background_image: string | null;
   dashboard_banner_style: string | null;
+  ai_grading_enabled: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -172,6 +174,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       app_font: app_settings.app_font,
       dashboard_background_image: app_settings.dashboard_background_image,
       dashboard_banner_style: app_settings.dashboard_banner_style,
+      ai_grading_enabled: app_settings.ai_grading_enabled,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -263,6 +266,14 @@ export interface AppSettings {
   // every widget row), with all of it rendered on top throughout, not just
   // the top edge. Meaningless with no dashboardBackgroundImage set.
   dashboardBannerStyle: "overlap" | "backdrop";
+  // Off (the default): a short-answer quiz question is graded locally —
+  // word-overlap against the model answer, no API call — instead of asking
+  // the AI to judge it. Saves a grading call per quiz on every attempt;
+  // trades away partial-credit nuance and written feedback for it. On:
+  // today's original behavior (see lib/grading.ts's gradeShortAnswers).
+  // Never affects mcq/multi_select, which are always graded locally either
+  // way — this only ever changes short-answer questions.
+  aiGradingEnabled: boolean;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -286,6 +297,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     appFont: row?.app_font ?? null,
     dashboardBackgroundImage: row?.dashboard_background_image ?? null,
     dashboardBannerStyle: row?.dashboard_banner_style === "backdrop" ? "backdrop" : "overlap",
+    aiGradingEnabled: row?.ai_grading_enabled ?? false,
   };
 }
 
@@ -300,6 +312,13 @@ export async function setAutoOpenGeneratedItems(autoOpen: boolean): Promise<void
   await db
     .update(app_settings)
     .set({ auto_open_generated_items: autoOpen, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setAiGradingEnabled(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ ai_grading_enabled: enabled, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -2069,4 +2088,52 @@ export async function addChatMessage(
   await db.update(chat_conversations).set(updates).where(eq(chat_conversations.id, conversationId));
 
   return toChatMessage(message);
+}
+
+// --- Quiz generation presets ---
+// Named, reusable QuizGenerationSettings (see lib/types.ts and
+// components/QuizGenerationDialog.tsx) — "only text answers", "only
+// multiple choice", etc.
+
+export interface QuizPreset {
+  id: number;
+  name: string;
+  settings: QuizGenerationSettings;
+  createdAt: string;
+}
+
+function toQuizPreset(row: typeof quiz_generation_presets.$inferSelect): QuizPreset {
+  return {
+    id: row.id,
+    name: row.name,
+    settings: {
+      singleChoice: row.single_choice,
+      multipleChoice: row.multiple_choice,
+      shortAnswer: row.short_answer,
+    },
+    createdAt: row.created_at,
+  };
+}
+
+export async function listQuizPresets(): Promise<QuizPreset[]> {
+  const rows = await db.select().from(quiz_generation_presets).orderBy(asc(quiz_generation_presets.id));
+  return rows.map(toQuizPreset);
+}
+
+export async function createQuizPreset(name: string, settings: QuizGenerationSettings): Promise<QuizPreset> {
+  const [row] = await db
+    .insert(quiz_generation_presets)
+    .values({
+      name,
+      single_choice: settings.singleChoice,
+      multiple_choice: settings.multipleChoice,
+      short_answer: settings.shortAnswer,
+      created_at: nowUtc(),
+    })
+    .returning();
+  return toQuizPreset(row);
+}
+
+export async function deleteQuizPreset(id: number): Promise<void> {
+  await db.delete(quiz_generation_presets).where(eq(quiz_generation_presets.id, id));
 }

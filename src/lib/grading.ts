@@ -48,3 +48,56 @@ export async function gradeShortAnswers(
   assertGradingResultShape(result, items.length);
   return result;
 }
+
+// AI-free fallback — see app_settings.ai_grading_enabled. No API call, so no
+// nuance: a plain word-overlap check against the model answer rather than
+// real semantic judgment, and always a binary correct/incorrect verdict
+// (never "partial" — that judgment call is exactly what needs an AI to make;
+// a coded heuristic has no basis for it). Good enough to unblock "was this
+// roughly right" without spending a grading call on every attempt; anyone
+// who wants the more accurate read can turn AI grading back on in Settings.
+// Filtered out before scoring — otherwise a student who writes only the
+// exact right content words ("mitochondria powerhouse cell") scores worse
+// than the model answer's own filler ("the mitochondria IS the powerhouse
+// OF the cell") would suggest, since those words never had any content to
+// match in the first place and only dilute the denominator.
+const STOPWORDS = new Set([
+  "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+  "of", "in", "on", "at", "to", "for", "and", "or", "but", "with", "as",
+  "by", "that", "this", "these", "those", "it", "its", "from", "which",
+  "who", "what", "when", "where", "why", "how", "do", "does", "did",
+]);
+
+function normalizeWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !STOPWORDS.has(w));
+}
+
+// How much of the model answer's own (content) vocabulary shows up in the
+// student's answer — recall-oriented (missing the model answer's content
+// matters more here than extra words the student added around it).
+const CORRECT_THRESHOLD = 0.6;
+
+export function gradeShortAnswersLocally(items: ShortAnswerToGrade[]): GradingResult {
+  return {
+    results: items.map((item) => {
+      const modelWords = new Set(normalizeWords(item.modelAnswer));
+      const userWords = new Set(normalizeWords(item.userAnswer));
+      if (modelWords.size === 0 || userWords.size === 0) {
+        return {
+          verdict: "incorrect",
+          feedback: "No answer given — AI grading is off, see the model answer above.",
+        };
+      }
+      let overlap = 0;
+      for (const w of modelWords) if (userWords.has(w)) overlap++;
+      const score = overlap / modelWords.size;
+      return score >= CORRECT_THRESHOLD
+        ? { verdict: "correct", feedback: "Matches the model answer closely enough (keyword match — AI grading is off)." }
+        : { verdict: "incorrect", feedback: "Doesn't match the model answer closely enough (keyword match — AI grading is off)." };
+    }),
+  };
+}

@@ -42,6 +42,7 @@ interface CalendarEvent {
   id: string;
   title: string;
   description: string | null;
+  location: string | null;
   start: string;
   end: string;
   allDay: boolean;
@@ -68,17 +69,6 @@ function sourceDotColor(source: string): string {
   let hash = 0;
   for (let i = 0; i < source.length; i++) hash = (hash * 31 + source.charCodeAt(i)) | 0;
   return SOURCE_DOT_COLORS[Math.abs(hash) % SOURCE_DOT_COLORS.length];
-}
-
-function formatRange(event: CalendarEvent): string {
-  const start = new Date(event.start);
-  const end = new Date(event.end);
-  if (event.allDay) {
-    return start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  }
-  const dateOpts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
-  const timeOpts: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
-  return `${start.toLocaleDateString(undefined, dateOpts)}, ${start.toLocaleTimeString(undefined, timeOpts)} – ${end.toLocaleTimeString(undefined, timeOpts)}`;
 }
 
 interface EventDraft {
@@ -495,7 +485,6 @@ function MonthGrid({
                     <EventInfoTooltip key={event.id} event={event}>
                       <div
                         data-event-id={event.id}
-                        title={event.description || event.htmlLink ? undefined : `${formatRange(event)} — ${event.source}`}
                         className="flex items-center gap-1 truncate rounded-md border border-border bg-muted px-1 py-0.5 text-[11px] text-muted-foreground"
                       >
                         <span className={`size-1.5 shrink-0 rounded-full ${sourceDotColor(event.source)}`} />

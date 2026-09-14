@@ -129,8 +129,18 @@ export default function ChatDialog() {
       <DialogContent
         showCloseButton={false}
         className={
+          // Only sizing changes here — top-1/2/left-1/2/-translate-1/2 (from
+          // DialogContent's own base className) are left alone rather than
+          // zeroed out: centering a w-screen/h-screen box via "50%, then
+          // translate back by half of the element's OWN size" already lands
+          // it at (0,0) filling the viewport, since half of a 100vw/100vh
+          // element is exactly 50vw/50vh. Overriding those classes too was
+          // fighting Base UI's own open/close transition state for no
+          // reason — same visual result either way, this way doesn't fight it.
+          // sm:max-w-none is still needed since DialogContent's sm:max-w-sm
+          // is a distinct variant-scoped slot a plain max-w-none can't reach.
           fullscreen
-            ? "top-0 left-0 flex h-screen w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0"
+            ? "flex h-screen w-screen max-w-none flex-col gap-0 rounded-none p-0 sm:max-w-none"
             : "flex h-[80vh] w-full max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl"
         }
       >

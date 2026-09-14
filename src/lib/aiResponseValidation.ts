@@ -25,8 +25,11 @@ export function assertQuizContentShape(content: unknown): void {
     if (!isRecord(q) || typeof q.question !== "string" || typeof q.explanation !== "string") {
       throw new InvalidAiResponseError("a quiz question is missing required fields");
     }
-    if (q.type === "mcq" && !Array.isArray(q.options)) {
-      throw new InvalidAiResponseError("an MCQ question is missing its options");
+    if ((q.type === "mcq" || q.type === "multi_select") && !Array.isArray(q.options)) {
+      throw new InvalidAiResponseError("a multiple-choice question is missing its options");
+    }
+    if (q.type === "multi_select" && !Array.isArray(q.correctIndices)) {
+      throw new InvalidAiResponseError("a multi-select question is missing its correct answers");
     }
   }
 }

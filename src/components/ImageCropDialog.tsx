@@ -12,8 +12,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
+// Falls back to this only before an image has actually loaded (naturalSize
+// is still 0×0, so the real dynamic minZoom below can't be computed yet).
+const MIN_ZOOM_FLOOR = 0.2;
 
 // Lets the user pan/zoom an uploaded image inside a fixed-aspect-ratio
 // viewport, then bakes exactly what's visible into a canvas at a fixed
@@ -86,20 +88,47 @@ export function ImageCropDialog({
     return () => ro.disconnect();
   }, [viewportEl]);
 
-  // "Cover" fit at zoom 1 (image always fully fills the viewport, cropped
-  // rather than letterboxed), then zoom scales up from there.
+  // "Cover" fit at zoom 1 (image fully fills the viewport, cropped rather
+  // than letterboxed) — the historical default and still where a freshly
+  // loaded image starts. Zoom scales up from there for MAX_ZOOM, but also
+  // *down* past 1 for a picture that should sit smaller than the frame
+  // instead of filling it — a sticker on a transparent background,
+  // especially, where cover-only forced cropping into its padding (or the
+  // sticker itself) with no way to back off.
   const baseScale =
     naturalSize.width > 0 && viewportSize.width > 0
       ? Math.max(viewportSize.width / naturalSize.width, viewportSize.height / naturalSize.height)
       : 0;
+  // "Contain" fit — the whole image just visible, letterboxed. Expressed
+  // relative to baseScale (since `zoom` is a multiplier of it) and given
+  // extra room below that (×0.5) so the image can shrink further still,
+  // leaving visible padding on every side rather than stopping right at its
+  // own edges. Computed per image/viewport shape, not a flat constant: a
+  // square icon in a square frame has nothing to gain from zooming out
+  // (contain == cover there), while a tall portrait in a wide cover frame
+  // needs to shrink a lot further before the whole thing is visible.
+  const containScale =
+    naturalSize.width > 0 && viewportSize.width > 0
+      ? Math.min(viewportSize.width / naturalSize.width, viewportSize.height / naturalSize.height)
+      : 0;
+  const minZoom = baseScale > 0 ? Math.min(1, (containScale / baseScale) * 0.5) : MIN_ZOOM_FLOOR;
   const totalScale = baseScale * zoom;
   const dispWidth = naturalSize.width * totalScale;
   const dispHeight = naturalSize.height * totalScale;
 
   function clampOffset(x: number, y: number) {
-    const minX = Math.min(0, viewportSize.width - dispWidth);
-    const minY = Math.min(0, viewportSize.height - dispHeight);
-    return { x: Math.min(0, Math.max(minX, x)), y: Math.min(0, Math.max(minY, y)) };
+    // Smaller than the frame on this axis (zoomed out past "contain") —
+    // center it there instead of letting it be dragged off to one side,
+    // same as how "contain"-fit images are conventionally shown.
+    const clampAxis = (value: number, disp: number, viewport: number) => {
+      if (disp <= viewport) return (viewport - disp) / 2;
+      const min = viewport - disp;
+      return Math.min(0, Math.max(min, value));
+    };
+    return {
+      x: clampAxis(x, dispWidth, viewportSize.width),
+      y: clampAxis(y, dispHeight, viewportSize.height),
+    };
   }
 
   // Clamped fresh every render (rather than synced into state via an
@@ -125,6 +154,16 @@ export function ImageCropDialog({
     }
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
+  }
+
+  // Multiplicative (not additive) so the step feels the same at any zoom
+  // level rather than huge relative jumps near minZoom and barely-there ones
+  // near MAX_ZOOM — same reasoning as a map or design tool's scroll-to-zoom.
+  function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
+    if (dispWidth <= 0) return;
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    setZoom((z) => Math.min(MAX_ZOOM, Math.max(minZoom, z * factor)));
   }
 
   async function handleConfirm() {
@@ -157,7 +196,10 @@ export function ImageCropDialog({
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>Drag to reposition, and zoom to fit what you want in frame.</DialogDescription>
+          <DialogDescription>
+            Drag to reposition, and zoom (scroll, or the slider below) to fit what you want in frame —
+            zoom out to shrink the whole picture inside it.
+          </DialogDescription>
         </DialogHeader>
 
         {/* A square (icon) or wide (cover) crop frame sized off the
@@ -170,8 +212,23 @@ export function ImageCropDialog({
           <div
             ref={setViewportEl}
             className="relative touch-none overflow-hidden rounded-lg border bg-muted select-none"
-            style={{ aspectRatio: aspect }}
+            style={
+              // A checkerboard (only for PNG — JPEG output is always
+              // opaque, so it would misleadingly suggest transparency that
+              // isn't there) so it's obvious how much of the frame a
+              // zoomed-out sticker actually leaves see-through, the same
+              // convention Photoshop/Figma use.
+              outputFormat === "png"
+                ? {
+                    aspectRatio: aspect,
+                    backgroundImage:
+                      "conic-gradient(var(--border) 90deg, transparent 90deg 180deg, var(--border) 180deg 270deg, transparent 270deg)",
+                    backgroundSize: "16px 16px",
+                  }
+                : { aspectRatio: aspect }
+            }
             onPointerDown={handlePointerDown}
+            onWheel={handleWheel}
           >
             {imgEl && dispWidth > 0 && (
               // eslint-disable-next-line @next/next/no-img-element -- blob: URL of a locally-picked file, not a next/image-optimizable asset
@@ -193,7 +250,7 @@ export function ImageCropDialog({
             <span className="text-xs text-muted-foreground">Zoom</span>
             <input
               type="range"
-              min={MIN_ZOOM}
+              min={minZoom}
               max={MAX_ZOOM}
               step={0.01}
               value={zoom}

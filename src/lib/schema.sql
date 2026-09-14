@@ -237,3 +237,17 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id ON chat_messages(conversation_id);
+
+-- Saved quiz-generation configurations (e.g. "only text answers", "only
+-- multiple choice") — see lib/types.ts's QuizGenerationSettings and
+-- components/QuizGenerationDialog.tsx. Column names deliberately mirror
+-- QuizGenerationSettings' own field names (snake_case), same convention as
+-- every other table here.
+CREATE TABLE IF NOT EXISTS quiz_generation_presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  single_choice INTEGER NOT NULL DEFAULT 1,
+  multiple_choice INTEGER NOT NULL DEFAULT 0,
+  short_answer INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

@@ -1,5 +1,5 @@
-import { getGeneratedItem, createQuizAttempt, completeQuizAttempt } from "@/lib/models";
-import { gradeShortAnswers } from "@/lib/grading";
+import { getGeneratedItem, createQuizAttempt, completeQuizAttempt, getAppSettings } from "@/lib/models";
+import { gradeShortAnswers, gradeShortAnswersLocally } from "@/lib/grading";
 import { describeAiError } from "@/lib/aiClient";
 import type { QuizContent, QuizQuestion } from "@/lib/types";
 
@@ -24,13 +24,13 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     const body = await request.json();
-    const answers: (number | string)[] = Array.isArray(body?.answers) ? body.answers : [];
+    const answers: (number | string | number[])[] = Array.isArray(body?.answers) ? body.answers : [];
 
     const content = JSON.parse(item.content_json) as QuizContent;
     const attempt = await createQuizAttempt(item.id);
 
-    // Grade MCQs locally (no API call needed) and collect short-answer
-    // questions for a single batched grading call.
+    // Grade MCQ/multi-select locally (no API call needed) and collect
+    // short-answer questions for a single batched grading call.
     const shortAnswerIndices: number[] = [];
     const shortAnswerPayload: { question: string; modelAnswer: string; userAnswer: string }[] = [];
     const results: AttemptResultEntry[] = content.questions.map((q, index) => {
@@ -44,6 +44,23 @@ export async function POST(request: Request, { params }: Params) {
           feedback: correct ? "Correct." : "Incorrect.",
           explanation: q.explanation,
           correctAnswer: q.options[q.correctIndex],
+        };
+      }
+      if (q.type === "multi_select") {
+        const selected = Array.isArray(answers[index]) ? (answers[index] as number[]) : [];
+        const selectedSet = new Set(selected);
+        const correctSet = new Set(q.correctIndices);
+        // Exact match — every correct option selected, no incorrect ones.
+        // No partial credit: consistent with mcq's own all-or-nothing grading.
+        const correct =
+          selectedSet.size === correctSet.size && [...selectedSet].every((i) => correctSet.has(i));
+        return {
+          index,
+          type: "multi_select" as const,
+          correct,
+          feedback: correct ? "Correct." : "Incorrect.",
+          explanation: q.explanation,
+          correctAnswer: q.correctIndices.map((i) => q.options[i]).join(", "),
         };
       }
       shortAnswerIndices.push(index);
@@ -64,7 +81,10 @@ export async function POST(request: Request, { params }: Params) {
     });
 
     if (shortAnswerPayload.length > 0) {
-      const graded = await gradeShortAnswers(shortAnswerPayload);
+      const { aiGradingEnabled } = await getAppSettings();
+      const graded = aiGradingEnabled
+        ? await gradeShortAnswers(shortAnswerPayload)
+        : gradeShortAnswersLocally(shortAnswerPayload);
       graded.results.forEach((g, i) => {
         const resultIndex = shortAnswerIndices[i];
         results[resultIndex].verdict = g.verdict;

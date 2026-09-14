@@ -73,6 +73,8 @@ export const app_settings = sqliteTable("app_settings", {
   // column/comment in schema.pg.ts and the AppSettings.dashboardBannerStyle
   // doc comment in models.ts.
   dashboard_banner_style: text("dashboard_banner_style"),
+  // See AppSettings.aiGradingEnabled's doc comment in models.ts.
+  ai_grading_enabled: integer("ai_grading_enabled", { mode: "boolean" }).notNull().default(false),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -268,5 +270,15 @@ export const chat_messages = sqliteTable("chat_messages", {
     .references(() => chat_conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull().$type<ChatRole>(),
   content: text("content").notNull(),
+  created_at: text("created_at").notNull(),
+});
+
+// Saved quiz-generation configurations — see the matching comment in schema.sql.
+export const quiz_generation_presets = sqliteTable("quiz_generation_presets", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  single_choice: integer("single_choice", { mode: "boolean" }).notNull().default(true),
+  multiple_choice: integer("multiple_choice", { mode: "boolean" }).notNull().default(false),
+  short_answer: integer("short_answer", { mode: "boolean" }).notNull().default(true),
   created_at: text("created_at").notNull(),
 });

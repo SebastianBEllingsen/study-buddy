@@ -36,12 +36,14 @@ import type {
   GenerationNotification,
   Note,
 } from "@/lib/models";
+import type { QuizGenerationSettings } from "@/lib/types";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizePopover } from "@/components/FolderCustomizePopover";
+import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -1383,6 +1385,7 @@ export default function CoursePage() {
   // extra documents on top of it.
   const [generationDocIds, setGenerationDocIds] = useState<Set<number>>(new Set());
   const [docPickerOpen, setDocPickerOpen] = useState(false);
+  const [quizDialogOpen, setQuizDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -1877,18 +1880,19 @@ export default function CoursePage() {
     setCollapseGeneration((g) => g + 1);
   }
 
-  async function handleGenerate(mode: GenerationMode) {
+  async function handleGenerate(mode: GenerationMode, quizSettings?: QuizGenerationSettings) {
     setGenerating(mode);
     setError(null);
     try {
       const res = await fetch(`/api/courses/${courseId}/generate/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          generationDocIds.size > 0
+        body: JSON.stringify({
+          ...(generationDocIds.size > 0
             ? { documentIds: [...generationDocIds] }
-            : { folderId: scope === ALL_MATERIAL ? null : Number(scope) }
-        ),
+            : { folderId: scope === ALL_MATERIAL ? null : Number(scope) }),
+          ...(quizSettings ? { quizSettings } : {}),
+        }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -2653,7 +2657,7 @@ export default function CoursePage() {
                   key={mode}
                   variant="outline"
                   className={`bg-card ${MODE_META[mode].borderClass}`}
-                  onClick={() => handleGenerate(mode)}
+                  onClick={() => (mode === "quiz" ? setQuizDialogOpen(true) : handleGenerate(mode))}
                   disabled={!scopedHasExtracted || generating !== null}
                 >
                   <Icon className={MODE_META[mode].textClass} />
@@ -2664,6 +2668,12 @@ export default function CoursePage() {
           </div>
         </CardContent>
       </Card>
+
+      <QuizGenerationDialog
+        open={quizDialogOpen}
+        onOpenChange={setQuizDialogOpen}
+        onGenerate={(settings) => handleGenerate("quiz", settings)}
+      />
 
       <DocumentViewer
         document={viewingDocument}

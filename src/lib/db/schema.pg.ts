@@ -110,6 +110,8 @@ export const app_settings = pgTable("app_settings", {
   // column/comment in schema.sqlite.ts and the AppSettings.dashboardBannerStyle
   // doc comment in models.ts.
   dashboard_banner_style: text("dashboard_banner_style"),
+  // See AppSettings.aiGradingEnabled's doc comment in models.ts.
+  ai_grading_enabled: boolean("ai_grading_enabled").notNull().default(false),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -294,5 +296,15 @@ export const chat_messages = pgTable("chat_messages", {
     .references(() => chat_conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull().$type<ChatRole>(),
   content: text("content").notNull(),
+  created_at: text("created_at").notNull(),
+});
+
+// Saved quiz-generation configurations — see the matching comment in schema.sql.
+export const quiz_generation_presets = pgTable("quiz_generation_presets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  single_choice: boolean("single_choice").notNull().default(true),
+  multiple_choice: boolean("multiple_choice").notNull().default(false),
+  short_answer: boolean("short_answer").notNull().default(true),
   created_at: text("created_at").notNull(),
 });
