@@ -3,6 +3,7 @@
 import { createPortal } from "react-dom";
 import { Lightbulb, MessageCircleQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 import type { AskKind } from "./useAskAi";
 import type { SelectionInfo } from "./useTextSelection";
 
@@ -17,6 +18,8 @@ export function AskAiToolbar({
   // sense to "explain" (there's no quiz question to hint toward).
   kinds?: AskKind[];
 }) {
+  // Same single gating point as AskAiButtons — see useAiEnabled's doc comment.
+  if (!useAiEnabled()) return null;
   // Portaled to <body> rather than rendered in place: `position: fixed`
   // only resolves against the actual viewport when every ancestor is
   // transform-free — the document viewer's Dialog centers itself with a

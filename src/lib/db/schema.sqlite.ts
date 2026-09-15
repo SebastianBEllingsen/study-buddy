@@ -93,6 +93,8 @@ export const app_settings = sqliteTable("app_settings", {
   // column/comment in schema.pg.ts and the AppSettings.modelBadgeDetail
   // doc comment in models.ts.
   model_badge_detail: text("model_badge_detail"),
+  // See AppSettings.aiEnabled's doc comment in models.ts.
+  ai_enabled: integer("ai_enabled", { mode: "boolean" }).notNull().default(true),
   updated_at: text("updated_at").notNull(),
 });
 

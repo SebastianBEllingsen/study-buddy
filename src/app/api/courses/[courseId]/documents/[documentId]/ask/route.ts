@@ -1,5 +1,5 @@
 import { getDocument, getCourse } from "@/lib/models";
-import { generateText, describeAiError } from "@/lib/aiClient";
+import { generateText, describeAiError, AiDisabledError } from "@/lib/aiClient";
 import {
   hintSystemPrompt,
   explainSystemPrompt,
@@ -67,6 +67,9 @@ export async function POST(request: Request, { params }: Params) {
         });
     return Response.json({ answer: answer.trim() });
   } catch (err) {
+    if (err instanceof AiDisabledError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Ask AI failed:", err);
     return Response.json({ error: await describeAiError(err) }, { status: 502 });
   }

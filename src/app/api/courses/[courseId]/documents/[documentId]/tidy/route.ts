@@ -1,6 +1,6 @@
 import { getDocument, markDocumentExtracted } from "@/lib/models";
 import { tidyPastedText } from "@/lib/tidyText";
-import { describeAiError } from "@/lib/aiClient";
+import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string; documentId: string }> };
@@ -37,6 +37,9 @@ export async function POST(_request: Request, { params }: Params) {
 
     return Response.json({ extractedText: tidied });
   } catch (err) {
+    if (err instanceof AiDisabledError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Tidying document text failed:", err);
     return Response.json({ error: await describeAiError(err) }, { status: 502 });
   }

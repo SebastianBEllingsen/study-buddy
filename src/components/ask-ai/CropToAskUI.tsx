@@ -4,12 +4,16 @@ import { createPortal } from "react-dom";
 import { Crop } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 import type { CropRect } from "./useCropToAsk";
 
 // Toggle button for entering/leaving crop-to-ask mode — shared styling
 // across every content view that offers it (PdfViewer, notes, the
 // extracted-text document view).
 export function CropToAskButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  // Same single gating point as AskAiButtons/AskAiToolbar — see
+  // useAiEnabled's doc comment.
+  if (!useAiEnabled()) return null;
   return (
     <Button
       type="button"

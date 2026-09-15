@@ -1,5 +1,5 @@
 import { generateForCourse, NoDocumentsError, DestinationFolderNotFoundError } from "@/lib/generate";
-import { describeAiError } from "@/lib/aiClient";
+import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
 import type { QuizGenerationSettings } from "@/lib/types";
@@ -66,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
     }
     return Response.json(item, { status: 201 });
   } catch (err) {
-    if (err instanceof NoDocumentsError || err instanceof DestinationFolderNotFoundError) {
+    if (err instanceof NoDocumentsError || err instanceof DestinationFolderNotFoundError || err instanceof AiDisabledError) {
       return Response.json({ error: err.message }, { status: 400 });
     }
     console.error("Generation failed:", err);

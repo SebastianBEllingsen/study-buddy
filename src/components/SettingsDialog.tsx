@@ -102,6 +102,7 @@ function AiSection() {
   const [saving, setSaving] = useState(false);
   const [gradingSaving, setGradingSaving] = useState(false);
   const [efficiencySaving, setEfficiencySaving] = useState(false);
+  const [aiEnabledSaving, setAiEnabledSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -190,11 +191,53 @@ function AiSection() {
     }
   }
 
+  async function handleAiEnabledToggle(next: boolean) {
+    if (!settings) return;
+    setSettings({ ...settings, aiEnabled: next });
+    setAiEnabledSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiEnabled: next }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save AI settings");
+        setSettings((prev) => (prev ? { ...prev, aiEnabled: !next } : prev));
+      }
+    } catch {
+      toast.error("Couldn't save AI settings");
+      setSettings((prev) => (prev ? { ...prev, aiEnabled: !next } : prev));
+    } finally {
+      setAiEnabledSaving(false);
+    }
+  }
+
   if (!settings) return null;
 
   return (
     <div className="space-y-3">
-      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          Enable AI features
+          <span className="block text-xs text-muted-foreground">
+            On (default): generation, AI chat, grading, and &quot;tidy with AI&quot; all work as normal.
+            Off: use Study Buddy as a plain document/notes/flashcards organizer — every AI control
+            hides and no AI call is ever made. Uploading, viewing, and manually organizing
+            documents, notes, and flashcards all keep working exactly the same either way.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.aiEnabled}
+          disabled={aiEnabledSaving}
+          onChange={(e) => handleAiEnabledToggle(e.target.checked)}
+        />
+      </label>
+      {settings.aiEnabled && (
+        <>
+      <h3 className="flex items-center gap-1.5 border-t pt-3 text-sm font-medium">
         <Sparkles className="size-3.5" />
         AI model
       </h3>
@@ -279,6 +322,8 @@ function AiSection() {
           onChange={(e) => handleEfficiencyToggle(e.target.checked)}
         />
       </label>
+        </>
+      )}
     </div>
   );
 }

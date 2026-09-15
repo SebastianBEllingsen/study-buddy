@@ -1,4 +1,4 @@
-import { getAiBackend } from "./models";
+import { getAiBackend, isAiEnabled } from "./models";
 import type { AiBackend } from "./models";
 import * as anthropicApi from "./aiBackends/anthropicApi";
 import * as claudeCode from "./aiBackends/claudeCode";
@@ -30,13 +30,29 @@ async function backend() {
   }
 }
 
+// Thrown by both calls below when app_settings.ai_enabled is off — the one
+// choke point every AI call in the app goes through (generate.ts, chat.ts,
+// grading.ts, tidyText.ts, and the ask-AI routes all call one of these two
+// functions directly), so gating here covers all of them without each
+// caller needing its own check. The UI is expected to hide/disable every AI
+// control when the setting is off (see SettingsDialog's "Enable AI
+// features" toggle), so reaching this in practice means a stale client.
+export class AiDisabledError extends Error {
+  constructor() {
+    super("AI features are turned off — enable them in Settings to use this.");
+    this.name = "AiDisabledError";
+  }
+}
+
 export async function generateStructured<T>(
   params: GenerateStructuredParams
 ): Promise<T> {
+  if (!(await isAiEnabled())) throw new AiDisabledError();
   return (await backend()).generateStructured<T>(params);
 }
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
+  if (!(await isAiEnabled())) throw new AiDisabledError();
   return (await backend()).generateText(params);
 }
 

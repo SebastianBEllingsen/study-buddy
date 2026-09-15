@@ -43,6 +43,7 @@ import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import { useDocumentBadgeSettings } from "@/lib/useDocumentBadgeSettings";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
@@ -1295,6 +1296,7 @@ export default function CoursePage() {
   const [insertingImage, setInsertingImage] = useState(false);
   const [pasteDropActive, setPasteDropActive] = useState(false);
 
+  const aiEnabled = useAiEnabled();
   const [generating, setGenerating] = useState<GenerationMode | null>(null);
   const [scope, setScope] = useState<string>(ALL_MATERIAL);
   // A hand-picked document selection (see DocumentPickerDialog) takes over
@@ -2508,16 +2510,18 @@ export default function CoursePage() {
                     <div className="grid gap-2">
                       <div className="flex items-center justify-between">
                         <Label htmlFor="paste-text">Text</Label>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={handleTidyPasteText}
-                          disabled={tidyingPaste || !pasteText.trim()}
-                        >
-                          <Wand2 className="size-3" />
-                          {tidyingPaste ? "Tidying…" : "Make pretty"}
-                        </Button>
+                        {aiEnabled && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            onClick={handleTidyPasteText}
+                            disabled={tidyingPaste || !pasteText.trim()}
+                          >
+                            <Wand2 className="size-3" />
+                            {tidyingPaste ? "Tidying…" : "Make pretty"}
+                          </Button>
+                        )}
                       </div>
                       <Textarea
                         id="paste-text"
@@ -2707,7 +2711,10 @@ export default function CoursePage() {
           identity — a tinted top edge and a soft background wash in the
           same accent as the Sparkles icon — but collapsed behind that same
           icon by default rather than a full card competing for attention
-          alongside the folders above it. */}
+          alongside the folders above it. Hidden entirely with AI features
+          off (see Settings' "Enable AI features") — this card is nothing
+          but generation controls, so there's nothing left to show. */}
+      {aiEnabled && (
       <Card className="gap-0 overflow-hidden border-t-2 border-t-focus bg-gradient-to-b from-focus/[0.04] to-transparent py-0">
         <Collapsible open={practiceOpen} onOpenChange={setPracticeOpen}>
           <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left font-heading text-base font-semibold hover:bg-focus/5">
@@ -2875,12 +2882,15 @@ export default function CoursePage() {
           </CollapsibleContent>
         </Collapsible>
       </Card>
+      )}
 
+      {aiEnabled && (
       <QuizGenerationDialog
         open={quizDialogOpen}
         onOpenChange={setQuizDialogOpen}
         onGenerate={(settings) => handleGenerate("quiz", settings)}
       />
+      )}
 
       <DocumentViewer
         document={viewingDocument}

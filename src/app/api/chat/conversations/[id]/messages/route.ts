@@ -1,5 +1,5 @@
 import { sendChatMessage } from "@/lib/chat";
-import { describeAiError } from "@/lib/aiClient";
+import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ id: string }> };
@@ -18,6 +18,9 @@ export async function POST(request: Request, { params }: Params) {
     const reply = await sendChatMessage(id, body.content.trim());
     return Response.json(reply, { status: 201 });
   } catch (err) {
+    if (err instanceof AiDisabledError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Chat reply failed:", err);
     return Response.json({ error: await describeAiError(err) }, { status: 502 });
   }

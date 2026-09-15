@@ -5,6 +5,7 @@ import { Bot, ExternalLink, Maximize2, Minimize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import ChatContent from "@/components/ChatContent";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 
 // A general-purpose AI assistant, independent of any course/document — see
 // ChatContent for the actual conversation UI (shared with the standalone
@@ -13,6 +14,9 @@ export default function ChatDialog() {
   const [open, setOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const aiEnabled = useAiEnabled();
+
+  if (!aiEnabled) return null;
 
   // Pops the exact same chat (ChatContent) into its own browser window, at
   // whichever conversation is currently open — e.g. so it can sit alongside

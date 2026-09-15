@@ -23,6 +23,7 @@ import {
 import { captureElementRegion } from "@/lib/cropCapture";
 import ModelBadge from "@/components/ModelBadge";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,7 @@ export default function ItemPage() {
   const noteEditorRef = useRef<NoteEditorHandle>(null);
   const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelBadge = useShowModelBadge();
+  const aiEnabled = useAiEnabled();
 
   // Screenshot-crop-to-ask for notes — useful for a rendered equation or
   // diagram a plain text selection (AskAiPanel below) can't capture. Reads
@@ -277,7 +279,7 @@ export default function ItemPage() {
         </h1>
       </div>
 
-      {detail.availableNewDocuments.length > 0 && (
+      {aiEnabled && detail.availableNewDocuments.length > 0 && (
         <Alert>
           <Sparkles />
           <AlertTitle>

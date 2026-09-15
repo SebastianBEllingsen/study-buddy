@@ -84,10 +84,11 @@ export async function POST(request: Request, { params }: Params) {
     });
 
     if (shortAnswerPayload.length > 0) {
-      const { aiGradingEnabled } = await getAppSettings();
-      const graded = aiGradingEnabled
-        ? await gradeShortAnswers(shortAnswerPayload)
-        : gradeShortAnswersLocally(shortAnswerPayload);
+      const { aiEnabled, aiGradingEnabled } = await getAppSettings();
+      const graded =
+        aiEnabled && aiGradingEnabled
+          ? await gradeShortAnswers(shortAnswerPayload)
+          : gradeShortAnswersLocally(shortAnswerPayload);
       graded.results.forEach((g, i) => {
         const resultIndex = shortAnswerIndices[i];
         results[resultIndex].verdict = g.verdict;

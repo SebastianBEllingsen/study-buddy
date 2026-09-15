@@ -500,6 +500,9 @@ function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "model_badge_detail")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN model_badge_detail TEXT");
   }
+  if (!hasColumn("app_settings", "ai_enabled")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 1");
+  }
 }
 
 function createConnection(): Database.Database {

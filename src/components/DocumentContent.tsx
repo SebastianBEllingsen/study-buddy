@@ -20,6 +20,7 @@ import DocxViewer from "@/components/DocxViewer";
 import ImageViewer from "@/components/ImageViewer";
 import { Download } from "lucide-react";
 import { extensionOf, isImageExtension } from "@/lib/documentFormats";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 
 // pdfjs-dist assumes a browser (Worker, DOM) — loaded client-only so its
 // module code never runs during SSR (it does, and warns, if imported
@@ -88,6 +89,7 @@ export default function DocumentContent({
     null
   );
   const [tidying, setTidying] = useState(false);
+  const aiEnabled = useAiEnabled();
   // HTMLElement, not HTMLPreElement — the container is a <pre> for a real
   // PDF's plain extracted-text fallback, but a plain <div> for pasted text
   // rendered as Markdown (see the isPasted branch below); every consumer of
@@ -234,7 +236,7 @@ export default function DocumentContent({
             <div className="relative h-full">
               <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
                 <CropToAskButton active={cropMode} onClick={toggleCropMode} />
-                {isPasted && (
+                {isPasted && aiEnabled && (
                   <Button variant="outline" size="sm" onClick={handleTidy} disabled={tidying}>
                     <Wand2 className="size-3.5" />
                     {tidying ? "Tidying…" : "Make pretty"}

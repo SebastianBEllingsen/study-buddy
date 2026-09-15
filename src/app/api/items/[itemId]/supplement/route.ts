@@ -1,6 +1,6 @@
 import { getGeneratedItem } from "@/lib/models";
 import { supplementGeneratedItem, NoNewDocumentsError } from "@/lib/generate";
-import { describeAiError } from "@/lib/aiClient";
+import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ itemId: string }> };
@@ -18,7 +18,7 @@ export async function POST(_request: Request, { params }: Params) {
     const updated = await supplementGeneratedItem(item);
     return Response.json(updated);
   } catch (err) {
-    if (err instanceof NoNewDocumentsError) {
+    if (err instanceof NoNewDocumentsError || err instanceof AiDisabledError) {
       return Response.json({ error: err.message }, { status: 400 });
     }
     console.error("Supplement failed:", err);

@@ -126,6 +126,8 @@ export const app_settings = pgTable("app_settings", {
   // column/comment in schema.sqlite.ts and the AppSettings.modelBadgeDetail
   // doc comment in models.ts.
   model_badge_detail: text("model_badge_detail"),
+  // See AppSettings.aiEnabled's doc comment in models.ts.
+  ai_enabled: boolean("ai_enabled").notNull().default(true),
   updated_at: text("updated_at").notNull(),
 });
 

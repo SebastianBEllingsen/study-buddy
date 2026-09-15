@@ -18,6 +18,7 @@ import { Confetti } from "@/components/Confetti";
 import { MathText } from "@/components/MathText";
 import { tap } from "@/lib/haptics";
 import { scrollToHighlight } from "@/lib/scrollToHighlight";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 
 interface ResultEntry {
   index: number;
@@ -204,6 +205,7 @@ export default function QuizRunner({
     null
   );
   const [retrying, setRetrying] = useState(false);
+  const aiEnabled = useAiEnabled();
 
   function setAnswer(index: number, value: number | string | number[]) {
     setAnswers((prev) => {
@@ -276,7 +278,7 @@ export default function QuizRunner({
           {outcome.score === 100 && <Confetti />}
           <AlertTitle className="flex items-center justify-between gap-3">
             <span>Score: {outcome.score.toFixed(0)}%</span>
-            {missedIndices.length > 0 && (
+            {aiEnabled && missedIndices.length > 0 && (
               <Button
                 type="button"
                 size="sm"

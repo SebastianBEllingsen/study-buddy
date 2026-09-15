@@ -157,6 +157,7 @@ interface SettingsRow {
   document_badge_detail: string | null;
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
+  ai_enabled: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -187,6 +188,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       document_badge_detail: app_settings.document_badge_detail,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
+      ai_enabled: app_settings.ai_enabled,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -197,6 +199,17 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
 export async function getAiBackend(): Promise<AiBackend> {
   const row = await getSettingsRow();
   return row?.ai_provider ?? "api";
+}
+
+// The master "AI enabled" switch (app_settings.ai_enabled, default true) —
+// see AppSettings.aiEnabled's doc comment. Checked directly by
+// aiClient.ts's generateStructured/generateText, the single choke point
+// every AI call in the app goes through (generation, chat, grading, tidy
+// text, ask-AI), so gating there covers all of them without each caller
+// needing its own check.
+export async function isAiEnabled(): Promise<boolean> {
+  const row = await getSettingsRow();
+  return row?.ai_enabled ?? true;
 }
 
 export async function setAiBackend(backend: AiBackend): Promise<void> {
@@ -241,6 +254,15 @@ export async function setProviderKey(name: AiProviderKeyName, key: string | null
 }
 
 export interface AppSettings {
+  // On (the default): every AI feature works as normal. Off: the master
+  // switch for people who just want the app as a plain document/notes/
+  // flashcards organizer — generation, chat, AI grading, "tidy with AI",
+  // and ask-AI/hint/explain all hide from the UI and are refused
+  // server-side too (see isAiEnabled, checked by aiClient.ts's
+  // generateStructured/generateText, the one choke point every AI call in
+  // the app goes through). Never affects document upload/extraction
+  // (PDF/DOCX/PPTX parsing is local, not AI) or anything else non-AI.
+  aiEnabled: boolean;
   aiBackend: AiBackend;
   hasAnthropicKey: boolean;
   hasOpenAiKey: boolean;
@@ -321,6 +343,7 @@ export async function getAppSettings(): Promise<AppSettings> {
   const row = await getSettingsRow();
   const feeds = await listCalendarFeeds();
   return {
+    aiEnabled: row?.ai_enabled ?? true,
     aiBackend: row?.ai_provider ?? "api",
     hasAnthropicKey: !!row?.anthropic_api_key,
     hasOpenAiKey: !!row?.openai_api_key,
@@ -345,6 +368,13 @@ export async function getAppSettings(): Promise<AppSettings> {
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
   };
+}
+
+export async function setAiEnabled(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ ai_enabled: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
 }
 
 export async function setShowModelBadge(show: boolean): Promise<void> {

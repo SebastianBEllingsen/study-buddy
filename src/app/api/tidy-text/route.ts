@@ -1,5 +1,5 @@
 import { tidyPastedText } from "@/lib/tidyText";
-import { describeAiError } from "@/lib/aiClient";
+import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 
 // Cleans up text before it's saved anywhere — used by the "Paste text"
 // dialog's "Make pretty" button, which has no document to attach to yet.
@@ -16,6 +16,9 @@ export async function POST(request: Request) {
     const tidied = await tidyPastedText(text);
     return Response.json({ text: tidied });
   } catch (err) {
+    if (err instanceof AiDisabledError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Tidying text failed:", err);
     return Response.json({ error: await describeAiError(err) }, { status: 502 });
   }
