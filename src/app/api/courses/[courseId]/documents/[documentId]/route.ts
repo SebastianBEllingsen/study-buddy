@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { deleteDocument, getDocument, getDocumentFile, moveDocument } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string; documentId: string }> };
 
@@ -9,7 +10,9 @@ type Params = { params: Promise<{ courseId: string; documentId: string }> };
 // the frontend (DocumentViewer.tsx) treats as "show extracted text instead."
 export async function GET(_request: Request, { params }: Params) {
   const { documentId } = await params;
-  const doc = await getDocumentFile(Number(documentId));
+  const id = parseId(documentId);
+  if (id === null) return new Response(null, { status: 404 });
+  const doc = await getDocumentFile(id);
   if (!doc) {
     return new Response(null, { status: 404 });
   }
@@ -35,7 +38,8 @@ export async function GET(_request: Request, { params }: Params) {
 
 export async function DELETE(_request: Request, { params }: Params) {
   const { documentId } = await params;
-  const id = Number(documentId);
+  const id = parseId(documentId);
+  if (id === null) return new Response(null, { status: 204 });
   const doc = await getDocument(id);
   if (doc) {
     await fs.rm(doc.file_path, { force: true });
@@ -46,6 +50,8 @@ export async function DELETE(_request: Request, { params }: Params) {
 
 export async function PATCH(request: Request, { params }: Params) {
   const { documentId } = await params;
+  const id = parseId(documentId);
+  if (id === null) return Response.json({ error: "Document not found" }, { status: 404 });
   const body = await request.json();
   const folderId = body?.folderId;
 
@@ -53,6 +59,6 @@ export async function PATCH(request: Request, { params }: Params) {
     return Response.json({ error: "folderId is required" }, { status: 400 });
   }
 
-  await moveDocument(Number(documentId), folderId);
+  await moveDocument(id, folderId);
   return Response.json({ ok: true });
 }

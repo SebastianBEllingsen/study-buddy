@@ -8,6 +8,7 @@ import {
   askUserPrompt,
 } from "@/lib/prompts/ask";
 import { parseDataUrlImage } from "@/lib/dataUrlImage";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ documentId: string }> };
 
@@ -18,7 +19,9 @@ type Params = { params: Promise<{ documentId: string }> };
 // frontend-only restriction into the backend.
 export async function POST(request: Request, { params }: Params) {
   const { documentId } = await params;
-  const doc = await getDocument(Number(documentId));
+  const id = parseId(documentId);
+  if (id === null) return Response.json({ error: "Document not found" }, { status: 404 });
+  const doc = await getDocument(id);
   if (!doc) {
     return Response.json({ error: "Document not found" }, { status: 404 });
   }

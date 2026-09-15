@@ -5,6 +5,7 @@ import {
 } from "@/lib/models";
 import type { FlashcardResult } from "@/lib/models";
 import { computeNextSchedule, dueAtFromInterval, DEFAULT_SCHEDULE } from "@/lib/spacedRepetition";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ itemId: string }> };
 
@@ -12,6 +13,8 @@ const VALID_RESULTS: FlashcardResult[] = ["again", "hard", "good", "easy"];
 
 export async function POST(request: Request, { params }: Params) {
   const { itemId } = await params;
+  const generatedItemId = parseId(itemId);
+  if (generatedItemId === null) return Response.json({ error: "Item not found" }, { status: 404 });
   try {
     const body = await request.json();
     const cardIndex = Number(body?.cardIndex);
@@ -21,7 +24,6 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid review payload" }, { status: 400 });
     }
 
-    const generatedItemId = Number(itemId);
     await logFlashcardReview({ generatedItemId, cardIndex, result });
 
     const current = await getFlashcardSchedule(generatedItemId, cardIndex);

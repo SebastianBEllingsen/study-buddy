@@ -12,6 +12,7 @@ import {
 } from "@/lib/models";
 import { computeDueCardIndices } from "@/lib/spacedRepetition";
 import type { FlashcardsContent } from "@/lib/types";
+import { parseId } from "@/lib/routeParams";
 
 // Only checks the shape the rest of the app actually reads (ReactMarkdown's
 // string, FlashcardViewer's card array, QuizRunner's question array) — not
@@ -43,7 +44,8 @@ type Params = { params: Promise<{ itemId: string }> };
 export async function GET(_request: Request, { params }: Params) {
   try {
     const { itemId } = await params;
-    const id = Number(itemId);
+    const id = parseId(itemId);
+    if (id === null) return Response.json({ error: "Item not found" }, { status: 404 });
     const item = await getGeneratedItem(id);
     if (!item) {
       return Response.json({ error: "Item not found" }, { status: 404 });
@@ -81,7 +83,8 @@ export async function GET(_request: Request, { params }: Params) {
 export async function PATCH(request: Request, { params }: Params) {
   try {
     const { itemId } = await params;
-    const id = Number(itemId);
+    const id = parseId(itemId);
+    if (id === null) return Response.json({ error: "Item not found" }, { status: 404 });
     const body = await request.json();
 
     if (body?.folderId !== undefined) {
@@ -124,7 +127,9 @@ export async function PATCH(request: Request, { params }: Params) {
 export async function DELETE(_request: Request, { params }: Params) {
   try {
     const { itemId } = await params;
-    await deleteGeneratedItem(Number(itemId));
+    const id = parseId(itemId);
+    if (id === null) return new Response(null, { status: 204 });
+    await deleteGeneratedItem(id);
     return new Response(null, { status: 204 });
   } catch (err) {
     console.error("Deleting item failed:", err);

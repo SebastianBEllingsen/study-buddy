@@ -3,6 +3,7 @@ import { describeAiError } from "@/lib/aiClient";
 import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
 import type { QuizGenerationSettings } from "@/lib/types";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string; mode: string }> };
 
@@ -27,6 +28,8 @@ export async function POST(request: Request, { params }: Params) {
   if (!VALID_MODES.includes(mode as GenerationMode)) {
     return Response.json({ error: "Invalid mode" }, { status: 400 });
   }
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
 
   const body = await request.json().catch(() => ({}));
   const folderId =
@@ -39,7 +42,7 @@ export async function POST(request: Request, { params }: Params) {
   const quizSettings = parseQuizSettings(body?.quizSettings);
 
   try {
-    const item = await generateForCourse(Number(courseId), mode as GenerationMode, {
+    const item = await generateForCourse(id, mode as GenerationMode, {
       folderId,
       documentIds,
       quizSettings,

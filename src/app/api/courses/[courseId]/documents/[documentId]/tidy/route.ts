@@ -1,6 +1,7 @@
 import { getDocument, markDocumentExtracted } from "@/lib/models";
 import { tidyPastedText } from "@/lib/tidyText";
 import { describeAiError } from "@/lib/aiClient";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string; documentId: string }> };
 
@@ -10,7 +11,9 @@ type Params = { params: Promise<{ courseId: string; documentId: string }> };
 export async function POST(_request: Request, { params }: Params) {
   try {
     const { documentId } = await params;
-    const doc = await getDocument(Number(documentId));
+    const id = parseId(documentId);
+    if (id === null) return Response.json({ error: "Document not found" }, { status: 404 });
+    const doc = await getDocument(id);
     if (!doc) {
       return Response.json({ error: "Document not found" }, { status: 404 });
     }

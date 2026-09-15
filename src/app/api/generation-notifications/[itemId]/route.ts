@@ -1,4 +1,5 @@
 import { dismissGenerationNotification } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ itemId: string }> };
 
@@ -7,6 +8,8 @@ type Params = { params: Promise<{ itemId: string }> };
 // dismissGenerationNotification for why a repeat call here is harmless.
 export async function DELETE(_request: Request, { params }: Params) {
   const { itemId } = await params;
-  await dismissGenerationNotification(Number(itemId));
+  const id = parseId(itemId);
+  if (id === null) return new Response(null, { status: 204 });
+  await dismissGenerationNotification(id);
   return new Response(null, { status: 204 });
 }

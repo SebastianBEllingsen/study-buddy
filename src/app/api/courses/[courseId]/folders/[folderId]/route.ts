@@ -1,21 +1,23 @@
 import {
-  CannotDeleteMasterFolderError,
   CannotNestSubfolderError,
   deleteFolder,
   nestFolder,
   renameFolder,
   updateFolderCustomization,
 } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string; folderId: string }> };
 
 export async function PATCH(request: Request, { params }: Params) {
   const { folderId } = await params;
+  const id = parseId(folderId);
+  if (id === null) return Response.json({ error: "Folder not found" }, { status: 404 });
   const body = await request.json();
 
   if ("parentFolderId" in body && (typeof body.parentFolderId === "number" || body.parentFolderId === null)) {
     try {
-      await nestFolder(Number(folderId), body.parentFolderId);
+      await nestFolder(id, body.parentFolderId);
     } catch (err) {
       if (err instanceof CannotNestSubfolderError) {
         return Response.json({ error: err.message }, { status: 400 });
@@ -39,7 +41,7 @@ export async function PATCH(request: Request, { params }: Params) {
       }
       customization.color = body.color;
     }
-    await updateFolderCustomization(Number(folderId), customization);
+    await updateFolderCustomization(id, customization);
     return Response.json({ ok: true });
   }
 
@@ -47,19 +49,14 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!name) {
     return Response.json({ error: "Folder name is required" }, { status: 400 });
   }
-  await renameFolder(Number(folderId), name);
+  await renameFolder(id, name);
   return Response.json({ ok: true });
 }
 
 export async function DELETE(_request: Request, { params }: Params) {
   const { folderId } = await params;
-  try {
-    await deleteFolder(Number(folderId));
-  } catch (err) {
-    if (err instanceof CannotDeleteMasterFolderError) {
-      return Response.json({ error: err.message }, { status: 400 });
-    }
-    throw err;
-  }
+  const id = parseId(folderId);
+  if (id === null) return Response.json({ error: "Folder not found" }, { status: 404 });
+  await deleteFolder(id);
   return new Response(null, { status: 204 });
 }

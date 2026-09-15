@@ -2,6 +2,7 @@ import { getGeneratedItem, createQuizAttempt, completeQuizAttempt, getAppSetting
 import { gradeShortAnswers, gradeShortAnswersLocally } from "@/lib/grading";
 import { describeAiError } from "@/lib/aiClient";
 import type { QuizContent, QuizQuestion } from "@/lib/types";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ itemId: string }> };
 
@@ -17,8 +18,10 @@ interface AttemptResultEntry {
 
 export async function POST(request: Request, { params }: Params) {
   const { itemId } = await params;
+  const id = parseId(itemId);
+  if (id === null) return Response.json({ error: "Quiz item not found" }, { status: 404 });
   try {
-    const item = await getGeneratedItem(Number(itemId));
+    const item = await getGeneratedItem(id);
     if (!item || item.mode !== "quiz") {
       return Response.json({ error: "Quiz item not found" }, { status: 404 });
     }

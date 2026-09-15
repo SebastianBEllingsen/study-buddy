@@ -9,12 +9,14 @@ import {
   updateCourseCustomization,
 } from "@/lib/models";
 import { isValidCoverImage, isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
 
 export async function GET(_request: Request, { params }: Params) {
   const { courseId } = await params;
-  const id = Number(courseId);
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
   const course = await getCourse(id);
   if (!course) {
     return Response.json({ error: "Course not found" }, { status: 404 });
@@ -30,7 +32,8 @@ export async function GET(_request: Request, { params }: Params) {
 
 export async function PATCH(request: Request, { params }: Params) {
   const { courseId } = await params;
-  const id = Number(courseId);
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
   const body = await request.json().catch(() => ({}));
 
   if (typeof body?.name === "string") {
@@ -103,6 +106,8 @@ export async function PATCH(request: Request, { params }: Params) {
 
 export async function DELETE(_request: Request, { params }: Params) {
   const { courseId } = await params;
-  await deleteCourse(Number(courseId));
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
+  await deleteCourse(id);
   return new Response(null, { status: 204 });
 }

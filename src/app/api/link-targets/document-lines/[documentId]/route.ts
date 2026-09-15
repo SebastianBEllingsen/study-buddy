@@ -1,4 +1,5 @@
 import { getDocumentLines } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ documentId: string }> };
 
@@ -7,5 +8,7 @@ type Params = { params: Promise<{ documentId: string }> };
 // link to, rather than just the document as a whole.
 export async function GET(_request: Request, { params }: Params) {
   const { documentId } = await params;
-  return Response.json({ lines: await getDocumentLines(Number(documentId)) });
+  const id = parseId(documentId);
+  if (id === null) return Response.json({ lines: [] });
+  return Response.json({ lines: await getDocumentLines(id) });
 }

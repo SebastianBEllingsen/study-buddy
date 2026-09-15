@@ -1,9 +1,12 @@
 import { createFolder, CannotNestSubfolderError } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
 
 export async function POST(request: Request, { params }: Params) {
   const { courseId } = await params;
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
   const body = await request.json();
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name) {
@@ -12,7 +15,7 @@ export async function POST(request: Request, { params }: Params) {
   const parentFolderId =
     typeof body?.parentFolderId === "number" ? body.parentFolderId : null;
   try {
-    const folder = await createFolder(Number(courseId), name, parentFolderId);
+    const folder = await createFolder(id, name, parentFolderId);
     return Response.json(folder, { status: 201 });
   } catch (err) {
     if (err instanceof CannotNestSubfolderError) {

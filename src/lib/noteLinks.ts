@@ -22,6 +22,20 @@ export interface NoteLinkMatch extends NoteLinkTarget {
 
 const LINK_RE = /\[\[(note|doc|item):(\d+)(?:#([^\]|]*))?(?:\|([^\]]+))?\]\]/g;
 
+// The snippet is normally percent-encoded by buildNoteLinkSyntax below, but
+// this syntax can also appear in hand-typed or pasted/imported text (e.g. a
+// note *about* the app's own link syntax) where it isn't — decodeURIComponent
+// throws on a "%" that isn't a valid escape, which would otherwise take down
+// every other note's backlink computation along with this one (see
+// getNoteBacklinks in models.ts, which parses every note's markdown).
+function decodeSnippet(snippet: string): string {
+  try {
+    return decodeURIComponent(snippet);
+  } catch {
+    return snippet;
+  }
+}
+
 export function parseNoteLinks(markdown: string): NoteLinkMatch[] {
   const matches: NoteLinkMatch[] = [];
   for (const m of markdown.matchAll(LINK_RE)) {
@@ -32,7 +46,7 @@ export function parseNoteLinks(markdown: string): NoteLinkMatch[] {
       end: m.index + raw.length,
       type: type as NoteLinkType,
       id: Number(idStr),
-      snippet: snippet ? decodeURIComponent(snippet) : undefined,
+      snippet: snippet ? decodeSnippet(snippet) : undefined,
       alias,
     });
   }

@@ -42,8 +42,9 @@ import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
-import { FolderCustomizePopover } from "@/components/FolderCustomizePopover";
+import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
+import { RowActionsMenu } from "@/components/RowActionsMenu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -120,6 +121,12 @@ const MODE_META: Record<GenerationMode, { icon: LucideIcon; borderClass: string;
 
 const ALL_MATERIAL = "all";
 const NEW_FOLDER_SENTINEL = "__new__";
+// Stands in for the course's default folder ("Unsorted") when it doesn't
+// exist yet — it's never pre-created (see getOrCreateDefaultFolder), so a
+// brand-new course has no real folder id to preselect in these dropdowns.
+// Resolving to `null` (rather than creating it up front) lets the server
+// create it lazily, only if the upload/paste actually goes through.
+const DEFAULT_FOLDER_SENTINEL = "__default__";
 
 // Folder-level key format is unchanged from before, so existing stored
 // preferences keep working; a section suffix (e.g. "documents", "generated")
@@ -151,47 +158,6 @@ function useCollapsed(key: string, defaultOpen = true) {
   }
 
   return [open, onOpenChange] as const;
-}
-
-function DeleteFolderButton({ onConfirm }: { onConfirm: () => Promise<void> | void }) {
-  const [open, setOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  async function handleConfirm() {
-    setDeleting(true);
-    try {
-      await onConfirm();
-      setOpen(false);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger
-        render={<Button variant="ghost" size="icon-sm" />}
-        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-      >
-        <Trash2 className="size-3.5 text-muted-foreground" />
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete this folder?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Its contents (and any subfolders&apos; contents) aren&apos;t deleted — they move to
-            Unsorted instead.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleConfirm}>
-            {deleting ? "Deleting…" : "Delete folder"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
 }
 
 // Documents and generated items previously deleted on a single unconfirmed
@@ -1112,23 +1078,16 @@ function FolderCard({
                 </Button>
               )}
               {!renaming && (
-                <FolderCustomizePopover folder={folder} onCustomize={onCustomizeFolder} />
-              )}
-              {!renaming && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    setRenaming(true);
-                  }}
-                  aria-label={`Rename ${folder.name}`}
+                <RowActionsMenu
+                  ariaLabel={`Actions for ${folder.name}`}
+                  contentClassName="w-64"
+                  actions={[{ label: "Rename", icon: Pencil, onSelect: () => setRenaming(true) }]}
+                  deleteLabel="Delete folder"
+                  deleteDescription="Its contents (and any subfolders' contents) aren't deleted — they move to Unsorted instead."
+                  onDelete={() => onDeleteFolder(folder.id)}
                 >
-                  <Pencil className="size-3.5 text-muted-foreground" />
-                </Button>
-              )}
-              {!folder.is_master && (
-                <DeleteFolderButton onConfirm={() => onDeleteFolder(folder.id)} />
+                  <FolderCustomizeFields folder={folder} onCustomize={onCustomizeFolder} />
+                </RowActionsMenu>
               )}
             </div>
           </div>
@@ -1386,6 +1345,10 @@ export default function CoursePage() {
   const [generationDocIds, setGenerationDocIds] = useState<Set<number>>(new Set());
   const [docPickerOpen, setDocPickerOpen] = useState(false);
   const [quizDialogOpen, setQuizDialogOpen] = useState(false);
+  // Collapsed by default — the folders above are the main event; this is a
+  // secondary action tucked behind its own small trigger rather than a
+  // full card competing for attention every time the page loads.
+  const [practiceOpen, setPracticeOpen] = useCollapsed(`studybuddy:course:${courseId}:practice:collapsed`, false);
   const [error, setError] = useState<string | null>(null);
 
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -1422,12 +1385,17 @@ export default function CoursePage() {
     clearSelection();
   }
 
-  // Seeds the upload-destination dropdown to the master folder the first
+  // Seeds the upload-destination dropdown to the default folder the first
   // time detail has folders to seed it from — render-phase sync (see
   // CustomizeCourseDialog's seededFor) rather than a useEffect; the
   // `!uploadDestination` guard makes this a no-op on every later update.
+  // Falls back to DEFAULT_FOLDER_SENTINEL when there's no real default
+  // folder yet (a still-empty course) rather than an empty string, so the
+  // dropdown always has a valid, selected option.
   if (detail && !uploadDestination) {
-    setUploadDestination(String(detail.folders.find((f) => f.is_master)?.id ?? ""));
+    setUploadDestination(
+      detail.folders.find((f) => f.is_master)?.id.toString() ?? DEFAULT_FOLDER_SENTINEL
+    );
   }
 
   // itemId → how many of its cards are due — GeneratedItemList and the
@@ -1483,13 +1451,17 @@ export default function CoursePage() {
     router.replace(`/courses/${courseId}`, { scroll: false });
   }
 
-  async function handleUpload(folderId: number, files: FileList) {
+  // folderId null means "the default folder" — omitted from the request
+  // entirely rather than resolved to a real id here, so the server creates
+  // it lazily (see getOrCreateDefaultFolder) only if this upload actually
+  // succeeds.
+  async function handleUpload(folderId: number | null, files: FileList) {
     setError(null);
     let uploaded = 0;
     for (const file of Array.from(files)) {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("folderId", String(folderId));
+      if (folderId !== null) formData.append("folderId", String(folderId));
       const res = await fetch(`/api/courses/${courseId}/documents`, {
         method: "POST",
         body: formData,
@@ -1542,8 +1514,14 @@ export default function CoursePage() {
 
   // Shared by the upload and paste-text dialogs — both pick a destination
   // folder from the same uploadDestination/uploadNewFolderName state,
-  // including "+ Create new folder".
-  async function resolveDestinationFolderId(): Promise<number> {
+  // including "+ Create new folder". `null` means "the default folder,
+  // created lazily server-side if it doesn't exist yet" (see
+  // DEFAULT_FOLDER_SENTINEL) — never resolved to a real id here, so nothing
+  // gets created unless the upload/paste actually goes through.
+  async function resolveDestinationFolderId(): Promise<number | null> {
+    if (uploadDestination === DEFAULT_FOLDER_SENTINEL) {
+      return null;
+    }
     if (uploadDestination !== NEW_FOLDER_SENTINEL) {
       return Number(uploadDestination);
     }
@@ -1986,6 +1964,11 @@ export default function CoursePage() {
             docsByFolder(id).some((d) => d.status === "extracted")
           );
 
+  // Whether the course already has its default folder — if not (a still-
+  // empty course, or one where it was deleted), the upload/paste dialogs'
+  // destination dropdown offers DEFAULT_FOLDER_SENTINEL in its place.
+  const hasDefaultFolder = detail.folders.some((f) => f.is_master);
+
   const viewedDoc = detail.documents.find((d) => d.id === viewingDocumentId);
   const viewingDocument = viewedDoc
     ? {
@@ -2292,11 +2275,16 @@ export default function CoursePage() {
                             {(v: string) =>
                               v === NEW_FOLDER_SENTINEL
                                 ? "+ Create new folder"
-                                : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                                : v === DEFAULT_FOLDER_SENTINEL
+                                  ? "Unsorted"
+                                  : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
+                          {!hasDefaultFolder && (
+                            <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
+                          )}
                           {detail.folders.map((folder) => (
                             <SelectItem key={folder.id} value={String(folder.id)}>
                               {folder.name}
@@ -2426,11 +2414,16 @@ export default function CoursePage() {
                             {(v: string) =>
                               v === NEW_FOLDER_SENTINEL
                                 ? "+ Create new folder"
-                                : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                                : v === DEFAULT_FOLDER_SENTINEL
+                                  ? "Unsorted"
+                                  : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
+                          {!hasDefaultFolder && (
+                            <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
+                          )}
                           {detail.folders.map((folder) => (
                             <SelectItem key={folder.id} value={String(folder.id)}>
                               {folder.name}
@@ -2505,6 +2498,11 @@ export default function CoursePage() {
             if (payload?.kind === "folder") handleUnnestFolder(payload.id);
           }}
         >
+          {detail.folders.length === 0 && (
+            <p className="py-1 text-sm text-muted-foreground/70">
+              Nothing here yet — upload a PDF, paste some text, or create a folder to get started.
+            </p>
+          )}
           {detail.folders
             .filter((folder) => folder.parent_folder_id == null)
             .map((folder) => (
@@ -2545,18 +2543,22 @@ export default function CoursePage() {
         </div>
       </section>
 
-      {/* The page's one primary call-to-action gets a touch of its own
+      {/* The page's one primary call-to-action still gets a touch of its own
           identity — a tinted top edge and a soft background wash in the
-          same accent as the Sparkles icon — so it doesn't read as just
-          another plain bordered card among the folders above it. */}
-      <Card className="gap-3 overflow-hidden border-t-2 border-t-focus bg-gradient-to-b from-focus/[0.04] to-transparent py-4">
-        <CardHeader>
-          <h2 className="flex items-center gap-2 font-heading text-base font-semibold">
+          same accent as the Sparkles icon — but collapsed behind that same
+          icon by default rather than a full card competing for attention
+          alongside the folders above it. */}
+      <Card className="gap-0 overflow-hidden border-t-2 border-t-focus bg-gradient-to-b from-focus/[0.04] to-transparent py-0">
+        <Collapsible open={practiceOpen} onOpenChange={setPracticeOpen}>
+          <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left font-heading text-base font-semibold hover:bg-focus/5">
             <Sparkles className="size-4 text-focus" />
             Practice
-          </h2>
-        </CardHeader>
-        <CardContent className="space-y-3">
+            <ChevronRight
+              className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${practiceOpen ? "rotate-90" : ""}`}
+            />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+        <CardContent className="space-y-3 pb-4">
           <div className="flex flex-wrap items-center gap-2">
             <Label className="text-sm text-muted-foreground">From</Label>
             {generationDocIds.size > 0 ? (
@@ -2667,6 +2669,8 @@ export default function CoursePage() {
             })}
           </div>
         </CardContent>
+          </CollapsibleContent>
+        </Collapsible>
       </Card>
 
       <QuizGenerationDialog

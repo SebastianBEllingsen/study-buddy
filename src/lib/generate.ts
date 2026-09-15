@@ -2,7 +2,7 @@ import { buildCourseContext, chunkCourseContext, combineDocumentText } from "./c
 import { generateStructured, generateText, getModelInfo } from "./aiClient";
 import {
   createGeneratedItem,
-  getMasterFolder,
+  getOrCreateDefaultFolder,
   getCourse,
   getNewDocumentsForItem,
   updateGeneratedItemContent,
@@ -161,7 +161,7 @@ export async function generateForCourse(
   // Scoped to a specific folder -> the result is filed right there,
   // alongside the documents it was generated from. Pooled ("All course
   // material", context.folderId null) -> the course's default folder.
-  const storageFolderId = context.folderId ?? (await getMasterFolder(courseId)).id;
+  const storageFolderId = context.folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
 
   return createGeneratedItem({
     courseId,

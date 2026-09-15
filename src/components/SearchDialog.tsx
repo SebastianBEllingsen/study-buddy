@@ -57,15 +57,27 @@ export default function SearchDialog() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The debounce only stops overlapping *timers* — two searches fired more
+  // than 300ms apart both still hit the network, and nothing otherwise stops
+  // a slower earlier response from landing after a faster later one and
+  // overwriting its results. Each fetch is tagged with an id; a response is
+  // only applied if it's still the most recent one issued.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (query.trim().length < 2) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      const requestId = ++requestIdRef.current;
       fetch(`/api/search?q=${encodeURIComponent(query.trim())}`)
         .then((r) => r.json())
-        .then((body: { results: SearchResult[] }) => setResults(body.results))
-        .finally(() => setLoading(false));
+        .then((body: { results: SearchResult[] }) => {
+          if (requestId !== requestIdRef.current) return;
+          setResults(body.results);
+        })
+        .finally(() => {
+          if (requestId === requestIdRef.current) setLoading(false);
+        });
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -75,6 +87,10 @@ export default function SearchDialog() {
   function handleQueryChange(value: string) {
     setQuery(value);
     if (value.trim().length < 2) {
+      // Invalidates any still-in-flight search for the text just cleared —
+      // without this, a slow response for it could land after this point
+      // and repopulate results the user no longer typed.
+      requestIdRef.current++;
       setResults([]);
       setLoading(false);
     } else {
@@ -85,6 +101,7 @@ export default function SearchDialog() {
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (!next) {
+      requestIdRef.current++;
       setQuery("");
       setResults([]);
     }

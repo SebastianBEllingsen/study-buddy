@@ -11,6 +11,16 @@ import type { ChatConversation, ChatMessage } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // A general-purpose AI assistant, independent of any course/document — see
 // lib/chat.ts for how a reply is generated (the whole transcript folded
@@ -26,6 +36,8 @@ export default function ChatDialog() {
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+  const [deletingConversation, setDeletingConversation] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Loads the conversation list fresh each time the dialog opens — render-
@@ -71,11 +83,21 @@ export default function ChatDialog() {
     setMessages([]);
   }
 
-  async function handleDeleteConversation(id: number, e: React.MouseEvent) {
-    e.stopPropagation();
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (activeId === id) startNewChat();
-    await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" }).catch(() => {});
+  async function handleConfirmDeleteConversation() {
+    if (deleteTargetId === null) return;
+    const id = deleteTargetId;
+    setDeletingConversation(true);
+    try {
+      const res = await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (activeId === id) startNewChat();
+      setDeleteTargetId(null);
+    } catch {
+      toast.error("Couldn't delete that conversation");
+    } finally {
+      setDeletingConversation(false);
+    }
   }
 
   async function handleSend() {
@@ -122,6 +144,7 @@ export default function ChatDialog() {
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={setOpen}>
       <Button variant="ghost" size="icon-sm" aria-label="AI chat" onClick={() => setOpen(true)}>
         <Bot className="size-4 text-muted-foreground" />
@@ -168,7 +191,10 @@ export default function ChatDialog() {
                     type="button"
                     aria-label="Delete conversation"
                     className="shrink-0 opacity-0 hover:text-destructive group-hover:opacity-100"
-                    onClick={(e) => handleDeleteConversation(c.id, e)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTargetId(c.id);
+                    }}
                   >
                     <Trash2 className="size-3" />
                   </button>
@@ -261,5 +287,24 @@ export default function ChatDialog() {
         </div>
       </DialogContent>
     </Dialog>
+    <AlertDialog open={deleteTargetId !== null} onOpenChange={(next) => !next && setDeleteTargetId(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+          <AlertDialogDescription>This can&apos;t be undone.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={deletingConversation}
+            onClick={handleConfirmDeleteConversation}
+          >
+            {deletingConversation ? "Deleting…" : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

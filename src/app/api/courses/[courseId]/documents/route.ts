@@ -1,26 +1,32 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
-import { createDocument, markDocumentExtracted, markDocumentFailed } from "@/lib/models";
+import { createDocument, getOrCreateDefaultFolder, markDocumentExtracted, markDocumentFailed } from "@/lib/models";
 import { uploadsDir } from "@/lib/uploads";
 import { extractPdfText, ScannedPdfError } from "@/lib/extraction";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
 
 export async function POST(request: Request, { params }: Params) {
   const { courseId } = await params;
-  const id = Number(courseId);
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
 
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    const folderId = Number(formData.get("folderId"));
+    // Omitted (rather than required) so an empty course with no folders yet
+    // can still be uploaded into — see getOrCreateDefaultFolder.
+    const folderIdRaw = formData.get("folderId");
+    const explicitFolderId = folderIdRaw === null ? null : Number(folderIdRaw);
     if (!(file instanceof File)) {
       return Response.json({ error: "No file uploaded" }, { status: 400 });
     }
-    if (!Number.isInteger(folderId)) {
-      return Response.json({ error: "A folder is required for uploads" }, { status: 400 });
+    if (explicitFolderId !== null && !Number.isInteger(explicitFolderId)) {
+      return Response.json({ error: "Invalid folder" }, { status: 400 });
     }
+    const folderId = explicitFolderId ?? (await getOrCreateDefaultFolder(id)).id;
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       return Response.json({ error: "Only PDF files are supported" }, { status: 400 });
     }

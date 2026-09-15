@@ -20,7 +20,6 @@ import {
   SlidersHorizontal,
   Sparkles,
   StickyNote,
-  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
@@ -39,6 +38,7 @@ import StudyHeatmap from "@/components/StudyHeatmap";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
 import { DueFlashcardsDialog } from "@/components/DueFlashcardsDialog";
+import { RowActionsMenu } from "@/components/RowActionsMenu";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
@@ -56,67 +56,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-
-function DeleteCourseButton({
-  onConfirm,
-  iconClassName = "text-muted-foreground",
-}: {
-  onConfirm: () => Promise<void> | void;
-  iconClassName?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  async function handleConfirm() {
-    setDeleting(true);
-    try {
-      await onConfirm();
-      setOpen(false);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger
-        render={<Button variant="ghost" size="icon-sm" />}
-        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-        aria-label="Delete course"
-      >
-        <Trash2 className={`size-3.5 ${iconClassName}`} />
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete this course?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This permanently deletes all its folders, documents, and generated
-            notes/quizzes/flashcards — including attempt and review history. This
-            can&apos;t be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleConfirm}>
-            {deleting ? "Deleting…" : "Delete course"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 function CourseCard({
   course,
   hasNotification,
@@ -256,25 +195,17 @@ function CourseCard({
           )}
         </div>
         {!renaming && (
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setCustomizeOpen(true)}
-              aria-label={`Customize ${course.name}`}
-            >
-              <Palette className={`size-3.5 ${mutedIconClass}`} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setRenaming(true)}
-              aria-label={`Rename ${course.name}`}
-            >
-              <Pencil className={`size-3.5 ${mutedIconClass}`} />
-            </Button>
-            <DeleteCourseButton onConfirm={() => onDelete(course.id)} iconClassName={mutedIconClass} />
-          </div>
+          <RowActionsMenu
+            ariaLabel={`Actions for ${course.name}`}
+            triggerIconClassName={mutedIconClass}
+            actions={[
+              { label: "Rename", icon: Pencil, onSelect: () => setRenaming(true) },
+              { label: "Customize appearance", icon: Palette, onSelect: () => setCustomizeOpen(true) },
+            ]}
+            deleteLabel="Delete course"
+            deleteDescription="This permanently deletes all its folders, documents, and generated notes/quizzes/flashcards — including attempt and review history. This can't be undone."
+            onDelete={() => onDelete(course.id)}
+          />
         )}
       </CardContent>
       <CustomizeCourseDialog

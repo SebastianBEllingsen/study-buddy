@@ -7,12 +7,15 @@ import {
   updateNoteIcon,
   updateNoteMarkdown,
 } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ noteId: string }> };
 
 export async function GET(_request: Request, { params }: Params) {
   const { noteId } = await params;
-  const id = Number(noteId);
+  const id = parseId(noteId);
+  if (id === null) return Response.json({ error: "Note not found" }, { status: 404 });
+
   const note = await getNote(id);
   if (!note) return Response.json({ error: "Note not found" }, { status: 404 });
 
@@ -22,7 +25,8 @@ export async function GET(_request: Request, { params }: Params) {
 
 export async function PATCH(request: Request, { params }: Params) {
   const { noteId } = await params;
-  const id = Number(noteId);
+  const id = parseId(noteId);
+  if (id === null) return Response.json({ error: "Note not found" }, { status: 404 });
   const body = await request.json().catch(() => ({}));
 
   try {
@@ -52,6 +56,8 @@ export async function PATCH(request: Request, { params }: Params) {
 
 export async function DELETE(_request: Request, { params }: Params) {
   const { noteId } = await params;
-  await deleteNote(Number(noteId));
+  const id = parseId(noteId);
+  if (id === null) return Response.json({ error: "Note not found" }, { status: 404 });
+  await deleteNote(id);
   return new Response(null, { status: 204 });
 }

@@ -1,10 +1,12 @@
 import { deleteCalendarFeed, updateCalendarFeedVisibility } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ feedId: string }> };
 
 export async function PATCH(request: Request, { params }: Params) {
   const { feedId } = await params;
-  const id = Number(feedId);
+  const id = parseId(feedId);
+  if (id === null) return Response.json({ error: "Feed not found" }, { status: 404 });
   const body = await request.json().catch(() => ({}));
 
   const fields: { show_on_calendar?: boolean; show_in_widget?: boolean } = {};
@@ -20,6 +22,8 @@ export async function PATCH(request: Request, { params }: Params) {
 
 export async function DELETE(_request: Request, { params }: Params) {
   const { feedId } = await params;
-  await deleteCalendarFeed(Number(feedId));
+  const id = parseId(feedId);
+  if (id === null) return Response.json({ error: "Feed not found" }, { status: 404 });
+  await deleteCalendarFeed(id);
   return new Response(null, { status: 204 });
 }

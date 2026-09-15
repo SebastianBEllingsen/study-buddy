@@ -8,12 +8,15 @@ import {
   askUserPrompt,
 } from "@/lib/prompts/ask";
 import { parseDataUrlImage } from "@/lib/dataUrlImage";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ itemId: string }> };
 
 export async function POST(request: Request, { params }: Params) {
   const { itemId } = await params;
-  const item = await getGeneratedItem(Number(itemId));
+  const id = parseId(itemId);
+  if (id === null) return Response.json({ error: "Item not found" }, { status: 404 });
+  const item = await getGeneratedItem(id);
   if (!item) {
     return Response.json({ error: "Item not found" }, { status: 404 });
   }

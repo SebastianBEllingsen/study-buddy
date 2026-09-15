@@ -166,21 +166,33 @@ function migrate(database: Database.Database) {
     "CREATE INDEX IF NOT EXISTS idx_documents_folder_id ON documents(folder_id)"
   );
 
-  // Every course must have exactly one permanent default folder, and every
-  // document/generated_item must belong to a real folder — no NULL
-  // ("floating") state. Backfill both invariants for data that predates
-  // this: create a default folder for any course missing one, then reassign
-  // any NULL folder_id rows to it. Tree-agnostic — safe to run regardless of
-  // which era of the folder feature this database is coming from.
-  const coursesMissingDefault = database
+  // Every document/generated_item/note must belong to a real folder — no
+  // NULL ("floating") state. A course itself no longer gets a default
+  // folder created just for existing, though (see createCourse/
+  // getOrCreateDefaultFolder in models.ts) — an empty course now shows
+  // nothing rather than a permanent "Unsorted" no one asked for. So this
+  // only creates one for a course that actually has orphaned (NULL
+  // folder_id) content needing a home, exactly mirroring what
+  // getOrCreateDefaultFolder does lazily at request time: a still-empty
+  // course must NOT get one conjured up here just for having zero folders.
+  // notes.folder_id doesn't necessarily exist yet at this point in an
+  // upgrade (added further below) — skip notes here in that case; any
+  // pre-folder-feature notes needing a home predate this backfill either way.
+  const notesHasFolderId = hasColumn("notes", "folder_id");
+  const orphanedContentUnion = notesHasFolderId
+    ? `SELECT course_id FROM documents WHERE folder_id IS NULL
+       UNION SELECT course_id FROM generated_items WHERE folder_id IS NULL
+       UNION SELECT course_id FROM notes WHERE folder_id IS NULL AND course_id IS NOT NULL`
+    : `SELECT course_id FROM documents WHERE folder_id IS NULL
+       UNION SELECT course_id FROM generated_items WHERE folder_id IS NULL`;
+  const coursesNeedingDefault = database
     .prepare(
-      `SELECT id FROM courses WHERE id NOT IN (
-         SELECT course_id FROM folders WHERE is_master = 1
-       )`
+      `SELECT DISTINCT course_id AS id FROM (${orphanedContentUnion})
+       WHERE course_id NOT IN (SELECT course_id FROM folders WHERE is_master = 1)`
     )
     .all() as { id: number }[];
 
-  if (coursesMissingDefault.length > 0) {
+  if (coursesNeedingDefault.length > 0) {
     const insertDefault = database.prepare(
       "INSERT INTO folders (course_id, name, is_master) VALUES (?, 'Unsorted', 1)"
     );
@@ -190,14 +202,18 @@ function migrate(database: Database.Database) {
     const backfillItems = database.prepare(
       "UPDATE generated_items SET folder_id = ? WHERE course_id = ? AND folder_id IS NULL"
     );
+    const backfillNotes = notesHasFolderId
+      ? database.prepare("UPDATE notes SET folder_id = ? WHERE course_id = ? AND folder_id IS NULL")
+      : null;
 
     const backfillCourse = database.transaction((courseId: number) => {
       const { lastInsertRowid } = insertDefault.run(courseId);
       backfillDocuments.run(lastInsertRowid, courseId);
       backfillItems.run(lastInsertRowid, courseId);
+      backfillNotes?.run(lastInsertRowid, courseId);
     });
 
-    for (const { id } of coursesMissingDefault) {
+    for (const { id } of coursesNeedingDefault) {
       backfillCourse(id);
     }
   }

@@ -26,6 +26,10 @@ export const MAX_ICON_IMAGE_LENGTH = 1_500_000;
 // A full-bleed page backdrop (Steam-library-style) covers far more pixels
 // than the small cover banner, so it gets its own, looser cap.
 export const MAX_PAGE_BACKGROUND_IMAGE_LENGTH = 4_000_000;
+// An image pasted/dropped into a note (NoteEditor.tsx) — PNG-capable (see
+// resizeImageForNote), so this needs more headroom than the always-JPEG
+// cover/icon caps for the same pixel count.
+export const MAX_NOTE_IMAGE_LENGTH = 4_000_000;
 
 export function isValidCoverImage(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_COVER_IMAGE_LENGTH;
@@ -41,4 +45,8 @@ export function isValidPageBackgroundImage(value: unknown): value is string {
     value.startsWith("data:image/") &&
     value.length <= MAX_PAGE_BACKGROUND_IMAGE_LENGTH
   );
+}
+
+export function isValidNoteImage(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_NOTE_IMAGE_LENGTH;
 }

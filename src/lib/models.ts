@@ -60,13 +60,6 @@ export interface Folder {
   created_at: string;
 }
 
-export class CannotDeleteMasterFolderError extends Error {
-  constructor() {
-    super("This root folder can't be deleted.");
-    this.name = "CannotDeleteMasterFolderError";
-  }
-}
-
 export class CannotNestSubfolderError extends Error {
   constructor() {
     super("Subfolders can't contain their own subfolders.");
@@ -602,7 +595,7 @@ export async function listRecentViews(limit = 8): Promise<RecentView[]> {
 // browsable so picking a badge/banner doesn't always mean uploading fresh
 // from disk.
 
-export type UploadedImageKind = "icon" | "cover" | "background";
+export type UploadedImageKind = "icon" | "cover" | "background" | "note";
 
 export interface UploadedImage {
   id: number;
@@ -629,6 +622,17 @@ export async function recordUploadedImage(kind: UploadedImageKind, dataUrl: stri
 
 export async function deleteUploadedImage(id: number): Promise<void> {
   await db.delete(uploaded_images).where(eq(uploaded_images.id, id));
+}
+
+// Looks up one image by id regardless of kind — used to resolve a
+// studybuddy-image:<id> reference embedded in a note's markdown (see
+// NoteEditor.tsx) back into a real data URL for rendering, since the note's
+// own source text only ever carries the short id, not the (often huge)
+// data URL itself.
+export async function getUploadedImage(id: number): Promise<UploadedImage | undefined> {
+  const [row] = await db.select().from(uploaded_images).where(eq(uploaded_images.id, id)).limit(1);
+  if (!row) return undefined;
+  return { id: row.id, kind: row.kind as UploadedImageKind, dataUrl: row.data_url, createdAt: row.created_at };
 }
 
 // --- The Vault: personal Obsidian-style notes ---
@@ -691,7 +695,7 @@ async function nextNotePosition(folderId: number): Promise<number> {
 
 export async function createNote(title: string, courseId: number, folderId?: number): Promise<Note> {
   await assertTitleAvailable(title);
-  const resolvedFolderId = folderId ?? (await getMasterFolder(courseId)).id;
+  const resolvedFolderId = folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
   const now = nowUtc();
   const [note] = await db
     .insert(notes)
@@ -959,28 +963,23 @@ export async function setHomeWidgets(widgets: HomeWidgetConfig[]): Promise<void>
 
 // --- Courses ---
 
-// Every course is created with its permanent default folder ("Unsorted") in
-// the same transaction, so a course can never exist without one. New courses
-// are prepended (position below every existing course) rather than appended,
-// so a course you just created still shows up first — the "newest first"
+// A new course starts with zero folders — an empty course page shows
+// nothing until something's actually added, rather than a permanent-looking
+// "Unsorted" folder sitting there unused. The default folder only comes into
+// being the first time something actually needs one (see
+// getOrCreateDefaultFolder), whenever that ends up being. New courses are
+// prepended (position below every existing course) rather than appended, so
+// a course you just created still shows up first — the "newest first"
 // behavior this app had before manual ordering existed.
 export async function createCourse(name: string): Promise<Course> {
-  return runTransaction(async (tx) => {
-    const [{ next }] = await tx
-      .select({ next: sql<number>`COALESCE(MIN(${courses.position}), 1) - 1` })
-      .from(courses);
-    const [course] = await tx
-      .insert(courses)
-      .values({ name, position: next, created_at: nowUtc() })
-      .returning();
-    await tx.insert(folders).values({
-      course_id: course.id,
-      name: "Unsorted",
-      is_master: true,
-      created_at: nowUtc(),
-    });
-    return course;
-  });
+  const [{ next }] = await db
+    .select({ next: sql<number>`COALESCE(MIN(${courses.position}), 1) - 1` })
+    .from(courses);
+  const [course] = await db
+    .insert(courses)
+    .values({ name, position: next, created_at: nowUtc() })
+    .returning();
+  return course;
 }
 
 export async function getCourse(id: number): Promise<Course | undefined> {
@@ -1065,18 +1064,42 @@ export async function getFolder(id: number): Promise<Folder | undefined> {
   return rows[0];
 }
 
-export async function getMasterFolder(courseId: number): Promise<Folder> {
-  const rows = await db
+// The one "if you don't say where, it goes here" folder per course — never
+// pre-created (see createCourse), so an empty course shows nothing rather
+// than a permanent "Unsorted" folder no one asked for yet. Created lazily
+// the first time something actually needs a home (an upload with no folder
+// chosen, a pooled "all course material" generation, …), and no more
+// protected against deletion than any other folder — delete it and the next
+// thing that needs a default just gets a fresh one (see deleteFolder).
+// Like the rest of this app, assumes one device at a time: two concurrent
+// callers racing to create the first one for the same course could each
+// insert their own, leaving two folders briefly flagged as the default.
+async function insertDefaultFolder(courseId: number, tx: typeof db): Promise<Folder> {
+  const [{ next }] = await tx
+    .select({ next: sql<number>`COALESCE(MAX(${folders.position}), -1) + 1` })
+    .from(folders)
+    .where(eq(folders.course_id, courseId));
+  const [folder] = await tx
+    .insert(folders)
+    .values({
+      course_id: courseId,
+      name: "Unsorted",
+      is_master: true,
+      position: next,
+      created_at: nowUtc(),
+    })
+    .returning();
+  return folder;
+}
+
+export async function getOrCreateDefaultFolder(courseId: number, tx: typeof db = db): Promise<Folder> {
+  const rows = await tx
     .select()
     .from(folders)
     .where(and(eq(folders.course_id, courseId), eq(folders.is_master, true)))
     .limit(1);
-  if (!rows[0]) {
-    // Should be unreachable post-migration (every course gets one on
-    // creation, and db/sqlite.ts backfills any that predate this).
-    throw new Error(`Course ${courseId} has no default folder`);
-  }
-  return rows[0];
+  if (rows[0]) return rows[0];
+  return insertDefaultFolder(courseId, tx);
 }
 
 export async function renameFolder(id: number, name: string): Promise<void> {
@@ -1153,15 +1176,11 @@ export async function listFoldersForCourse(courseId: number): Promise<Folder[]> 
 export async function deleteFolder(id: number): Promise<void> {
   const folder = await getFolder(id);
   if (!folder) return;
-  if (folder.is_master) {
-    throw new CannotDeleteMasterFolderError();
-  }
-  const root = await getMasterFolder(folder.course_id);
 
   // Deleting a parent folder takes its subfolders with it (one level of
   // nesting, so this is never recursive) — every one of them needs its own
-  // documents/items reassigned first too, same as the parent, so nothing
-  // winds up with a NULL folder_id.
+  // documents/items/notes reassigned first too, same as the parent, so
+  // nothing winds up with a NULL folder_id.
   const subfolders = await db
     .select()
     .from(folders)
@@ -1169,20 +1188,44 @@ export async function deleteFolder(id: number): Promise<void> {
   const targetIds = [id, ...subfolders.map((f) => f.id)];
 
   await runTransaction(async (tx) => {
-    for (const targetId of targetIds) {
-      await tx
-        .update(documents)
-        .set({ folder_id: root.id })
-        .where(eq(documents.folder_id, targetId));
+    const [hasDocs] = await tx
+      .select({ id: documents.id })
+      .from(documents)
+      .where(inArray(documents.folder_id, targetIds))
+      .limit(1);
+    const [hasItems] = await tx
+      .select({ id: generated_items.id })
+      .from(generated_items)
+      .where(inArray(generated_items.folder_id, targetIds))
+      .limit(1);
+    const [hasNotes] = await tx
+      .select({ id: notes.id })
+      .from(notes)
+      .where(inArray(notes.folder_id, targetIds))
+      .limit(1);
+
+    // Only actually needed when there's something to reassign — an empty
+    // folder just gets deleted, no default folder conjured up to receive
+    // nothing (that would recreate the exact clutter getOrCreateDefaultFolder
+    // exists to avoid).
+    if (hasDocs || hasItems || hasNotes) {
+      // The reassignment target is normally the course's one default
+      // folder — but if THIS folder (or the current default folder, same
+      // thing when folder.is_master) is what's being deleted, it can't be
+      // its own replacement, so a fresh one is created here instead of
+      // fetched.
+      const root = folder.is_master
+        ? await insertDefaultFolder(folder.course_id, tx)
+        : await getOrCreateDefaultFolder(folder.course_id, tx);
+      await tx.update(documents).set({ folder_id: root.id }).where(inArray(documents.folder_id, targetIds));
       await tx
         .update(generated_items)
         .set({ folder_id: root.id })
-        .where(eq(generated_items.folder_id, targetId));
+        .where(inArray(generated_items.folder_id, targetIds));
+      await tx.update(notes).set({ folder_id: root.id }).where(inArray(notes.folder_id, targetIds));
     }
-    for (const sub of subfolders) {
-      await tx.delete(folders).where(eq(folders.id, sub.id));
-    }
-    await tx.delete(folders).where(eq(folders.id, id));
+
+    await tx.delete(folders).where(inArray(folders.id, targetIds));
   });
 }
 

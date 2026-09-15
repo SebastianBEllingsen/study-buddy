@@ -1,4 +1,5 @@
-import { createDocument, markDocumentExtracted } from "@/lib/models";
+import { createDocument, getOrCreateDefaultFolder, markDocumentExtracted } from "@/lib/models";
+import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
 
@@ -11,12 +12,16 @@ type Params = { params: Promise<{ courseId: string }> };
 // flows into generation/search/viewing identically with no changes there.
 export async function POST(request: Request, { params }: Params) {
   const { courseId } = await params;
-  const id = Number(courseId);
+  const id = parseId(courseId);
+  if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
 
   const body = await request.json().catch(() => ({}));
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   const text = typeof body?.text === "string" ? body.text.trim() : "";
-  const folderId = Number(body?.folderId);
+  // Omitted or explicitly null (rather than required) so an empty course
+  // with no folders yet can still be pasted into — see
+  // getOrCreateDefaultFolder.
+  const explicitFolderId = body?.folderId == null ? null : Number(body.folderId);
 
   if (!title) {
     return Response.json({ error: "A title is required" }, { status: 400 });
@@ -24,11 +29,12 @@ export async function POST(request: Request, { params }: Params) {
   if (!text) {
     return Response.json({ error: "Paste some text first" }, { status: 400 });
   }
-  if (!Number.isInteger(folderId)) {
-    return Response.json({ error: "A folder is required" }, { status: 400 });
+  if (explicitFolderId !== null && !Number.isInteger(explicitFolderId)) {
+    return Response.json({ error: "Invalid folder" }, { status: 400 });
   }
 
   try {
+    const folderId = explicitFolderId ?? (await getOrCreateDefaultFolder(id)).id;
     const doc = await createDocument({
       courseId: id,
       folderId,

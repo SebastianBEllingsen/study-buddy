@@ -28,11 +28,12 @@ import {
   type Extension,
   type Range,
 } from "@codemirror/state";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { toast } from "sonner";
 import {
   Bold,
   Italic,
@@ -61,6 +62,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LinkTargets } from "@/lib/models";
 import { buildNoteLinkSyntax, parseNoteLinks, type NoteLinkMatch, type NoteLinkType } from "@/lib/noteLinks";
+import { resizeImageForNote } from "@/lib/resizeImage";
 
 const EMPTY_TARGETS: LinkTargets = { notes: [], documents: [], items: [] };
 
@@ -262,6 +264,257 @@ function markdownLinkPills(): Extension {
     },
     { decorations: (v) => v.decorations }
   );
+}
+
+// Pictures pasted/dropped into a note (see noteImagePasteDrop below) are
+// uploaded once and referenced in the markdown source by this short pseudo-
+// scheme plus their uploaded_images row id — never the raw data URL, which
+// for a real photo/screenshot can run to hundreds of KB of base64 text.
+// Obsidian's own approach for a pasted image is the same idea (a short
+// wikilink to a saved file, not the image data inline); this is this app's
+// equivalent, since there's no separate attachments folder to save a real
+// file into — everything already lives in the uploaded_images table.
+const NOTE_IMAGE_SCHEME = "studybuddy-image:";
+// Custom drag payload type for reordering an already-embedded image within
+// the note (see the widget's dragstart and moveNoteImageLine below) — an OS
+// file drag (Finder/Explorer) never sets this, so the drop handler can tell
+// the two apart before deciding what to do with a drop.
+const NOTE_IMAGE_MOVE_MIME = "application/x-studybuddy-note-image";
+
+// Resolved data URLs are cached at module scope (not per-editor-instance)
+// since the same image id can appear in more than one place across a
+// session — Preview and Edit mode both render the same reference
+// independently, and switching notes shouldn't mean re-fetching an image
+// already seen once.
+const noteImageCache = new Map<number, string>();
+const noteImageFetches = new Map<number, Promise<string>>();
+
+function fetchNoteImage(id: number): Promise<string> {
+  const cached = noteImageCache.get(id);
+  if (cached) return Promise.resolve(cached);
+  const inFlight = noteImageFetches.get(id);
+  if (inFlight) return inFlight;
+  const promise = fetch(`/api/uploaded-images/${id}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((body: { image?: { dataUrl: string } } | null) => {
+      const dataUrl = body?.image?.dataUrl ?? "";
+      if (dataUrl) noteImageCache.set(id, dataUrl);
+      noteImageFetches.delete(id);
+      return dataUrl;
+    });
+  noteImageFetches.set(id, promise);
+  return promise;
+}
+
+class NoteImageWidget extends WidgetType {
+  constructor(readonly imageId: number) {
+    super();
+  }
+
+  eq(other: NoteImageWidget): boolean {
+    return other.imageId === this.imageId;
+  }
+
+  toDOM(): HTMLElement {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cm-note-image";
+    wrapper.title = "Drag to reposition — click to edit";
+    wrapper.draggable = true;
+
+    const img = document.createElement("img");
+    img.alt = "";
+    wrapper.appendChild(img);
+
+    const cached = noteImageCache.get(this.imageId);
+    if (cached) {
+      img.src = cached;
+    } else {
+      wrapper.classList.add("cm-note-image-loading");
+      fetchNoteImage(this.imageId).then((dataUrl) => {
+        if (!dataUrl) return;
+        img.src = dataUrl;
+        wrapper.classList.remove("cm-note-image-loading");
+      });
+    }
+
+    wrapper.addEventListener("dragstart", (e) => {
+      e.dataTransfer?.setData(NOTE_IMAGE_MOVE_MIME, String(this.imageId));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    });
+
+    return wrapper;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+// Renders every studybuddy-image:<id> as the actual picture, concealing the
+// raw ![](...) syntax the same way markdownLinkPills conceals a real link —
+// except on whatever line the cursor is currently on, where it drops back
+// to editable raw text.
+function noteImagePills(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    const sel = view.state.selection.main;
+    const tree = syntaxTree(view.state);
+    for (const { from, to } of view.visibleRanges) {
+      tree.iterate({
+        from,
+        to,
+        enter: (node) => {
+          if (node.name !== "Image") return;
+          const reveal = sel.from <= node.to && sel.to >= node.from;
+          if (reveal) return;
+          const urlNode = node.node.getChild("URL");
+          if (!urlNode) return;
+          const url = view.state.sliceDoc(urlNode.from, urlNode.to);
+          if (!url.startsWith(NOTE_IMAGE_SCHEME)) return;
+          const imageId = Number(url.slice(NOTE_IMAGE_SCHEME.length));
+          if (!Number.isFinite(imageId)) return;
+          ranges.push(Decoration.replace({ widget: new NoteImageWidget(imageId) }).range(node.from, node.to));
+        },
+      });
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+
+// Moves the line holding image `imageId` to wherever the drop landed (see
+// NoteImageWidget's dragstart) — snapped to the start of the target line,
+// so a dropped image always lands as its own line rather than splicing into
+// the middle of whatever text happened to be there. Searches the CURRENT
+// document for the image's marker rather than trusting a position captured
+// at dragstart, so it stays correct even if the document changed (e.g. the
+// user kept typing) in between.
+function moveNoteImageLine(view: EditorView, imageId: number, event: DragEvent) {
+  const doc = view.state.doc;
+  const marker = `(${NOTE_IMAGE_SCHEME}${imageId})`;
+  const idx = doc.toString().indexOf(marker);
+  if (idx < 0) return;
+  const line = doc.lineAt(idx);
+  const from = line.from;
+  const to = line.to < doc.length ? line.to + 1 : line.to; // swallow one trailing newline, if any
+
+  // precise: false — always returns an estimate rather than null for
+  // coordinates the precise algorithm doesn't consider "covered" by the
+  // rendered viewport (e.g. right at an edge, or a line not yet measured).
+  // An estimate is exactly as good as an exact position here anyway, since
+  // this only ever snaps to whichever line it lands nearest to.
+  const dropPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  const dropLine = doc.lineAt(Math.min(dropPos, doc.length));
+  const insertAt = dropLine.from;
+  if (insertAt >= from && insertAt <= to) return; // dropped on (or right next to) itself
+
+  const lineText = `${doc.sliceString(line.from, line.to)}\n`;
+  // Both change specs are given in the ORIGINAL document's coordinates —
+  // CodeMirror composes simultaneous changes itself, so insertAt doesn't
+  // need manually adjusting for the deletion even when it falls after it.
+  view.dispatch({
+    changes: [
+      { from, to, insert: "" },
+      { from: insertAt, insert: lineText },
+    ],
+  });
+}
+
+// Uploads `file` (resized, transparency preserved — see resizeImageForNote)
+// and replaces a placeholder inserted at `insertPos` with the real
+// reference once that finishes. The placeholder carries a random token so
+// it can be found again by exact text match regardless of how long the
+// upload takes or what the user typed elsewhere in the meantime — simpler
+// and just as reliable as mapping a raw position through arbitrary
+// intervening edits.
+async function insertNoteImage(view: EditorView, file: File, insertPos: number): Promise<void> {
+  const token = Math.random().toString(36).slice(2);
+  const placeholder = `![Uploading image…](pending:${token})`;
+  view.dispatch({
+    changes: { from: insertPos, insert: placeholder },
+    selection: EditorSelection.cursor(insertPos + placeholder.length),
+  });
+
+  function replacePlaceholder(withText: string) {
+    const idx = view.state.doc.toString().indexOf(placeholder);
+    if (idx < 0) return;
+    view.dispatch({ changes: { from: idx, to: idx + placeholder.length, insert: withText } });
+  }
+
+  try {
+    const dataUrl = await resizeImageForNote(file);
+    const res = await fetch("/api/uploaded-images", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "note", dataUrl }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.error ?? "Upload failed");
+    noteImageCache.set(body.image.id, dataUrl);
+    replacePlaceholder(`![](${NOTE_IMAGE_SCHEME}${body.image.id})`);
+  } catch {
+    replacePlaceholder("");
+    toast.error("Couldn't add that image");
+  }
+}
+
+// Handles both directions at once since they share the same "is this an
+// image?" triage and upload path: pasting an image from the clipboard, and
+// dropping one or more image files from outside the browser (an OS file
+// drag — see moveNoteImageLine above for dragging an *already-embedded*
+// image to reorder it, which is a different drag payload entirely).
+function noteImagePasteDrop(): Extension {
+  return EditorView.domEventHandlers({
+    paste(event, view) {
+      const items = event.clipboardData?.items;
+      if (!items) return false;
+      const file = Array.from(items)
+        .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+        ?.getAsFile();
+      if (!file) return false;
+      event.preventDefault();
+      insertNoteImage(view, file, view.state.selection.main.head);
+      return true;
+    },
+    drop(event, view) {
+      const movedImageId = event.dataTransfer?.getData(NOTE_IMAGE_MOVE_MIME);
+      if (movedImageId) {
+        event.preventDefault();
+        moveNoteImageLine(view, Number(movedImageId), event);
+        return true;
+      }
+
+      const files = Array.from(event.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+      if (files.length === 0) return false;
+      event.preventDefault();
+      // precise: false — see moveNoteImageLine's comment on the same call.
+      const dropPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+      // Sequential, not Promise.all — each file's placeholder needs the
+      // document left by the previous one's insert, not the pre-drop one.
+      (async () => {
+        let at = dropPos;
+        for (const file of files) {
+          await insertNoteImage(view, file, at);
+          at = view.state.selection.main.head;
+        }
+      })();
+      return true;
+    },
+  });
 }
 
 // Matches a list item's marker — leading indent, the bullet/number itself,
@@ -562,6 +815,27 @@ const editorTheme = EditorView.theme({
     borderRadius: "0.2em",
     transition: "background-color 1s",
   },
+  // A pasted/dropped picture — see noteImagePills/NoteImageWidget above.
+  // display:block (despite being an inline-replace decoration structurally)
+  // so it reads as its own line rather than sitting inline with text either
+  // side of it, matching how "![](url)" alone on a line normally looks.
+  ".cm-note-image": {
+    display: "block",
+    margin: "0.5em 0",
+    cursor: "grab",
+  },
+  ".cm-note-image img": {
+    display: "block",
+    maxWidth: "100%",
+    maxHeight: "24rem",
+    borderRadius: "0.5em",
+    border: "1px solid var(--border)",
+  },
+  ".cm-note-image-loading img": {
+    minHeight: "4rem",
+    minWidth: "6rem",
+    backgroundColor: "var(--muted)",
+  },
   // Live-preview formatting — see liveMarkdownFormatting() above.
   ".cm-heading": {
     fontFamily: "var(--font-heading)",
@@ -619,6 +893,55 @@ function markdownForPreview(source: string, targets: LinkTargets): string {
   return out;
 }
 
+// Preview-mode counterpart to NoteImageWidget: ReactMarkdown hands this
+// whatever raw src the markdown source carries, which for a pasted picture
+// is a studybuddy-image:<id> reference rather than a real URL — resolves it
+// through the same cache/fetch every Edit-mode widget already shares, so a
+// note switched to Preview shows the actual picture instead of a broken
+// image icon.
+function NoteMarkdownImage({ src: rawSrc, alt }: { src?: string | Blob; alt?: string }) {
+  // react-markdown types <img>'s src as string | Blob (a plain HTML
+  // attribute type, not something this app's own markdown ever actually
+  // produces) — a Blob here would mean something upstream is doing
+  // something unexpected, so just treat it as "no image" rather than
+  // guessing how to render it.
+  const src = typeof rawSrc === "string" ? rawSrc : undefined;
+  const isNoteImage = !!src && src.startsWith(NOTE_IMAGE_SCHEME);
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(() =>
+    isNoteImage ? (noteImageCache.get(Number(src!.slice(NOTE_IMAGE_SCHEME.length))) ?? null) : (src ?? null)
+  );
+  // A plain (non-note-image) src change is synced during render — compared
+  // against the src resolvedSrc was last computed for — rather than in the
+  // effect below, matching this app's established pattern elsewhere for
+  // avoiding a synchronous setState inside an effect body. The effect
+  // itself is left for what actually needs it: the async fetch when src
+  // *is* a note-image reference.
+  const [syncedFor, setSyncedFor] = useState(src);
+  if (!isNoteImage && src !== syncedFor) {
+    setSyncedFor(src);
+    setResolvedSrc(src ?? null);
+  }
+
+  useEffect(() => {
+    if (!isNoteImage) return;
+    const id = Number(src!.slice(NOTE_IMAGE_SCHEME.length));
+    if (!Number.isFinite(id)) return;
+    let cancelled = false;
+    fetchNoteImage(id).then((dataUrl) => {
+      if (!cancelled && dataUrl) setResolvedSrc(dataUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src, isNoteImage]);
+
+  if (!resolvedSrc) {
+    return <span className="my-2 block h-32 w-full animate-pulse rounded-lg bg-muted" />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element -- a data: URL / user-uploaded image, not a next/image-optimizable asset
+  return <img src={resolvedSrc} alt={alt ?? ""} className="rounded-lg border" />;
+}
+
 function NotePreview({
   markdown,
   targets,
@@ -643,6 +966,15 @@ function NotePreview({
         // matching what you actually typed.
         remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
         rehypePlugins={[rehypeKatex]}
+        // react-markdown sanitizes every href/src through its own built-in
+        // urlTransform by default, allow-listing only http(s)/irc(s)/
+        // mailto/xmpp — a studybuddy-image: reference isn't a URL a browser
+        // would ever navigate to or fetch on its own (NoteMarkdownImage
+        // resolves it itself, via a same-origin API call), so it's safe to
+        // let through unchanged; everything else still goes through the
+        // default sanitizer, same protection as before for a link/image a
+        // note's own markdown might otherwise carry.
+        urlTransform={(url) => (url.startsWith(NOTE_IMAGE_SCHEME) ? url : defaultUrlTransform(url))}
         components={{
           a: ({ href, children }) =>
             href && href.startsWith("/") ? (
@@ -652,6 +984,7 @@ function NotePreview({
                 {children}
               </a>
             ),
+          img: ({ src, alt }) => <NoteMarkdownImage src={src} alt={alt} />,
         }}
       >
         {markdownForPreview(markdown, targets)}
@@ -895,6 +1228,8 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       autocompletion({ override: [noteLinkCompletionSource(targets)] }),
       wikilinkPills(targets, onNavigate),
       markdownLinkPills(),
+      noteImagePills(),
+      noteImagePasteDrop(),
       listHangingIndent(),
       liveMarkdownFormatting(),
       highlightField,

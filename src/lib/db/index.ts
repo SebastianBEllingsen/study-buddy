@@ -127,6 +127,15 @@ export async function reconnect(): Promise<{ ok: boolean; error: string | null }
   return { ok: lastConnectionError === null, error: lastConnectionError };
 }
 
+// SQLite's manual BEGIN/COMMIT/ROLLBACK below (see runTransaction) runs
+// against the single shared `db` handle, not a scoped transaction object —
+// two concurrent callers could otherwise interleave their BEGINs into what
+// was meant to be one atomic block. Chained onto this, each call waits for
+// the previous one's commit/rollback before issuing its own BEGIN, so "one
+// SQLite transaction at a time" — already this app's assumed usage model,
+// per the comment below — actually holds instead of merely being assumed.
+let sqliteTransactionQueue: Promise<void> = Promise.resolve();
+
 // A second dialect seam, alongside the type cast above: postgres-js's
 // driver needs a real async callback for `db.transaction()` (each query is
 // genuine network I/O), but better-sqlite3's driver requires the opposite —
@@ -152,13 +161,24 @@ export async function runTransaction<T>(fn: (tx: typeof db) => Promise<T>): Prom
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return db.transaction(fn as any);
   }
-  await db.run(sql`begin`);
+
+  const previous = sqliteTransactionQueue;
+  let release: () => void;
+  sqliteTransactionQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
   try {
-    const result = await fn(db);
-    await db.run(sql`commit`);
-    return result;
-  } catch (err) {
-    await db.run(sql`rollback`);
-    throw err;
+    await db.run(sql`begin`);
+    try {
+      const result = await fn(db);
+      await db.run(sql`commit`);
+      return result;
+    } catch (err) {
+      await db.run(sql`rollback`);
+      throw err;
+    }
+  } finally {
+    release!();
   }
 }
