@@ -179,6 +179,12 @@ export async function POST(request: Request) {
     }
     branding.dashboardBannerStyle = body.dashboardBannerStyle;
   }
+  if ("dashboardTransparentWidgets" in body) {
+    if (typeof body.dashboardTransparentWidgets !== "boolean") {
+      return Response.json({ error: "dashboardTransparentWidgets must be a boolean" }, { status: 400 });
+    }
+    branding.dashboardTransparentWidgets = body.dashboardTransparentWidgets;
+  }
   if (Object.keys(branding).length > 0) {
     await setAppBranding(branding);
   }

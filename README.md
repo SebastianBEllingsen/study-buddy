@@ -23,7 +23,7 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
 ## Features
 
-- 🗂️ **Courses & folders** — upload PDFs, organize them however you like, drag to reorder
+- 🗂️ **Courses & folders** — upload documents (PDF, DOCX, ODT, PPTX) or images (PNG, JPG, GIF, WEBP), organize them however you like, drag to reorder, rename in place
 
   <img src="docs/images/CoursePage1.png" width="500" alt="Course page with folders">
 
@@ -81,12 +81,12 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
   <img src="docs/images/CalenderNoEvents.png" width="600" alt="Calendar month view">
 
-- 🧩 **Customizable home screen** — a phone-widget-style dashboard (pictured up top): a streak heatmap, an "Upcoming events" agenda, and more, each toggleable and drag-to-reorder from Settings
+- 🧩 **Customizable home screen** — a phone-widget-style dashboard (pictured up top): a streak heatmap, an "Upcoming events" agenda, and more, each toggleable and drag-to-reorder from Settings — with an optional transparent mode so widgets blend into the dashboard backdrop instead of sitting on cards
 
   <img src="docs/images/CustomizeWidgets.png" width="400" alt="Dragging and resizing dashboard widgets">
 
 - ☁️ **Optional Supabase sync** — stays local-first by default, or point it at your own Supabase project to sync across devices
-- ➕ **Supplement, don't regenerate** — add newly-uploaded PDFs to an existing quiz/deck/notes instead of starting over
+- ➕ **Supplement, don't regenerate** — add newly-uploaded documents to an existing quiz/deck/notes instead of starting over
 
   <img src="docs/images/SupplementToFlashCardsExample.png" width="600" alt="Banner offering to add new material to an existing flashcard set">
 
@@ -148,11 +148,11 @@ Means Node is installed as 32-bit — almost always the wrong installer on a 64-
 
 ## How to use it
 
-1. **Create a course**, upload PDFs into a folder, or paste text/images straight in.
+1. **Create a course**, upload documents (PDF, DOCX, ODT, PPTX) or images into a folder, or paste text/images straight in.
 2. **Generate** Notes / Quiz / Flashcards for a folder (or "All course material").
 3. **Study** — quizzes grade instantly and offer a retry on what you missed; flashcards only surface what's due; select any text (or crop any region) for a Hint or Explain.
 4. **Take your own notes** alongside the generated material — `[[link]]` to other notes, embed a PDF/quiz/flashcard reference, and write LaTeX that renders as you type.
-5. **Added more PDFs later?** Open the existing item — a banner offers to add just the new material.
+5. **Added more material later?** Open the existing item — a banner offers to add just the new material.
 6. **Search** in the header to find anything across every course, or open the AI chat icon for a general question that isn't tied to one document.
 7. **Track deadlines** on the Calendar page once Google Calendar or an ICS feed is connected.
 
@@ -164,8 +164,9 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · Base UI (shadcn/ui) �
 
 ## Known limitations
 
-- No OCR — scanned/image-only PDFs are rejected with a clear message (photos can still be pasted in as embedded images, just not transcribed)
+- No OCR — scanned/image-only PDFs are rejected with a clear message, and a directly-uploaded image is viewable and Crop & Ask-able but isn't transcribed, so it's never used as generation source material
 - No Anki `.apkg` export — flashcards are reviewed in-app only
+- PDF and DOCX work out of the box. ODT and PPTX need a local [LibreOffice](https://www.libreoffice.org/) install (`soffice` on your PATH) — they're converted to PDF on upload for viewing and text extraction; without it, uploading one fails with a clear error instead
 
 ## License
 

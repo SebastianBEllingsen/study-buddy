@@ -9,8 +9,10 @@ import {
   ClipboardPaste,
   FileText,
   Folder as FolderIcon,
+  FolderPlus,
   GripVertical,
   HelpCircle,
+  Image as ImageIcon,
   Layers,
   ListChecks,
   NotebookPen,
@@ -46,7 +48,7 @@ import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
 import { RowActionsMenu } from "@/components/RowActionsMenu";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -94,6 +96,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import DocumentViewer from "@/components/DocumentViewer";
 import { resizeImageToDataUrl } from "@/lib/resizeImage";
+import { UPLOAD_ACCEPT, extensionOf, isImageExtension } from "@/lib/documentFormats";
 
 interface CourseDetail {
   course: Course;
@@ -350,28 +353,40 @@ function DocumentPickerDialog({
 function DocumentList({
   documents,
   folderId,
-  folders,
   editMode,
   selected,
   onToggleSelect,
   onDelete,
-  onMove,
+  onRename,
   onView,
   onReorder,
 }: {
   documents: DocumentRow[];
   folderId: number;
-  folders: Folder[];
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (documentId: number) => void;
   onDelete: (documentId: number) => void;
-  onMove: (documentId: number, folderId: number) => void;
+  onRename: (documentId: number, filename: string) => void;
   onView: (doc: DocumentRow) => void;
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
-  if (documents.length === 0) {
-    return <p className="py-0.5 text-sm text-muted-foreground/70">No PDFs here yet.</p>;
+  // A single renamingId (not one useState per row) — only one document's
+  // name can be in edit mode at a time, same shape as ChatContent's
+  // deleteTargetId elsewhere in this app.
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+
+  function startRename(doc: DocumentRow) {
+    setRenamingId(doc.id);
+    setNameDraft(doc.filename);
+  }
+
+  function commitRename(doc: DocumentRow) {
+    setRenamingId(null);
+    const trimmed = nameDraft.trim();
+    if (!trimmed || trimmed === doc.filename) return;
+    onRename(doc.id, trimmed);
   }
 
   // Drops a dragged document (payload set by its own onDragStart below) onto
@@ -398,13 +413,13 @@ function DocumentList({
   }
 
   return (
-    <ul className="divide-y divide-border/60">
+    <>
       {documents.map((doc) => (
         <li
           key={doc.id}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => handleDrop(e, doc.id)}
-          className="group/row flex items-center justify-between gap-2 rounded-md px-1 py-2 text-sm hover:bg-muted/40"
+          className="group/row flex items-center justify-between gap-2 px-1 py-2 text-sm hover:bg-muted/40"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             {editMode && (
@@ -427,14 +442,39 @@ function DocumentList({
               className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
             >
               <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
-              <FileText className="size-3.5 shrink-0 text-muted-foreground/70" />
-              <button
-                type="button"
-                onClick={() => onView(doc)}
-                className="break-words text-left hover:underline"
-              >
-                {doc.filename}
-              </button>
+              {isImageExtension(extensionOf(doc.filename)) ? (
+                <ImageIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+              ) : (
+                <FileText className="size-3.5 shrink-0 text-muted-foreground/70" />
+              )}
+              {renamingId === doc.id ? (
+                <Input
+                  autoFocus
+                  value={nameDraft}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={() => commitRename(doc)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitRename(doc);
+                    }
+                    if (e.key === "Escape") {
+                      setNameDraft(doc.filename);
+                      setRenamingId(null);
+                    }
+                  }}
+                  className="h-6 max-w-60"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onView(doc)}
+                  className="break-words text-left hover:underline"
+                >
+                  {doc.filename}
+                </button>
+              )}
               {doc.status === "pending" && (
                 <Badge variant="secondary" className="ml-1">
                   processing…
@@ -450,58 +490,52 @@ function DocumentList({
                   {doc.error_message}
                 </Badge>
               )}
+              {doc.status === "image" && (
+                <Badge variant="secondary" className="ml-1">
+                  image, not used for generation
+                </Badge>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <FolderSelect
-              folders={folders}
-              value={doc.folder_id}
-              onChange={(folderId) => onMove(doc.id, folderId)}
-              ariaLabel={`Move ${doc.filename} to folder`}
-            />
-            <DeleteRowButton
-              itemLabel={doc.filename}
-              ariaLabel={`Delete ${doc.filename}`}
-              onConfirm={() => onDelete(doc.id)}
-            />
+            {renamingId !== doc.id && (
+              <RowActionsMenu
+                ariaLabel={`Actions for ${doc.filename}`}
+                actions={[{ label: "Rename", icon: Pencil, onSelect: () => startRename(doc) }]}
+                deleteLabel="Delete document"
+                onDelete={() => onDelete(doc.id)}
+              />
+            )}
           </div>
         </li>
       ))}
-    </ul>
+    </>
   );
 }
 
 function GeneratedItemList({
   items,
   folderId,
-  folders,
   dueByItemId,
   notifiedItemIds,
   editMode,
   selected,
   onToggleSelect,
-  onMove,
   onDelete,
   onReorder,
 }: {
   items: GeneratedItem[];
   folderId: number;
-  folders: Folder[];
   dueByItemId: Map<number, number>;
   notifiedItemIds: Set<number>;
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (itemId: number) => void;
-  onMove: (itemId: number, folderId: number) => void;
   onDelete: (itemId: number) => void;
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
   const { push: pushWithTransition } = useViewTransitionRouter();
   const showModelBadge = useShowModelBadge();
-
-  if (items.length === 0) {
-    return <p className="py-0.5 text-sm text-muted-foreground/70">Nothing generated here yet.</p>;
-  }
 
   // See DocumentList's handleDrop — same reorder-by-drop-on-a-sibling-row
   // pattern (including why stopPropagation matters), mirrored here for
@@ -521,7 +555,7 @@ function GeneratedItemList({
   }
 
   return (
-    <ul className="divide-y divide-border/60">
+    <>
       {items.map((item) => {
         const ModeIcon = MODE_META[item.mode].icon;
         return (
@@ -529,7 +563,7 @@ function GeneratedItemList({
           key={item.id}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => handleDrop(e, item.id)}
-          className="group/row flex items-center justify-between gap-2 rounded-md px-1 py-2 text-sm hover:bg-muted/40"
+          className="group/row flex items-center justify-between gap-2 px-1 py-2 text-sm hover:bg-muted/40"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             {editMode && (
@@ -589,12 +623,6 @@ function GeneratedItemList({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <FolderSelect
-              folders={folders}
-              value={item.folder_id}
-              onChange={(folderId) => onMove(item.id, folderId)}
-              ariaLabel={`Move ${item.title} to folder`}
-            />
             <DeleteRowButton
               itemLabel={item.title}
               ariaLabel={`Delete ${item.title}`}
@@ -604,7 +632,7 @@ function GeneratedItemList({
         </li>
         );
       })}
-    </ul>
+    </>
   );
 }
 
@@ -623,10 +651,6 @@ function NoteList({
   onDelete: (noteId: number) => void;
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
-  if (notes.length === 0) {
-    return <p className="py-0.5 text-sm text-muted-foreground/70">No notes here yet.</p>;
-  }
-
   // Same reorder-by-drop-on-a-sibling-row pattern as DocumentList/
   // GeneratedItemList's row-level handleDrop.
   function handleDrop(e: React.DragEvent, targetId: number) {
@@ -644,13 +668,13 @@ function NoteList({
   }
 
   return (
-    <ul className="divide-y divide-border/60">
+    <>
       {notes.map((note) => (
         <li
           key={note.id}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => handleDrop(e, note.id)}
-          className="group/row flex items-center justify-between gap-2 rounded-md px-1 py-2 text-sm hover:bg-muted/40"
+          className="group/row flex items-center justify-between gap-2 px-1 py-2 text-sm hover:bg-muted/40"
         >
           <div
             draggable
@@ -675,107 +699,25 @@ function NoteList({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <FolderSelect
-              folders={folders}
-              value={note.folder_id}
-              onChange={(folderId) => onMove(note.id, folderId)}
-              ariaLabel={`Move ${note.title} to folder`}
-            />
-            <DeleteRowButton
-              itemLabel={note.title}
-              ariaLabel={`Delete ${note.title}`}
-              onConfirm={() => onDelete(note.id)}
-            />
+            <RowActionsMenu
+              ariaLabel={`Actions for ${note.title}`}
+              deleteLabel="Delete note"
+              onDelete={() => onDelete(note.id)}
+            >
+              <div className="space-y-1.5 p-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Move to</p>
+                <FolderSelect
+                  folders={folders}
+                  value={note.folder_id}
+                  onChange={(folderId) => onMove(note.id, folderId)}
+                  ariaLabel={`Move ${note.title} to folder`}
+                />
+              </div>
+            </RowActionsMenu>
           </div>
         </li>
       ))}
-    </ul>
-  );
-}
-
-// A quiet inline add-row rather than a Dialog like Upload/New folder —
-// a note only needs a title to exist (unlike a document, there's no file
-// to pick), so a modal would be more friction than the action warrants.
-function NewNoteRow({ onCreate }: { onCreate: (title: string) => void }) {
-  const [title, setTitle] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  async function handleCreate() {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    setCreating(true);
-    try {
-      await onCreate(trimmed);
-      setTitle("");
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <Input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            handleCreate();
-          }
-        }}
-        placeholder="New note title…"
-        className="h-8 text-sm"
-      />
-      <Button size="sm" variant="outline" disabled={creating || !title.trim()} onClick={handleCreate}>
-        <Plus className="size-3.5" />
-        Add
-      </Button>
-    </div>
-  );
-}
-
-// Icon + accent per content type — the same visual language as MODE_META's
-// generate-button colors and the row-level icons below, so "this is a note"
-// reads the same way everywhere on the page instead of only as plain text.
-function CollapsibleSection({
-  title,
-  icon: Icon,
-  accentClass = "text-muted-foreground",
-  count,
-  storageKey,
-  autoOpen = false,
-  children,
-}: {
-  title: string;
-  icon: LucideIcon;
-  accentClass?: string;
-  count: number;
-  storageKey: string;
-  // Forces this section open once when it turns true — e.g. a pending
-  // "just generated" notification lives inside it — even if the user had
-  // previously collapsed it. Only fires on that transition (and on mount,
-  // if already true), so it doesn't fight a manual re-collapse afterward
-  // while the notification is still pending.
-  autoOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, onOpenChange] = useCollapsed(storageKey);
-  useEffect(() => {
-    if (autoOpen) onOpenChange(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoOpen]);
-  return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="group/section -ml-1 flex items-center gap-1.5 rounded-md py-1 pl-1 text-sm font-medium hover:bg-muted/60">
-        <ChevronRight
-          className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-90" : ""}`}
-        />
-        <Icon className={`size-3.5 shrink-0 ${accentClass}`} />
-        {title}
-        <span className="font-normal text-muted-foreground">{count}</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1 pl-[1.375rem]">{children}</CollapsibleContent>
-    </Collapsible>
+    </>
   );
 }
 
@@ -795,13 +737,14 @@ function FolderCard({
   onUpload,
   onDeleteDocument,
   onMoveDocument,
+  onRenameDocument,
   onViewDocument,
   onMoveItem,
   onDeleteItem,
   onMoveNote,
   onDeleteNote,
   onReorderNotes,
-  onCreateNote,
+  onAddToFolder,
   onDeleteFolder,
   onRenameFolder,
   onCustomizeFolder,
@@ -827,13 +770,14 @@ function FolderCard({
   onUpload: (folderId: number, files: FileList) => Promise<void>;
   onDeleteDocument: (documentId: number) => void;
   onMoveDocument: (documentId: number, folderId: number) => void;
+  onRenameDocument: (documentId: number, filename: string) => void;
   onViewDocument: (doc: DocumentRow) => void;
   onMoveItem: (itemId: number, folderId: number) => void;
   onDeleteItem: (itemId: number) => void;
   onMoveNote: (noteId: number, folderId: number) => void;
   onDeleteNote: (noteId: number) => void;
   onReorderNotes: (folderId: number, orderedIds: number[]) => void;
-  onCreateNote: (folderId: number, title: string) => void;
+  onAddToFolder: (folderId: number, kind: "upload" | "note") => void;
   onDeleteFolder: (folderId: number) => Promise<void>;
   onRenameFolder: (folderId: number, name: string) => Promise<void>;
   onCustomizeFolder: (folderId: number, fields: { icon?: string | null; color?: string | null }) => void;
@@ -953,14 +897,14 @@ function FolderCard({
   }
 
   return (
-    <Card
-      className={`group gap-3 py-3 transition-colors ${dragOver ? "ring-2 ring-primary" : ""}`}
+    <div
+      className={`group rounded-md transition-colors ${dragOver ? "bg-primary/5 ring-1 ring-primary" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
       <Collapsible open={open} onOpenChange={onOpenChange}>
-        <CardHeader className="px-3">
+        <div className="rounded-md px-2 py-1.5 hover:bg-muted/40">
           <div className="flex items-center justify-between gap-2">
             <div
               draggable
@@ -1029,10 +973,10 @@ function FolderCard({
                   )}
                 </span>
                 {/* Icon+count chips instead of "N docs, N generated, N
-                    notes" — same colors as the sections they summarize
-                    (see CollapsibleSection below), so the header alone tells
-                    you what's actually in here at a glance. Native title
-                    attributes keep the full word one hover away. */}
+                    notes" — same colors as the type icons in the merged
+                    list below, so the header alone tells you what's
+                    actually in here at a glance. Native title attributes
+                    keep the full word one hover away. */}
                 <span className="flex shrink-0 items-center gap-2.5 font-normal text-xs">
                   <span
                     className="flex items-center gap-1 text-muted-foreground"
@@ -1065,18 +1009,20 @@ function FolderCard({
               </CollapsibleTrigger>
             </div>
             <div className="flex shrink-0 items-center">
-              {!renaming && !isSubfolder && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    onCreateSubfolder(folder.id);
-                  }}
-                  aria-label={`Add a subfolder to ${folder.name}`}
-                >
-                  <Plus className="size-3.5 text-muted-foreground" />
-                </Button>
+              {!renaming && (
+                <RowActionsMenu
+                  ariaLabel={`Add to ${folder.name}`}
+                  triggerIcon={Plus}
+                  actions={[
+                    { label: "Upload files", icon: Upload, onSelect: () => onAddToFolder(folder.id, "upload") },
+                    { label: "New note", icon: StickyNote, onSelect: () => onAddToFolder(folder.id, "note") },
+                    // Nesting is one level deep — a subfolder can't have its
+                    // own subfolder, so this option only shows up top-level.
+                    ...(isSubfolder
+                      ? []
+                      : [{ label: "New subfolder", icon: FolderPlus, onSelect: () => onCreateSubfolder(folder.id) }]),
+                  ]}
+                />
               )}
               {!renaming && (
                 <RowActionsMenu
@@ -1092,71 +1038,61 @@ function FolderCard({
               )}
             </div>
           </div>
-        </CardHeader>
+        </div>
         <CollapsibleContent>
-          <CardContent className="space-y-3 px-3">
-            <CollapsibleSection
-              title="Documents"
-              icon={FileText}
-              count={documents.length}
-              storageKey={collapseKey(folder.id, "documents")}
-            >
-              <DocumentList
-                documents={documents}
-                folderId={folder.id}
-                folders={folders}
-                editMode={editMode}
-                selected={selectedDocs}
-                onToggleSelect={onToggleSelectDoc}
-                onDelete={onDeleteDocument}
-                onMove={onMoveDocument}
-                onView={onViewDocument}
-                onReorder={onReorderDocuments}
-              />
-            </CollapsibleSection>
-            <CollapsibleSection
-              title="Generated"
-              icon={Sparkles}
-              accentClass="text-focus"
-              count={items.length}
-              storageKey={collapseKey(folder.id, "generated")}
-              autoOpen={hasNotifiedHere}
-            >
-              <GeneratedItemList
-                items={items}
-                folderId={folder.id}
-                folders={folders}
-                dueByItemId={dueByItemId}
-                notifiedItemIds={notifiedItemIds}
-                editMode={editMode}
-                selected={selectedItems}
-                onToggleSelect={onToggleSelectItem}
-                onMove={onMoveItem}
-                onDelete={onDeleteItem}
-                onReorder={onReorderItems}
-              />
-            </CollapsibleSection>
-            <CollapsibleSection
-              title="Notes"
-              icon={StickyNote}
-              accentClass="text-sage"
-              count={notes.length}
-              storageKey={collapseKey(folder.id, "notes")}
-            >
-              <div className="space-y-2">
-                <NoteList
-                  notes={notes}
-                  folderId={folder.id}
-                  folders={folders}
-                  onMove={onMoveNote}
-                  onDelete={onDeleteNote}
-                  onReorder={onReorderNotes}
-                />
-                <NewNoteRow onCreate={(title) => onCreateNote(folder.id, title)} />
-              </div>
-            </CollapsibleSection>
+          <div className="space-y-2 py-1 pl-[1.625rem]">
+            {documents.length + items.length + notes.length === 0 ? (
+              <p className="py-0.5 text-sm text-muted-foreground/70">
+                Nothing here yet — upload a document, generate something, or add a note.
+              </p>
+            ) : (
+              // One merged list instead of three always-expanded Documents/
+              // Generated/Notes sections — each row's own icon (FileText,
+              // the generated item's mode icon, StickyNote) still says what
+              // it is, so nothing here needs a section header to explain it,
+              // and a folder with just one note no longer costs two empty
+              // "nothing here yet" lines above it.
+              <ul className="divide-y divide-border/60">
+                {documents.length > 0 && (
+                  <DocumentList
+                    documents={documents}
+                    folderId={folder.id}
+                    editMode={editMode}
+                    selected={selectedDocs}
+                    onToggleSelect={onToggleSelectDoc}
+                    onDelete={onDeleteDocument}
+                    onRename={onRenameDocument}
+                    onView={onViewDocument}
+                    onReorder={onReorderDocuments}
+                  />
+                )}
+                {items.length > 0 && (
+                  <GeneratedItemList
+                    items={items}
+                    folderId={folder.id}
+                    dueByItemId={dueByItemId}
+                    notifiedItemIds={notifiedItemIds}
+                    editMode={editMode}
+                    selected={selectedItems}
+                    onToggleSelect={onToggleSelectItem}
+                    onDelete={onDeleteItem}
+                    onReorder={onReorderItems}
+                  />
+                )}
+                {notes.length > 0 && (
+                  <NoteList
+                    notes={notes}
+                    folderId={folder.id}
+                    folders={folders}
+                    onMove={onMoveNote}
+                    onDelete={onDeleteNote}
+                    onReorder={onReorderNotes}
+                  />
+                )}
+              </ul>
+            )}
             {subfolders.length > 0 && (
-              <div className="space-y-3 border-l-2 border-dashed border-muted-foreground/15 pl-4">
+              <div className="space-y-1 border-l border-muted-foreground/15 pl-4">
                 {subfolders.map((sub) => (
                   <FolderCard
                     key={sub.id}
@@ -1175,13 +1111,14 @@ function FolderCard({
                     onUpload={onUpload}
                     onDeleteDocument={onDeleteDocument}
                     onMoveDocument={onMoveDocument}
+                    onRenameDocument={onRenameDocument}
                     onViewDocument={onViewDocument}
                     onMoveItem={onMoveItem}
                     onDeleteItem={onDeleteItem}
                     onMoveNote={onMoveNote}
                     onDeleteNote={onDeleteNote}
                     onReorderNotes={onReorderNotes}
-                    onCreateNote={onCreateNote}
+                    onAddToFolder={onAddToFolder}
                     onDeleteFolder={onDeleteFolder}
                     onRenameFolder={onRenameFolder}
                     onCustomizeFolder={onCustomizeFolder}
@@ -1195,10 +1132,10 @@ function FolderCard({
                 ))}
               </div>
             )}
-          </CardContent>
+          </div>
         </CollapsibleContent>
       </Collapsible>
-    </Card>
+    </div>
   );
 }
 
@@ -1325,6 +1262,14 @@ export default function CoursePage() {
   const [uploadNewFolderName, setUploadNewFolderName] = useState("");
   const [uploading, setUploading] = useState(false);
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Shares uploadDestination/uploadNewFolderName with Upload/Paste above —
+  // one top-level dialog instead of a "New note title…" row repeated inside
+  // every folder (that got noisy fast once a course had more than a couple
+  // of folders — see FolderCard's own "+" menu for the folder-scoped way in).
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [creatingNote, setCreatingNote] = useState(false);
 
   // Shares uploadDestination/uploadNewFolderName with the upload dialog —
   // both pick a destination folder the same way, and only one dialog is
@@ -1488,6 +1433,16 @@ export default function CoursePage() {
   function openNewFolderDialog(parentFolderId: number | null) {
     setNewFolderParentId(parentFolderId);
     setNewFolderOpen(true);
+  }
+
+  // Pre-scopes the Upload/New note dialogs (which otherwise default to
+  // whatever destination was last picked) to one specific folder — used by
+  // that folder's own "+" menu, so "Upload files" from inside "App Ideas"
+  // doesn't need "App Ideas" re-picked from the destination dropdown.
+  function openAddToFolder(folderId: number, kind: "upload" | "note") {
+    setUploadDestination(String(folderId));
+    if (kind === "upload") setUploadOpen(true);
+    else setNoteOpen(true);
   }
 
   async function handleCreateFolder(e: React.FormEvent) {
@@ -1691,6 +1646,19 @@ export default function CoursePage() {
     refresh();
   }
 
+  async function handleRenameDocument(documentId: number, filename: string) {
+    const res = await fetch(`/api/courses/${courseId}/documents/${documentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      toast.error(body.error ?? "Couldn't rename this document");
+    }
+    refresh();
+  }
+
   async function handleMoveItem(itemId: number, folderId: number) {
     await fetch(`/api/items/${itemId}`, {
       method: "PATCH",
@@ -1728,11 +1696,14 @@ export default function CoursePage() {
     refresh();
   }
 
-  async function handleCreateNote(folderId: number, title: string) {
+  // `folderId` null omits the field entirely — the server lazily creates
+  // the default "Unsorted" folder in that case (see getOrCreateDefaultFolder),
+  // same as an upload with no destination picked.
+  async function handleCreateNote(folderId: number | null, title: string) {
     const res = await fetch(`/api/courses/${courseId}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, folderId }),
+      body: JSON.stringify({ title, ...(folderId != null ? { folderId } : {}) }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -1740,6 +1711,24 @@ export default function CoursePage() {
       return;
     }
     router.push(`/vault/${body.note.id}`);
+  }
+
+  async function handleNoteDialogSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!noteTitle.trim()) return;
+    if (uploadDestination === NEW_FOLDER_SENTINEL && !uploadNewFolderName.trim()) return;
+    setCreatingNote(true);
+    try {
+      const destinationId = await resolveDestinationFolderId();
+      await handleCreateNote(destinationId, noteTitle.trim());
+      setNoteOpen(false);
+      setNoteTitle("");
+      setUploadNewFolderName("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't create the new folder");
+    } finally {
+      setCreatingNote(false);
+    }
   }
 
   async function handleBulkMove(folderId: number) {
@@ -2256,6 +2245,86 @@ export default function CoursePage() {
               </DialogContent>
             </Dialog>
 
+            <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
+              <DialogTrigger render={<Button variant="outline" size="sm" />}>
+                <StickyNote />
+                New note
+              </DialogTrigger>
+              <DialogContent>
+                <form onSubmit={handleNoteDialogSubmit}>
+                  <DialogHeader>
+                    <DialogTitle>New note</DialogTitle>
+                    <DialogDescription>
+                      Opens in the wiki-style note editor — pick where it should live.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-3 py-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="note-title">Title</Label>
+                      <Input
+                        id="note-title"
+                        autoFocus
+                        value={noteTitle}
+                        onChange={(e) => setNoteTitle(e.target.value)}
+                        placeholder="e.g. Lecture 4 recap"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Destination folder</Label>
+                      <Select value={uploadDestination} onValueChange={(v) => v && setUploadDestination(v)}>
+                        <SelectTrigger>
+                          <SelectValue>
+                            {(v: string) =>
+                              v === NEW_FOLDER_SENTINEL
+                                ? "+ Create new folder"
+                                : v === DEFAULT_FOLDER_SENTINEL
+                                  ? "Unsorted"
+                                  : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {!hasDefaultFolder && (
+                            <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
+                          )}
+                          {detail.folders.map((folder) => (
+                            <SelectItem key={folder.id} value={String(folder.id)}>
+                              {folder.name}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {uploadDestination === NEW_FOLDER_SENTINEL && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="note-new-folder-name">New folder name</Label>
+                        <Input
+                          id="note-new-folder-name"
+                          autoFocus
+                          value={uploadNewFolderName}
+                          onChange={(e) => setUploadNewFolderName(e.target.value)}
+                          placeholder="e.g. Test 1"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      type="submit"
+                      disabled={
+                        creatingNote ||
+                        !noteTitle.trim() ||
+                        (uploadDestination === NEW_FOLDER_SENTINEL && !uploadNewFolderName.trim())
+                      }
+                    >
+                      {creatingNote ? "Creating…" : "Create note"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+
             <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
               <DialogTrigger render={<Button size="sm" />}>
                 <Upload />
@@ -2266,17 +2335,17 @@ export default function CoursePage() {
                   <DialogHeader>
                     <DialogTitle>Upload files</DialogTitle>
                     <DialogDescription>
-                      Choose PDFs and where they should go.
+                      Choose documents (PDF, DOCX, ODT, PPTX) or images (PNG, JPG, GIF, WEBP) and where they should go.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="upload-files">PDFs</Label>
+                      <Label htmlFor="upload-files">Documents</Label>
                       <Input
                         id="upload-files"
                         ref={uploadFileInputRef}
                         type="file"
-                        accept="application/pdf"
+                        accept={UPLOAD_ACCEPT}
                         multiple
                         className="text-xs"
                       />
@@ -2348,7 +2417,7 @@ export default function CoursePage() {
                     <DialogDescription>
                       {pasteSaveAs === "note"
                         ? "Opens in the wiki-style note editor — good for your own writing, but won't be picked up as source material when generating notes/quizzes/flashcards."
-                        : "For text-only material with no PDF — treated just like an uploaded document once added, so it can be used to generate notes/quizzes/flashcards."}
+                        : "For text-only material with no file — treated just like an uploaded document once added, so it can be used to generate notes/quizzes/flashcards."}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-4">
@@ -2503,7 +2572,7 @@ export default function CoursePage() {
         <p className="text-xs text-muted-foreground">
           {editMode
             ? "Check documents or generated items to move or delete several at once."
-            : "Drag documents or generated items onto a folder to move them, drag one folder onto another's name/icon to nest it as a subfolder (elsewhere on the card to reorder), drag a subfolder into the gaps around the cards to move it back to the top level, or drop PDFs straight onto a folder to upload."}
+            : "Drag documents or generated items onto a folder to move them, drag one folder onto another's name/icon to nest it as a subfolder (elsewhere on the card to reorder), drag a subfolder into the gaps around the cards to move it back to the top level, or drop documents straight onto a folder to upload."}
         </p>
 
         {editMode && selectedDocs.size + selectedItems.size > 0 && (
@@ -2534,7 +2603,7 @@ export default function CoursePage() {
         >
           {detail.folders.length === 0 && (
             <p className="py-1 text-sm text-muted-foreground/70">
-              Nothing here yet — upload a PDF, paste some text, or create a folder to get started.
+              Nothing here yet — upload a document, paste some text, or create a folder to get started.
             </p>
           )}
           {detail.folders
@@ -2557,13 +2626,14 @@ export default function CoursePage() {
                 onUpload={handleUpload}
                 onDeleteDocument={handleDeleteDocument}
                 onMoveDocument={handleMoveDocument}
+                onRenameDocument={handleRenameDocument}
                 onViewDocument={(doc) => openDocumentViewer(doc.id)}
                 onMoveItem={handleMoveItem}
                 onDeleteItem={handleDeleteItem}
                 onMoveNote={handleMoveNote}
                 onDeleteNote={handleDeleteNote}
                 onReorderNotes={handleReorderNotes}
-                onCreateNote={handleCreateNote}
+                onAddToFolder={openAddToFolder}
                 onDeleteFolder={handleDeleteFolder}
                 onRenameFolder={handleRenameFolder}
                 onCustomizeFolder={handleCustomizeFolder}
@@ -2682,7 +2752,7 @@ export default function CoursePage() {
           />
           {!scopedHasExtracted && (
             <p className="text-sm text-muted-foreground">
-              Upload at least one PDF that extracts successfully in this scope before generating.
+              Upload at least one document that extracts successfully in this scope before generating.
             </p>
           )}
           <div className="flex flex-wrap gap-2">

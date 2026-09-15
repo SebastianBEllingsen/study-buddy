@@ -476,6 +476,11 @@ function migrate(database: Database.Database) {
       "ALTER TABLE app_settings ADD COLUMN ai_grading_enabled INTEGER NOT NULL DEFAULT 0"
     );
   }
+  if (!hasColumn("app_settings", "dashboard_transparent_widgets")) {
+    database.exec(
+      "ALTER TABLE app_settings ADD COLUMN dashboard_transparent_widgets INTEGER NOT NULL DEFAULT 0"
+    );
+  }
 }
 
 function createConnection(): Database.Database {

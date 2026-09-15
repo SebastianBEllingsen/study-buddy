@@ -7,7 +7,6 @@ import useSWR from "swr";
 import {
   BookOpen,
   CalendarDays,
-  Check,
   Clock,
   FileText,
   Flame,
@@ -233,7 +232,7 @@ interface WidgetLayout {
   rowSpan: number;
 }
 
-function StreakWidget({ stats }: { stats: Stats }) {
+function StreakWidget({ stats, transparent }: { stats: Stats; transparent: boolean }) {
   if (stats.streak === 0) {
     return (
       <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
@@ -243,7 +242,10 @@ function StreakWidget({ stats }: { stats: Stats }) {
     );
   }
   return (
-    <Card className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
+    <Card
+      elevation={transparent ? "flat" : "raised"}
+      className={`h-full items-center justify-center gap-1 overflow-hidden text-center ${transparent ? "" : "border"}`}
+    >
       <span className="stat-glow font-heading text-3xl font-semibold text-amber">{stats.streak}</span>
       <span className="flex items-center gap-1 text-sm text-muted-foreground">
         <Flame className="size-3.5 text-amber" />
@@ -253,7 +255,15 @@ function StreakWidget({ stats }: { stats: Stats }) {
   );
 }
 
-function DueCardsWidget({ stats, layout }: { stats: Stats; layout: WidgetLayout }) {
+function DueCardsWidget({
+  stats,
+  layout,
+  transparent,
+}: {
+  stats: Stats;
+  layout: WidgetLayout;
+  transparent: boolean;
+}) {
   const { dueFlashcards } = stats;
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -280,7 +290,8 @@ function DueCardsWidget({ stats, layout }: { stats: Stats; layout: WidgetLayout 
           tabIndex={0}
           onClick={() => setDialogOpen(true)}
           onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setDialogOpen(true)}
-          className="h-full cursor-pointer items-center justify-center gap-1 overflow-hidden border text-center transition-colors hover:bg-muted/40"
+          elevation={transparent ? "flat" : "raised"}
+          className={`h-full cursor-pointer items-center justify-center gap-1 overflow-hidden text-center transition-colors hover:bg-muted/40 ${transparent ? "" : "border"}`}
         >
           <span className="stat-glow font-heading text-3xl font-semibold text-amber">
             {dueFlashcards.total}
@@ -301,7 +312,10 @@ function DueCardsWidget({ stats, layout }: { stats: Stats; layout: WidgetLayout 
 
   return (
     <>
-      <Card className="h-full space-y-3 overflow-hidden border p-4">
+      <Card
+        elevation={transparent ? "flat" : "raised"}
+        className={`h-full space-y-3 overflow-hidden p-4 ${transparent ? "" : "border"}`}
+      >
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
@@ -353,9 +367,20 @@ function heatmapWeeksFor(colSpan: number): number {
   return 14;
 }
 
-function HeatmapWidget({ activity, layout }: { activity: Record<string, number>; layout: WidgetLayout }) {
+function HeatmapWidget({
+  activity,
+  layout,
+  transparent,
+}: {
+  activity: Record<string, number>;
+  layout: WidgetLayout;
+  transparent: boolean;
+}) {
   return (
-    <Card className="h-full overflow-hidden border p-3">
+    <Card
+      elevation={transparent ? "flat" : "raised"}
+      className={`h-full overflow-hidden p-3 ${transparent ? "" : "border"}`}
+    >
       <StudyHeatmap
         activity={activity}
         weeks={heatmapWeeksFor(layout.colSpan)}
@@ -456,10 +481,12 @@ function UpcomingEventsWidget({
   connected,
   layout,
   label,
+  transparent,
 }: {
   connected: boolean;
   layout: WidgetLayout;
   label?: string;
+  transparent: boolean;
 }) {
   const maxResults = upcomingMaxResultsFor(layout);
   // The list's date/time columns need more room than a narrow tile has —
@@ -498,7 +525,10 @@ function UpcomingEventsWidget({
   if (compact) {
     const next = events?.[0];
     return (
-      <Card className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+      <Card
+        elevation={transparent ? "flat" : "raised"}
+        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+      >
         <CalendarDays className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
         {!error && events === null && <Skeleton className="h-4 w-16 rounded" />}
@@ -519,8 +549,10 @@ function UpcomingEventsWidget({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "border"}`}>
+      <div
+        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b bg-card"}`}
+      >
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <CalendarDays className="size-4 text-focus" />
           {label ?? "Upcoming"}
@@ -585,10 +617,12 @@ function AssignmentsWidget({
   feeds,
   layout,
   label,
+  transparent,
 }: {
   feeds: CalendarFeed[] | null;
   layout: WidgetLayout;
   label?: string;
+  transparent: boolean;
 }) {
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data: eventsData, error: fetchError } = useSWR<{ events: UpcomingCalendarEvent[] }>(
@@ -646,7 +680,10 @@ function AssignmentsWidget({
   if (compact) {
     const next = assignments.find((e) => !completedIds?.has(e.id)) ?? assignments[0];
     return (
-      <Card className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+      <Card
+        elevation={transparent ? "flat" : "raised"}
+        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+      >
         <ListChecks className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
         {!error && loading && <Skeleton className="h-4 w-16 rounded" />}
@@ -662,12 +699,20 @@ function AssignmentsWidget({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "border"}`}>
+      <div
+        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b bg-card"}`}
+      >
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <ListChecks className="size-4 text-focus" />
           {label ?? "Assignments"}
         </span>
+        <Link
+          href="/calendar?view=assignments"
+          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Open calendar
+        </Link>
       </div>
       <div className="scrollbar-hover min-h-0 flex-1 overflow-y-auto">
         {error && <p className="px-4 py-6 text-sm text-destructive">{error}</p>}
@@ -687,7 +732,10 @@ function AssignmentsWidget({
               return (
                 <li
                   key={event.id}
-                  className={cn("flex items-center gap-3 px-4 py-2 text-sm", done && "bg-sage/10")}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-2 text-sm hover:bg-muted/40",
+                    done && "bg-sage/10"
+                  )}
                 >
                   <Checkbox
                     checked={done}
@@ -697,7 +745,7 @@ function AssignmentsWidget({
                   <EventInfoTooltip event={event}>
                     <Link
                       href={assignmentsCalendarHref(event)}
-                      className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                      className="flex min-w-0 flex-1 items-center gap-3"
                     >
                       <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                         {eventDayLabel(event)}
@@ -716,7 +764,6 @@ function AssignmentsWidget({
                       <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event)}</span>
                     </Link>
                   </EventInfoTooltip>
-                  {done && <Check className="size-3.5 shrink-0 text-sage" />}
                 </li>
               );
             })}
@@ -755,7 +802,15 @@ function formatRelativeTime(utcString: string): string {
   return new Date(then).toLocaleDateString();
 }
 
-function RecentActivityWidget({ layout, label }: { layout: WidgetLayout; label?: string }) {
+function RecentActivityWidget({
+  layout,
+  label,
+  transparent,
+}: {
+  layout: WidgetLayout;
+  label?: string;
+  transparent: boolean;
+}) {
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data, error: fetchError } = useSWR<{ views: RecentView[] }>("/api/recent-views");
   const views = data?.views ?? null;
@@ -768,7 +823,10 @@ function RecentActivityWidget({ layout, label }: { layout: WidgetLayout; label?:
   if (compact) {
     const next = views?.[0];
     return (
-      <Card className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+      <Card
+        elevation={transparent ? "flat" : "raised"}
+        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+      >
         <Clock className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
         {!error && loading && <Skeleton className="h-4 w-16 rounded" />}
@@ -784,8 +842,10 @@ function RecentActivityWidget({ layout, label }: { layout: WidgetLayout; label?:
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "border"}`}>
+      <div
+        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b bg-card"}`}
+      >
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <Clock className="size-4 text-focus" />
           {label ?? "Recent activity"}
@@ -979,15 +1039,30 @@ function HomePageContent() {
     </Dialog>
   );
 
+  const transparentWidgets = settings?.dashboardTransparentWidgets ?? false;
+
   function renderWidget(widget: HomeWidgetConfig) {
     const layout: WidgetLayout = { colSpan: widget.colSpan, rowSpan: widget.rowSpan };
     switch (widget.id) {
       case "streak":
-        return stats && <StreakWidget key="streak" stats={stats} />;
+        return stats && <StreakWidget key="streak" stats={stats} transparent={transparentWidgets} />;
       case "due":
-        return stats && <DueCardsWidget key="due" stats={stats} layout={layout} />;
+        return (
+          stats && (
+            <DueCardsWidget key="due" stats={stats} layout={layout} transparent={transparentWidgets} />
+          )
+        );
       case "heatmap":
-        return stats && <HeatmapWidget key="heatmap" activity={stats.activity} layout={layout} />;
+        return (
+          stats && (
+            <HeatmapWidget
+              key="heatmap"
+              activity={stats.activity}
+              layout={layout}
+              transparent={transparentWidgets}
+            />
+          )
+        );
       case "calendar":
         return (
           <UpcomingEventsWidget
@@ -995,12 +1070,28 @@ function HomePageContent() {
             connected={!!settings?.googleCalendarConnected || !!settings?.hasCalendarFeeds}
             layout={layout}
             label={widget.label}
+            transparent={transparentWidgets}
           />
         );
       case "assignments":
-        return <AssignmentsWidget key="assignments" feeds={feeds} layout={layout} label={widget.label} />;
+        return (
+          <AssignmentsWidget
+            key="assignments"
+            feeds={feeds}
+            layout={layout}
+            label={widget.label}
+            transparent={transparentWidgets}
+          />
+        );
       case "recent":
-        return <RecentActivityWidget key="recent" layout={layout} label={widget.label} />;
+        return (
+          <RecentActivityWidget
+            key="recent"
+            layout={layout}
+            label={widget.label}
+            transparent={transparentWidgets}
+          />
+        );
     }
   }
 

@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS documents (
   extracted_text TEXT,
   page_count INTEGER,
   char_count INTEGER,
-  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'extracted' | 'failed'
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'extracted' | 'failed' | 'image'
   error_message TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

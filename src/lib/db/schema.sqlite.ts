@@ -75,6 +75,10 @@ export const app_settings = sqliteTable("app_settings", {
   dashboard_banner_style: text("dashboard_banner_style"),
   // See AppSettings.aiGradingEnabled's doc comment in models.ts.
   ai_grading_enabled: integer("ai_grading_enabled", { mode: "boolean" }).notNull().default(false),
+  // See AppSettings.dashboardTransparentWidgets's doc comment in models.ts.
+  dashboard_transparent_widgets: integer("dashboard_transparent_widgets", { mode: "boolean" })
+    .notNull()
+    .default(false),
   updated_at: text("updated_at").notNull(),
 });
 

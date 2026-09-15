@@ -112,6 +112,8 @@ export const app_settings = pgTable("app_settings", {
   dashboard_banner_style: text("dashboard_banner_style"),
   // See AppSettings.aiGradingEnabled's doc comment in models.ts.
   ai_grading_enabled: boolean("ai_grading_enabled").notNull().default(false),
+  // See AppSettings.dashboardTransparentWidgets's doc comment in models.ts.
+  dashboard_transparent_widgets: boolean("dashboard_transparent_widgets").notNull().default(false),
   updated_at: text("updated_at").notNull(),
 });
 

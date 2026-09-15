@@ -773,6 +773,7 @@ function BrandingSection() {
     appIconImage?: string | null;
     dashboardBackgroundImage?: string | null;
     dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
+    dashboardTransparentWidgets?: boolean;
   }) {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -948,6 +949,20 @@ function BrandingSection() {
             </Select>
           </div>
         )}
+        <label className="flex items-center justify-between gap-3 pt-1 text-xs">
+          <span className="text-muted-foreground">
+            Transparent widgets
+            <span className="block text-muted-foreground/70">
+              Widgets drop their card background and sit directly on the dashboard.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            className="size-4 shrink-0 accent-primary"
+            checked={settings.dashboardTransparentWidgets}
+            onChange={(e) => saveBranding({ dashboardTransparentWidgets: e.target.checked })}
+          />
+        </label>
       </div>
       <ImageCropDialog
         open={cropOpen}

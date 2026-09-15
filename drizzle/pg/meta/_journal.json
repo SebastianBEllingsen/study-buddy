@@ -176,6 +176,13 @@
       "when": 1789471027597,
       "tag": "0025_lucky_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789491318156,
+      "tag": "0026_fixed_leper_queen",
+      "breakpoints": true
     }
   ]
 }

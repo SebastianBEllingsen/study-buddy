@@ -1,4 +1,5 @@
 import { getDocumentProxy, extractText } from "unpdf";
+import mammoth from "mammoth";
 
 export interface ExtractionResult {
   text: string;
@@ -12,6 +13,13 @@ export class ScannedPdfError extends Error {
       "This looks like a scanned or image-only PDF — OCR isn't supported yet."
     );
     this.name = "ScannedPdfError";
+  }
+}
+
+export class EmptyDocumentError extends Error {
+  constructor() {
+    super("Couldn't find any readable text in this file.");
+    this.name = "EmptyDocumentError";
   }
 }
 
@@ -39,4 +47,22 @@ export async function extractPdfText(
   }
 
   return { text, pageCount: totalPages, charCount };
+}
+
+// Roughly what a dense text page holds — docx has no real page concept
+// (that's a rendering-time property, not a document property), so this is
+// only used to give the "extracted, Np" badge a plausible number rather
+// than leaving it blank.
+const APPROX_CHARS_PER_PAGE = 2000;
+
+export async function extractDocxText(buffer: Buffer): Promise<ExtractionResult> {
+  const { value: rawText } = await mammoth.extractRawText({ buffer });
+  const text = rawText.replace(/\0/g, "");
+  const charCount = text.trim().length;
+
+  if (charCount < MIN_CHARS_PER_PAGE) {
+    throw new EmptyDocumentError();
+  }
+
+  return { text, pageCount: Math.max(1, Math.round(charCount / APPROX_CHARS_PER_PAGE)), charCount };
 }

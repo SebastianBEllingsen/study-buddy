@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "dashboard_transparent_widgets" boolean DEFAULT false NOT NULL;

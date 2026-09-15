@@ -53,8 +53,16 @@ export function EventInfoTooltip({ event, children }: { event: EventInfo; childr
     <Tooltip>
       {/* `block`, not `contents` — a `display: contents` wrapper has no
           box of its own, so the browser never fires pointerenter/leave on
-          it and the tooltip's hover detection never triggers. */}
-      <TooltipTrigger render={<span className="block" />}>{children}</TooltipTrigger>
+          it and the tooltip's hover detection never triggers. min-w-0
+          flex-1 only take effect when a caller uses this as a flex item
+          alongside e.g. a checkbox (see AssignmentsWidget) — without them
+          this span defaults to `min-width: auto` as a flex item, refusing
+          to shrink below its content's width and pushing the row wider
+          than the widget instead of letting the title inside truncate;
+          harmless everywhere else (the calendar month view's non-flex
+          event chips), since both classes are no-ops outside a flex
+          parent. */}
+      <TooltipTrigger render={<span className="block min-w-0 flex-1" />}>{children}</TooltipTrigger>
       <TooltipContent className="w-72 max-w-[calc(100vw-2rem)] space-y-2 rounded-lg bg-popover p-3 text-popover-foreground whitespace-normal ring-1 ring-foreground/10 shadow-md">
         <div className="flex items-start gap-2">
           <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${dotColor}`} />

@@ -42,6 +42,11 @@ export interface RowActionsMenuProps {
   // cover photo as a background needs a light icon to stay legible, same as
   // the other icons drawn over that photo.
   triggerIconClassName?: string;
+  // Swaps the "⋯" for a different glyph — e.g. a folder's own "add content"
+  // trigger reuses this exact popover shell (same panel, same row styling)
+  // but reads as "+" rather than "more actions", since it opens a menu of
+  // things to add rather than edit.
+  triggerIcon?: LucideIcon;
   contentClassName?: string;
 }
 
@@ -53,6 +58,7 @@ export function RowActionsMenu({
   deleteLabel = "Delete",
   deleteDescription = "This can't be undone.",
   triggerIconClassName = "text-muted-foreground",
+  triggerIcon: TriggerIcon = MoreHorizontal,
   contentClassName,
 }: RowActionsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -79,7 +85,7 @@ export function RowActionsMenu({
           aria-label={ariaLabel}
           onClick={(e: React.MouseEvent) => e.stopPropagation()}
         >
-          <MoreHorizontal className={cn("size-3.5", triggerIconClassName)} />
+          <TriggerIcon className={cn("size-3.5", triggerIconClassName)} />
         </PopoverTrigger>
         <PopoverContent
           align="end"

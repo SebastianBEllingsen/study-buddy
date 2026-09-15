@@ -27,7 +27,12 @@ import { computeDueCardIndices } from "./spacedRepetition";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 
-export type DocumentStatus = "pending" | "extracted" | "failed";
+// "image" is distinct from "failed": a plain image (png/jpg/...) has no text
+// to extract by design (no OCR — see extraction.ts), not a broken upload —
+// it's still fully viewable and Crop & Ask-able, just never picked up as
+// generation source material (see getNewDocumentsForItem/context.ts, both
+// of which key off "extracted" specifically).
+export type DocumentStatus = "pending" | "extracted" | "failed" | "image";
 export type GenerationMode = "notes" | "quiz" | "flashcards";
 export type FlashcardResult = "again" | "hard" | "good" | "easy";
 
@@ -147,6 +152,7 @@ interface SettingsRow {
   dashboard_background_image: string | null;
   dashboard_banner_style: string | null;
   ai_grading_enabled: boolean;
+  dashboard_transparent_widgets: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -172,6 +178,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       dashboard_background_image: app_settings.dashboard_background_image,
       dashboard_banner_style: app_settings.dashboard_banner_style,
       ai_grading_enabled: app_settings.ai_grading_enabled,
+      dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -271,6 +278,13 @@ export interface AppSettings {
   // Never affects mcq/multi_select, which are always graded locally either
   // way — this only ever changes short-answer questions.
   aiGradingEnabled: boolean;
+  // Off (the default): every widget renders on its own solid card, same as
+  // before this setting existed. On: widgets drop their card background/ring
+  // (Card's own "flat" elevation) and sit directly on the dashboard's own
+  // background — the plain page color, or dashboardBackgroundImage's backdrop
+  // when one is set — like icons on a home screen rather than a stack of
+  // panels.
+  dashboardTransparentWidgets: boolean;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -295,6 +309,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardBackgroundImage: row?.dashboard_background_image ?? null,
     dashboardBannerStyle: row?.dashboard_banner_style === "backdrop" ? "backdrop" : "overlap",
     aiGradingEnabled: row?.ai_grading_enabled ?? false,
+    dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
   };
 }
 
@@ -329,14 +344,16 @@ export async function setAppBranding(fields: {
   appFont?: string | null;
   dashboardBackgroundImage?: string | null;
   dashboardBannerStyle?: "overlap" | "backdrop" | null;
+  dashboardTransparentWidgets?: boolean;
 }): Promise<void> {
-  const values: Record<string, string | null> = {};
+  const values: Record<string, string | boolean | null> = {};
   if ("appName" in fields) values.app_name = fields.appName ?? null;
   if ("appIcon" in fields) values.app_icon = fields.appIcon ?? null;
   if ("appIconImage" in fields) values.app_icon_image = fields.appIconImage ?? null;
   if ("appFont" in fields) values.app_font = fields.appFont ?? null;
   if ("dashboardBackgroundImage" in fields) values.dashboard_background_image = fields.dashboardBackgroundImage ?? null;
   if ("dashboardBannerStyle" in fields) values.dashboard_banner_style = fields.dashboardBannerStyle ?? null;
+  if ("dashboardTransparentWidgets" in fields) values.dashboard_transparent_widgets = fields.dashboardTransparentWidgets ?? false;
   await db
     .update(app_settings)
     .set({ ...values, updated_at: nowUtc() })
@@ -1347,6 +1364,13 @@ export async function markDocumentFailed(id: number, errorMessage: string): Prom
     .where(eq(documents.id, id));
 }
 
+export async function markDocumentImage(id: number): Promise<void> {
+  await db
+    .update(documents)
+    .set({ status: "image", error_message: null })
+    .where(eq(documents.id, id));
+}
+
 export async function deleteDocument(id: number): Promise<void> {
   await db.delete(documents).where(eq(documents.id, id));
 }
@@ -1359,6 +1383,10 @@ export async function moveDocument(id: number, folderId: number): Promise<void> 
     .update(documents)
     .set({ folder_id: folderId, position: await nextDocumentPosition(folderId) })
     .where(eq(documents.id, id));
+}
+
+export async function renameDocument(id: number, filename: string): Promise<void> {
+  await db.update(documents).set({ filename }).where(eq(documents.id, id));
 }
 
 // Applies a new drag-and-drop order in one transaction, same pattern as

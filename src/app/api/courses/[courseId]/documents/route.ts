@@ -1,9 +1,17 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
-import { createDocument, getOrCreateDefaultFolder, markDocumentExtracted, markDocumentFailed } from "@/lib/models";
-import { uploadsDir } from "@/lib/uploads";
-import { extractPdfText, ScannedPdfError } from "@/lib/extraction";
+import {
+  createDocument,
+  getOrCreateDefaultFolder,
+  markDocumentExtracted,
+  markDocumentFailed,
+  markDocumentImage,
+} from "@/lib/models";
+import { uploadsDir, previewPdfPath } from "@/lib/uploads";
+import { extractPdfText, extractDocxText, ScannedPdfError, EmptyDocumentError } from "@/lib/extraction";
+import { convertToPdf, LibreOfficeUnavailableError } from "@/lib/libreoffice";
+import { extensionOf, isSupportedExtension, isImageExtension, needsLibreOfficeConversion } from "@/lib/documentFormats";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
@@ -27,8 +35,12 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid folder" }, { status: 400 });
     }
     const folderId = explicitFolderId ?? (await getOrCreateDefaultFolder(id)).id;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      return Response.json({ error: "Only PDF files are supported" }, { status: 400 });
+    const ext = extensionOf(file.name);
+    if (!isSupportedExtension(ext)) {
+      return Response.json(
+        { error: "Only PDF, DOCX, ODT, PPTX, and image files are supported" },
+        { status: 400 }
+      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -53,11 +65,36 @@ export async function POST(request: Request, { params }: Params) {
     });
 
     try {
-      const { text, pageCount, charCount } = await extractPdfText(buffer);
-      await markDocumentExtracted({ id: doc.id, extractedText: text, pageCount, charCount });
+      if (isImageExtension(ext)) {
+        // No OCR (see README's Known limitations) — an image has nothing to
+        // extract by design, not a failure, so it gets its own status
+        // rather than "failed": still fully viewable (ImageViewer) and
+        // Crop & Ask-able, just never picked up as generation source
+        // material (see getNewDocumentsForItem/context.ts).
+        await markDocumentImage(doc.id);
+      } else if (ext === "pdf") {
+        const { text, pageCount, charCount } = await extractPdfText(buffer);
+        await markDocumentExtracted({ id: doc.id, extractedText: text, pageCount, charCount });
+      } else if (ext === "docx") {
+        const { text, pageCount, charCount } = await extractDocxText(buffer);
+        await markDocumentExtracted({ id: doc.id, extractedText: text, pageCount, charCount });
+      } else if (needsLibreOfficeConversion(ext)) {
+        // Converted once here rather than on-demand in the viewing route —
+        // by the time the user actually opens it, it's already cached on
+        // disk (see previewPdfPath) instead of making their first view wait
+        // out a multi-second LibreOffice conversion.
+        const pdfBuffer = await convertToPdf(buffer, ext);
+        await fs.writeFile(previewPdfPath(filePath), pdfBuffer);
+        const { text, pageCount, charCount } = await extractPdfText(pdfBuffer);
+        await markDocumentExtracted({ id: doc.id, extractedText: text, pageCount, charCount });
+      }
     } catch (err) {
-      const message =
-        err instanceof ScannedPdfError ? err.message : "Failed to extract text from this PDF.";
+      let message = "Failed to extract text from this file.";
+      if (err instanceof ScannedPdfError || err instanceof EmptyDocumentError) {
+        message = err.message;
+      } else if (err instanceof LibreOfficeUnavailableError) {
+        message = err.message;
+      }
       await markDocumentFailed(doc.id, message);
     }
 

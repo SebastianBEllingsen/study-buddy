@@ -58,8 +58,8 @@ export default function DocumentViewer({
                 <DialogTitle className="truncate">{document.filename}</DialogTitle>
                 <DialogDescription>
                   {hasPdf === false
-                    ? "The original PDF isn't available on this device — showing extracted text instead."
-                    : "Original PDF"}
+                    ? "The original file isn't available on this device — showing extracted text instead."
+                    : "Original file"}
                 </DialogDescription>
               </div>
               <div className="flex shrink-0 items-center gap-1">

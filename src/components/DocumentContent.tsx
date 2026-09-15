@@ -16,6 +16,10 @@ import {
 import { captureElementRegion } from "@/lib/cropCapture";
 import { scrollToHighlight } from "@/lib/scrollToHighlight";
 import PastedTextView from "@/components/PastedTextView";
+import DocxViewer from "@/components/DocxViewer";
+import ImageViewer from "@/components/ImageViewer";
+import { Download } from "lucide-react";
+import { extensionOf, isImageExtension } from "@/lib/documentFormats";
 
 // pdfjs-dist assumes a browser (Worker, DOM) — loaded client-only so its
 // module code never runs during SSR (it does, and warns, if imported
@@ -70,14 +74,19 @@ export default function DocumentContent({
   // only renders what it's handed, so the caller needs to refetch.
   onTidied?: () => void;
   // Lets a caller with its own header (DocumentViewer's DialogDescription)
-  // mirror the PDF-availability check without running a second HEAD fetch.
-  onHasPdfChange?: (hasPdf: boolean | null) => void;
+  // mirror the original-file-availability check without running a second
+  // HEAD fetch. Named for its original pdf-only meaning; now true whenever
+  // ANY original (pdf, docx, or a LibreOffice-converted odt/pptx) is
+  // viewable, not just a pdf.
+  onHasPdfChange?: (hasOriginal: boolean | null) => void;
 }) {
   // Keyed by document id (not just a plain boolean) so a stale result from
   // the previous document can't flash while the new one is still loading —
   // compared against the current document at render time below, instead of
   // resetting state synchronously inside the effect.
-  const [pdfCheck, setPdfCheck] = useState<{ documentId: number; hasPdf: boolean } | null>(null);
+  const [originalCheck, setOriginalCheck] = useState<{ documentId: number; hasOriginal: boolean } | null>(
+    null
+  );
   const [tidying, setTidying] = useState(false);
   // HTMLElement, not HTMLPreElement — the container is a <pre> for a real
   // PDF's plain extracted-text fallback, but a plain <div> for pasted text
@@ -86,6 +95,9 @@ export default function DocumentContent({
   // takes a generic HTMLElement.
   const textRef = useRef<HTMLElement>(null);
   const isPasted = document.filePath === "";
+  const ext = extensionOf(document.filename);
+  const isDocx = ext === "docx";
+  const isImage = isImageExtension(ext);
 
   // Screenshot-crop-to-ask for the extracted-text fallback view — same
   // html2canvas-based capture as notes (see items/[itemId]/page.tsx), useful
@@ -137,40 +149,79 @@ export default function DocumentContent({
     let cancelled = false;
     fetch(`/api/courses/${document.courseId}/documents/${document.id}`, { method: "HEAD" })
       .then((res) => {
-        if (!cancelled) setPdfCheck({ documentId: document.id, hasPdf: res.ok });
+        if (!cancelled) setOriginalCheck({ documentId: document.id, hasOriginal: res.ok });
       })
       .catch(() => {
-        if (!cancelled) setPdfCheck({ documentId: document.id, hasPdf: false });
+        if (!cancelled) setOriginalCheck({ documentId: document.id, hasOriginal: false });
       });
     return () => {
       cancelled = true;
     };
   }, [document.id, document.courseId]);
 
-  const hasPdf = pdfCheck?.documentId === document.id ? pdfCheck.hasPdf : null;
+  const hasOriginal = originalCheck?.documentId === document.id ? originalCheck.hasOriginal : null;
 
   useEffect(() => {
-    onHasPdfChange?.(hasPdf);
+    onHasPdfChange?.(hasOriginal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPdf]);
+  }, [hasOriginal]);
 
   useEffect(() => {
-    if (hasPdf === false && highlight && textRef.current) {
+    if (hasOriginal === false && highlight && textRef.current) {
       scrollToHighlight(textRef.current, highlight);
     }
     // Runs once per document as its text view first becomes visible.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [document.id, hasPdf]);
+  }, [document.id, hasOriginal]);
 
   return (
     <>
       <div className="min-h-0 flex-1 overflow-hidden rounded-lg border">
-        {hasPdf === null && (
+        {hasOriginal === null && (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Loading…
           </div>
         )}
-        {hasPdf === true && (
+        {hasOriginal === true && isDocx && (
+          <DocxViewer
+            url={`/api/courses/${document.courseId}/documents/${document.id}`}
+            filename={document.filename}
+          />
+        )}
+        {hasOriginal === true && isImage && (
+          <div className="relative h-full">
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+              <CropToAskButton active={cropMode} onClick={toggleCropMode} />
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Download image"
+                nativeButton={false}
+                render={
+                  <a
+                    href={`/api/courses/${document.courseId}/documents/${document.id}`}
+                    download={document.filename}
+                  />
+                }
+              >
+                <Download className="size-3.5" />
+              </Button>
+            </div>
+            <div
+              ref={textRef as React.RefObject<HTMLDivElement>}
+              className={`h-full overflow-auto bg-muted/50 p-4 ${cropMode ? "cursor-crosshair select-none" : ""}`}
+              onMouseDown={handleCropMouseDown}
+              onMouseMove={handleCropMouseMove}
+              onMouseUp={handleCropMouseUp}
+            >
+              <ImageViewer
+                url={`/api/courses/${document.courseId}/documents/${document.id}`}
+                filename={document.filename}
+              />
+            </div>
+          </div>
+        )}
+        {hasOriginal === true && !isDocx && !isImage && (
           <PdfViewer
             url={`/api/courses/${document.courseId}/documents/${document.id}`}
             filename={document.filename}
@@ -178,7 +229,7 @@ export default function DocumentContent({
             highlight={highlight}
           />
         )}
-        {hasPdf === false &&
+        {hasOriginal === false &&
           (document.extracted_text ? (
             <div className="relative h-full">
               <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
@@ -237,7 +288,7 @@ export default function DocumentContent({
           onDismiss={dismissCrop}
         />
       )}
-      {hasPdf === false && document.extracted_text && (
+      {hasOriginal === false && document.extracted_text && (
         <AskAiPanel
           endpoint={`/api/courses/${document.courseId}/documents/${document.id}/ask`}
           containerRef={textRef}
