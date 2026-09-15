@@ -83,6 +83,11 @@ const BANNER_STYLE_LABELS: Record<AppSettings["dashboardBannerStyle"], string> =
   backdrop: "Full backdrop",
 };
 
+const DOCUMENT_BADGE_DETAIL_LABELS: Record<AppSettings["documentBadgeDetail"], string> = {
+  detailed: "Detailed",
+  minimal: "Minimal",
+};
+
 function AiSection() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [backend, setBackendState] = useState<AiBackend>("api");
@@ -1020,7 +1025,7 @@ function DisplaySection() {
   }, []);
 
   async function handleToggle(
-    field: "showModelBadge" | "autoOpenGeneratedItems" | "aiGradingEnabled",
+    field: "showModelBadge" | "autoOpenGeneratedItems" | "aiGradingEnabled" | "documentBadgesEnabled",
     next: boolean
   ) {
     if (!settings) return;
@@ -1039,6 +1044,29 @@ function DisplaySection() {
     } catch {
       toast.error("Couldn't save display settings");
       setSettings((prev) => (prev ? { ...prev, [field]: !next } : prev));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDocumentBadgeDetail(detail: AppSettings["documentBadgeDetail"]) {
+    if (!settings) return;
+    const prev = settings.documentBadgeDetail;
+    setSettings({ ...settings, documentBadgeDetail: detail });
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentBadgeDetail: detail }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save display settings");
+        setSettings((s) => (s ? { ...s, documentBadgeDetail: prev } : s));
+      }
+    } catch {
+      toast.error("Couldn't save display settings");
+      setSettings((s) => (s ? { ...s, documentBadgeDetail: prev } : s));
     } finally {
       setSaving(false);
     }
@@ -1098,6 +1126,47 @@ function DisplaySection() {
           onChange={(e) => handleToggle("aiGradingEnabled", e.target.checked)}
         />
       </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          Show document status badges
+          <span className="block text-xs text-muted-foreground">
+            The &quot;extracted, Np&quot; / &quot;processing…&quot; / &quot;image&quot; pill next to each document.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.documentBadgesEnabled}
+          disabled={saving}
+          onChange={(e) => handleToggle("documentBadgesEnabled", e.target.checked)}
+        />
+      </label>
+      {settings.documentBadgesEnabled && (
+        <div className="flex items-center justify-between gap-3 pl-1 text-xs">
+          <span className="text-muted-foreground">Detail level</span>
+          <Select
+            value={settings.documentBadgeDetail}
+            onValueChange={(value: AppSettings["documentBadgeDetail"] | null) =>
+              value && saveDocumentBadgeDetail(value)
+            }
+          >
+            <SelectTrigger className="h-8 w-32 text-xs">
+              <SelectValue>
+                {(v: AppSettings["documentBadgeDetail"]) => DOCUMENT_BADGE_DETAIL_LABELS[v] ?? v}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(DOCUMENT_BADGE_DETAIL_LABELS) as AppSettings["documentBadgeDetail"][]).map(
+                (value) => (
+                  <SelectItem key={value} value={value}>
+                    {DOCUMENT_BADGE_DETAIL_LABELS[value]}
+                  </SelectItem>
+                )
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   );
 }

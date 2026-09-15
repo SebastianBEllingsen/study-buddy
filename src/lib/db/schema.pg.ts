@@ -114,6 +114,12 @@ export const app_settings = pgTable("app_settings", {
   ai_grading_enabled: boolean("ai_grading_enabled").notNull().default(false),
   // See AppSettings.dashboardTransparentWidgets's doc comment in models.ts.
   dashboard_transparent_widgets: boolean("dashboard_transparent_widgets").notNull().default(false),
+  // See AppSettings.documentBadgesEnabled's doc comment in models.ts.
+  document_badges_enabled: boolean("document_badges_enabled").notNull().default(true),
+  // "detailed" | "minimal" | null (null == "detailed") — see the matching
+  // column/comment in schema.sqlite.ts and the AppSettings.documentBadgeDetail
+  // doc comment in models.ts.
+  document_badge_detail: text("document_badge_detail"),
   updated_at: text("updated_at").notNull(),
 });
 

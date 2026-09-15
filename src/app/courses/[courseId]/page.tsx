@@ -42,6 +42,7 @@ import type { QuizGenerationSettings } from "@/lib/types";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
+import { useDocumentBadgeSettings } from "@/lib/useDocumentBadgeSettings";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
@@ -376,6 +377,7 @@ function DocumentList({
   // deleteTargetId elsewhere in this app.
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [nameDraft, setNameDraft] = useState("");
+  const documentBadges = useDocumentBadgeSettings();
 
   function startRename(doc: DocumentRow) {
     setRenamingId(doc.id);
@@ -475,24 +477,24 @@ function DocumentList({
                   {doc.filename}
                 </button>
               )}
-              {doc.status === "pending" && (
+              {documentBadges.enabled && doc.status === "pending" && (
                 <Badge variant="secondary" className="ml-1">
                   processing…
                 </Badge>
               )}
-              {doc.status === "extracted" && (
+              {documentBadges.enabled && doc.status === "extracted" && (
                 <Badge className="ml-1 border-sage/30 bg-sage/10 text-sage" variant="outline">
-                  extracted, {doc.page_count}p
+                  {documentBadges.detail === "minimal" ? `${doc.page_count}p` : `extracted, ${doc.page_count}p`}
                 </Badge>
               )}
-              {doc.status === "failed" && (
+              {documentBadges.enabled && doc.status === "failed" && (
                 <Badge variant="destructive" className="ml-1">
                   {doc.error_message}
                 </Badge>
               )}
-              {doc.status === "image" && (
+              {documentBadges.enabled && doc.status === "image" && (
                 <Badge variant="secondary" className="ml-1">
-                  image, not used for generation
+                  {documentBadges.detail === "minimal" ? "image" : "image, not used for generation"}
                 </Badge>
               )}
             </div>

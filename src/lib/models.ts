@@ -153,6 +153,8 @@ interface SettingsRow {
   dashboard_banner_style: string | null;
   ai_grading_enabled: boolean;
   dashboard_transparent_widgets: boolean;
+  document_badges_enabled: boolean;
+  document_badge_detail: string | null;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -179,6 +181,8 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       dashboard_banner_style: app_settings.dashboard_banner_style,
       ai_grading_enabled: app_settings.ai_grading_enabled,
       dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
+      document_badges_enabled: app_settings.document_badges_enabled,
+      document_badge_detail: app_settings.document_badge_detail,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -285,6 +289,15 @@ export interface AppSettings {
   // when one is set — like icons on a home screen rather than a stack of
   // panels.
   dashboardTransparentWidgets: boolean;
+  // On (the default): document rows show their status badge — "extracted,
+  // Np", "processing…", the failure error, or "image, not used for
+  // generation" — same as before this setting existed. Off: no badge at all.
+  documentBadgesEnabled: boolean;
+  // "detailed" (default): the full status text above. "minimal": just the
+  // page count ("Np") for extracted documents and just "image" for image
+  // files — processing/failure text is short enough already and doesn't
+  // shrink further. Meaningless with documentBadgesEnabled off.
+  documentBadgeDetail: "detailed" | "minimal";
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -310,6 +323,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardBannerStyle: row?.dashboard_banner_style === "backdrop" ? "backdrop" : "overlap",
     aiGradingEnabled: row?.ai_grading_enabled ?? false,
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
+    documentBadgesEnabled: row?.document_badges_enabled ?? true,
+    documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
   };
 }
 
@@ -331,6 +346,20 @@ export async function setAiGradingEnabled(enabled: boolean): Promise<void> {
   await db
     .update(app_settings)
     .set({ ai_grading_enabled: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setDocumentBadgesEnabled(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ document_badges_enabled: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setDocumentBadgeDetail(detail: "detailed" | "minimal"): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ document_badge_detail: detail === "minimal" ? "minimal" : null, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 

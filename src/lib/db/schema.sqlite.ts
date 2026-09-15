@@ -79,6 +79,14 @@ export const app_settings = sqliteTable("app_settings", {
   dashboard_transparent_widgets: integer("dashboard_transparent_widgets", { mode: "boolean" })
     .notNull()
     .default(false),
+  // See AppSettings.documentBadgesEnabled's doc comment in models.ts.
+  document_badges_enabled: integer("document_badges_enabled", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  // "detailed" | "minimal" | null (null == "detailed") — see the matching
+  // column/comment in schema.pg.ts and the AppSettings.documentBadgeDetail
+  // doc comment in models.ts.
+  document_badge_detail: text("document_badge_detail"),
   updated_at: text("updated_at").notNull(),
 });
 

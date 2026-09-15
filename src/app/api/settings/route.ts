@@ -5,6 +5,8 @@ import {
   setShowModelBadge,
   setAutoOpenGeneratedItems,
   setAiGradingEnabled,
+  setDocumentBadgesEnabled,
+  setDocumentBadgeDetail,
   setGoogleClientCredentials,
   setHomeWidgets,
   setAppBranding,
@@ -84,6 +86,23 @@ export async function POST(request: Request) {
       return Response.json({ error: "aiGradingEnabled must be a boolean" }, { status: 400 });
     }
     await setAiGradingEnabled(body.aiGradingEnabled);
+  }
+
+  if (body?.documentBadgesEnabled !== undefined) {
+    if (typeof body.documentBadgesEnabled !== "boolean") {
+      return Response.json({ error: "documentBadgesEnabled must be a boolean" }, { status: 400 });
+    }
+    await setDocumentBadgesEnabled(body.documentBadgesEnabled);
+  }
+
+  if (body?.documentBadgeDetail !== undefined) {
+    if (body.documentBadgeDetail !== "detailed" && body.documentBadgeDetail !== "minimal") {
+      return Response.json(
+        { error: "documentBadgeDetail must be \"detailed\" or \"minimal\"" },
+        { status: 400 }
+      );
+    }
+    await setDocumentBadgeDetail(body.documentBadgeDetail);
   }
 
   if (body?.googleClientId !== undefined || body?.googleClientSecret !== undefined) {
