@@ -11,13 +11,15 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 ## Features
 
 - 🗂️ **Courses & folders** — upload PDFs, organize them however you like, drag to reorder
+  
   <table>
     <tr>
       <td>
               <img src="docs/images/CoursePage1.png" width="500" alt="Customized dashboard">
       </td>
-          <td>
-              <img src="docs/images/CoursePage2.png" width="500"></td>
+      <td>
+              <img src="docs/images/CoursePage2.png" width="500" alt="Another customization">
+      </td>
     </tr>
   </table>
 
