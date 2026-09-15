@@ -52,6 +52,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -1331,6 +1332,11 @@ export default function CoursePage() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteText, setPasteText] = useState("");
+  // Document: scoped into notes/quiz/flashcard generation and full-text
+  // search, like an uploaded PDF. Note: opened straight into the wiki-style
+  // note editor instead — not picked up as generation source material,
+  // since generation reads from documents only (see generate/[mode]/route.ts).
+  const [pasteSaveAs, setPasteSaveAs] = useState<"document" | "note">("document");
   const [pasting, setPasting] = useState(false);
   const [tidyingPaste, setTidyingPaste] = useState(false);
   const [insertingImage, setInsertingImage] = useState(false);
@@ -1605,11 +1611,18 @@ export default function CoursePage() {
     setError(null);
     try {
       const destinationId = await resolveDestinationFolderId();
-      const res = await fetch(`/api/courses/${courseId}/documents/paste`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: pasteTitle, text: pasteText, folderId: destinationId }),
-      });
+      const res =
+        pasteSaveAs === "note"
+          ? await fetch(`/api/courses/${courseId}/notes`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: pasteTitle, markdown: pasteText, folderId: destinationId }),
+            })
+          : await fetch(`/api/courses/${courseId}/documents/paste`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: pasteTitle, text: pasteText, folderId: destinationId }),
+            });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setError(body.error ?? "Failed to add pasted text");
@@ -1619,6 +1632,7 @@ export default function CoursePage() {
       setPasteOpen(false);
       setPasteTitle("");
       setPasteText("");
+      setPasteSaveAs("document");
       setUploadNewFolderName("");
       refresh();
     } catch (err) {
@@ -2332,11 +2346,31 @@ export default function CoursePage() {
                   <DialogHeader>
                     <DialogTitle>Paste text</DialogTitle>
                     <DialogDescription>
-                      For text-only material with no PDF — treated just like an uploaded document
-                      once added.
+                      {pasteSaveAs === "note"
+                        ? "Opens in the wiki-style note editor — good for your own writing, but won't be picked up as source material when generating notes/quizzes/flashcards."
+                        : "For text-only material with no PDF — treated just like an uploaded document once added, so it can be used to generate notes/quizzes/flashcards."}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-4">
+                    <div className="grid gap-2">
+                      <Label>Save as</Label>
+                      <ToggleGroup
+                        value={[pasteSaveAs]}
+                        onValueChange={(v: string[]) => v[0] && setPasteSaveAs(v[0] as "document" | "note")}
+                        size="sm"
+                        variant="outline"
+                        className="self-start"
+                      >
+                        <ToggleGroupItem value="document">
+                          <FileText className="size-3.5" />
+                          Document
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="note">
+                          <StickyNote className="size-3.5" />
+                          Note
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </div>
                     <div className="grid gap-2">
                       <Label htmlFor="paste-title">Title</Label>
                       <Input

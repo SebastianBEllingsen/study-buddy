@@ -693,7 +693,12 @@ async function nextNotePosition(folderId: number): Promise<number> {
   return next;
 }
 
-export async function createNote(title: string, courseId: number, folderId?: number): Promise<Note> {
+export async function createNote(
+  title: string,
+  courseId: number,
+  folderId?: number,
+  markdown = ""
+): Promise<Note> {
   await assertTitleAvailable(title);
   const resolvedFolderId = folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
   const now = nowUtc();
@@ -701,7 +706,7 @@ export async function createNote(title: string, courseId: number, folderId?: num
     .insert(notes)
     .values({
       title,
-      markdown: "",
+      markdown,
       course_id: courseId,
       folder_id: resolvedFolderId,
       position: await nextNotePosition(resolvedFolderId),

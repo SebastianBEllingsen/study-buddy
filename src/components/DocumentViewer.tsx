@@ -76,7 +76,12 @@ export default function DocumentViewer({
   // resetting state synchronously inside the effect.
   const [pdfCheck, setPdfCheck] = useState<{ documentId: number; hasPdf: boolean } | null>(null);
   const [tidying, setTidying] = useState(false);
-  const textRef = useRef<HTMLPreElement>(null);
+  // HTMLElement, not HTMLPreElement — the container is a <pre> for a real
+  // PDF's plain extracted-text fallback, but a plain <div> for pasted text
+  // rendered as Markdown (see the isPasted branch below); every consumer of
+  // this ref (captureElementRegion, scrollToHighlight, AskAiPanel) already
+  // takes a generic HTMLElement.
+  const textRef = useRef<HTMLElement>(null);
   const searchParams = useSearchParams();
   const highlight = searchParams.get("highlight");
   const isPasted = document?.filePath === "";
@@ -191,15 +196,27 @@ export default function DocumentViewer({
                       </Button>
                     )}
                   </div>
-                  <pre
-                    ref={textRef}
-                    className={`h-full overflow-y-auto p-4 font-sans text-sm whitespace-pre-wrap ${cropMode ? "cursor-crosshair select-none" : ""}`}
-                    onMouseDown={handleCropMouseDown}
-                    onMouseMove={handleCropMouseMove}
-                    onMouseUp={handleCropMouseUp}
-                  >
-                    <PastedTextView text={document.extracted_text} />
-                  </pre>
+                  {isPasted ? (
+                    <div
+                      ref={textRef as React.RefObject<HTMLDivElement>}
+                      className={`h-full overflow-y-auto p-4 ${cropMode ? "cursor-crosshair select-none" : ""}`}
+                      onMouseDown={handleCropMouseDown}
+                      onMouseMove={handleCropMouseMove}
+                      onMouseUp={handleCropMouseUp}
+                    >
+                      <PastedTextView text={document.extracted_text} markdown />
+                    </div>
+                  ) : (
+                    <pre
+                      ref={textRef as React.RefObject<HTMLPreElement>}
+                      className={`h-full overflow-y-auto p-4 font-sans text-sm whitespace-pre-wrap ${cropMode ? "cursor-crosshair select-none" : ""}`}
+                      onMouseDown={handleCropMouseDown}
+                      onMouseMove={handleCropMouseMove}
+                      onMouseUp={handleCropMouseUp}
+                    >
+                      <PastedTextView text={document.extracted_text} />
+                    </pre>
+                  )}
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">

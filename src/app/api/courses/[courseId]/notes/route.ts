@@ -10,11 +10,12 @@ export async function POST(request: Request, { params }: Params) {
   const body = await request.json().catch(() => ({}));
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   const folderId = Number.isInteger(body?.folderId) ? Number(body.folderId) : undefined;
+  const markdown = typeof body?.markdown === "string" ? body.markdown : undefined;
 
   if (!title) return Response.json({ error: "Title is required" }, { status: 400 });
 
   try {
-    const note = await createNote(title, id, folderId);
+    const note = await createNote(title, id, folderId, markdown);
     return Response.json({ note }, { status: 201 });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Couldn't create note" }, { status: 409 });

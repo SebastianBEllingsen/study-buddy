@@ -15,13 +15,16 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 - 🗂️ **Courses & folders** — upload PDFs, organize them however you like, drag to reorder
 
   <img src="docs/images/CoursePage1.png" width="500" alt="Course page with folders">
-  <img src="docs/images/CoursePage2.png" width="500" alt="Another course, customized icon and cover">
 
 - 🔗 **Wiki-style notes** — an Obsidian-inspired editor: live-preview markdown, `[[note]]` links with backlinks, and embedded references to a PDF, generated item, or pasted image (optionally anchored to a specific line/sentence). LaTeX now renders live as you type — `$...$`/`$$...$$` conceal into real KaTeX right in the editor, not just Preview — with Overleaf-style `\command` autocomplete for fractions, sums, greek letters, and more
 
   <img src="docs/images/NotesView.png" width="600" alt="Note with headings, a wikilink, an embedded document reference, LaTeX, and an inline image">
 
 - 📝 **Notes, quizzes & flashcards** — generated from your own material, one click each; save a question-type mix (MCQ / multi-select / short answer) as a reusable quiz preset
+
+  <img src="docs/images/CoursePage2.png" width="500" alt="Generating notes, a quiz, or flashcards from a course">
+  <img src="docs/images/QuizGenerationSettings.png" width="380" alt="Quiz settings, with a saved question-type preset">
+
 - ✅ **Quiz grading** — MCQ graded instantly, short answers graded by AI, with a **"Retry what you got wrong"** button for fresh practice on missed concepts
 
   <table>
@@ -52,10 +55,16 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
   <img src="docs/images/AiChatDialogModal.png" width="500" alt="General-purpose AI chat with conversation history">
 
-- 📋 **Paste text or images** — paste messy lecture text and hit **Make pretty** to clean it up, or paste/drop an image straight into your notes to embed it inline
+- 📋 **Paste text or images** — paste a raw Ctrl+A page dump (an LMS assignment page, a lecture site, anything) and hit **Make pretty**: it discards the navigation/footer/boilerplate and keeps only the real content, cleanly formatted — save it as a document (which renders that Markdown and LaTeX live, same as a note) or straight into a note, and paste/drop an image to embed it inline either way
 
-  <img src="docs/images/PasteTextFunctionalityMessyInput1.png" width="380" alt="Pasting messy raw text">
-  <img src="docs/images/PasteTextFunctionalityMessyInput2.png" width="600" alt="Same text, with Make pretty available">
+  <img src="docs/images/PasteTextFunctionalityMessyInput1.png" width="380" alt="Pasting a raw page dump, with Save as: Document/Note">
+
+  <table>
+    <tr>
+      <td><img src="docs/images/PasteTextFunctionalityMessyInput2.png" width="500" alt="Before: raw page dump"></td>
+      <td><img src="docs/images/PasteTextFunctionalityMessyInputResult.png" width="500" alt="After: Make pretty extracts just the assignment"></td>
+    </tr>
+  </table>
 
 - 📅 **Google Calendar & ICS feeds** — connect your own Google Calendar (read + write) and see it as a real month grid inside the app, or subscribe to a read-only ICS feed (a university portal's timetable, an LMS's assignment export) alongside it
 
@@ -67,6 +76,9 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
 - ☁️ **Optional Supabase sync** — stays local-first by default, or point it at your own Supabase project to sync across devices
 - ➕ **Supplement, don't regenerate** — add newly-uploaded PDFs to an existing quiz/deck/notes instead of starting over
+
+  <img src="docs/images/SupplementToFlashCardsExample.png" width="600" alt="Banner offering to add new material to an existing flashcard set">
+
 - 📤 **Full data export** — download every course, note, quiz, and flashcard set — with complete review/attempt history — as one JSON file
 - 🔍 **Search** — find any question, flashcard, or note across every course
 
