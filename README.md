@@ -6,22 +6,16 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js) ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript) ![SQLite](https://img.shields.io/badge/SQLite-local--first-lightblue?logo=sqlite)
 
+<img src="docs/images/Dashboard.png" width="100%" alt="Study Buddy dashboard">
+
 ---
 
 ## Features
 
 - 🗂️ **Courses & folders** — upload PDFs, organize them however you like, drag to reorder
 
-  <table>
-    <tr>
-      <td>
-              <img src="docs/images/CoursePage1.png" width="500" alt="Customized dashboard">
-      </td>
-      <td>
-              <img src="docs/images/CoursePage2.png" width="500" alt="Another customization">
-      </td>
-    </tr>
-  </table>
+  <img src="docs/images/CoursePage1.png" width="500" alt="Course page with folders">
+  <img src="docs/images/CoursePage2.png" width="500" alt="Another course, customized icon and cover">
 
 - 🔗 **Wiki-style notes** — an Obsidian-inspired editor: live-preview markdown, `[[note]]` links with backlinks, and embedded references to a PDF, generated item, or pasted image (optionally anchored to a specific line/sentence). LaTeX now renders live as you type — `$...$`/`$$...$$` conceal into real KaTeX right in the editor, not just Preview — with Overleaf-style `\command` autocomplete for fractions, sums, greek letters, and more
 
@@ -59,18 +53,25 @@ Upload the PDFs for a course and generate study material scoped strictly to that
   <img src="docs/images/AiChatDialogModal.png" width="500" alt="General-purpose AI chat with conversation history">
 
 - 📋 **Paste text or images** — paste messy lecture text and hit **Make pretty** to clean it up, or paste/drop an image straight into your notes to embed it inline
+
+  <img src="docs/images/PasteTextFunctionalityMessyInput1.png" width="380" alt="Pasting messy raw text">
+  <img src="docs/images/PasteTextFunctionalityMessyInput2.png" width="600" alt="Same text, with Make pretty available">
+
 - 📅 **Google Calendar & ICS feeds** — connect your own Google Calendar (read + write) and see it as a real month grid inside the app, or subscribe to a read-only ICS feed (a university portal's timetable, an LMS's assignment export) alongside it
 
   <img src="docs/images/CalenderNoEvents.png" width="600" alt="Calendar month view">
-- 🔥 **Streak heatmap** — a GitHub-style view of your study activity over time
-- 🧩 **Customizable home screen** — a phone-widget-style "Upcoming events" agenda alongside your streak and heatmap; toggle any of them on/off and drag to reorder in Settings
 
-  <img src="docs/images/Dashboard.png" width="500" alt="Customized dashboard">
+- 🧩 **Customizable home screen** — a phone-widget-style dashboard (pictured up top): a streak heatmap, an "Upcoming events" agenda, and more, each toggleable and drag-to-reorder from Settings
+
+  <img src="docs/images/CustomizeWidgets.png" width="400" alt="Dragging and resizing dashboard widgets">
 
 - ☁️ **Optional Supabase sync** — stays local-first by default, or point it at your own Supabase project to sync across devices
 - ➕ **Supplement, don't regenerate** — add newly-uploaded PDFs to an existing quiz/deck/notes instead of starting over
 - 📤 **Full data export** — download every course, note, quiz, and flashcard set — with complete review/attempt history — as one JSON file
 - 🔍 **Search** — find any question, flashcard, or note across every course
+
+  <img src="docs/images/SearchShowCase.png" width="450" alt="Fuzzy search across notes, quizzes, flashcards, and documents">
+
 - 🤖 **Bring your own AI** — Anthropic, OpenAI, or Gemini API keys; Claude Code or Codex CLI subscriptions; or a free tier via OpenRouter
 
   <img src="docs/images/SettingsMenuAIProvider.png" width="380" alt="AI provider settings">
