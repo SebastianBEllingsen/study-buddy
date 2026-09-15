@@ -99,6 +99,10 @@ export interface GeneratedItem {
   // (pooled across every folder). See schema.sql for why this differs from
   // folder_id (where the item is filed).
   source_folder_id: number | null;
+  // True for a hand-picked "choose documents" selection — also leaves
+  // source_folder_id null, but distinct from pooled "all course material".
+  // See schema.sql and getNewDocumentsForItem.
+  source_handpicked: boolean;
   // Which AI backend/model produced this item — null for items generated
   // before this was tracked. See lib/aiClient.ts's getModelInfo().
   model_provider: AiBackend | null;
@@ -1392,6 +1396,7 @@ export async function createGeneratedItem(params: {
   courseId: number;
   folderId: number;
   sourceFolderId: number | null;
+  sourceHandpicked: boolean;
   mode: GenerationMode;
   title: string;
   contentJson: unknown;
@@ -1406,6 +1411,7 @@ export async function createGeneratedItem(params: {
       folder_id: params.folderId,
       position: await nextGeneratedItemPosition(params.folderId),
       source_folder_id: params.sourceFolderId,
+      source_handpicked: params.sourceHandpicked,
       mode: params.mode,
       title: params.title,
       content_json: JSON.stringify(params.contentJson),
@@ -1419,27 +1425,45 @@ export async function createGeneratedItem(params: {
   return item as GeneratedItem;
 }
 
-// Documents within the item's actual generation scope (source_folder_id —
-// the whole course if null/pooled, otherwise that one folder; NOT
-// necessarily the folder the item is filed in, see schema.sql), extracted,
-// and not already reflected in source_document_ids — i.e. what a
-// "supplement" pass would add.
+// Documents within the item's actual generation scope, extracted, and not
+// already reflected in source_document_ids — i.e. what a "supplement" pass
+// would add. Three cases (NOT necessarily the folder the item is filed in —
+// see schema.sql):
+// - source_handpicked: a hand-picked "choose documents" selection has no
+//   single coherent folder (it can span several), so there's nothing
+//   sensible to check new uploads against — never offer to supplement these.
+// - source_folder_id set: that one folder, pooled with its immediate
+//   subfolders — matching how buildCourseContext itself collects documents
+//   for a folder-scoped generation (lib/context.ts), so a doc uploaded into
+//   a subfolder counts as "new" exactly when it would have been included
+//   had it existed at generation time.
+// - neither: a genuinely pooled "all course material" generation — every
+//   folder's new documents count.
 export async function getNewDocumentsForItem(item: GeneratedItem): Promise<DocumentRow[]> {
+  if (item.source_handpicked) return [];
+
   const covered = new Set(JSON.parse(item.source_document_ids) as number[]);
-  const docs =
-    item.source_folder_id == null
-      ? (await listDocumentsForCourse(item.course_id)).filter((d) => d.status === "extracted")
-      : ((await db
-          .select()
-          .from(documents)
-          .where(
-            and(
-              eq(documents.course_id, item.course_id),
-              eq(documents.folder_id, item.source_folder_id),
-              eq(documents.status, "extracted")
-            )
-          )
-          .orderBy(asc(documents.created_at))) as DocumentRow[]);
+
+  let docs: DocumentRow[];
+  if (item.source_folder_id == null) {
+    docs = (await listDocumentsForCourse(item.course_id)).filter((d) => d.status === "extracted");
+  } else {
+    const subfolderIds = (await listFoldersForCourse(item.course_id))
+      .filter((f) => f.parent_folder_id === item.source_folder_id)
+      .map((f) => f.id);
+    const folderIds = [item.source_folder_id, ...subfolderIds];
+    docs = (await db
+      .select()
+      .from(documents)
+      .where(
+        and(
+          eq(documents.course_id, item.course_id),
+          inArray(documents.folder_id, folderIds),
+          eq(documents.status, "extracted")
+        )
+      )
+      .orderBy(asc(documents.created_at))) as DocumentRow[];
+  }
   return docs.filter((d) => !covered.has(d.id));
 }
 

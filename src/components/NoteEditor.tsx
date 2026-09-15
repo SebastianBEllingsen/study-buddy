@@ -8,6 +8,7 @@ import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-mar
 import { syntaxTree } from "@codemirror/language";
 import {
   autocompletion,
+  snippet,
   snippetCompletion,
   type Completion,
   type CompletionContext,
@@ -50,6 +51,7 @@ import {
   Eye,
   PencilLine,
   Link2,
+  Table as TableIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -750,6 +752,142 @@ function liveMathFormatting(): Extension {
   );
 }
 
+// A GFM table row: starts and ends with "|" (the toolbar's own insertTable
+// always produces this shape; a row without the outer pipes is valid GFM
+// too but deliberately out of scope here to keep detection simple).
+function isTableRowLine(text: string): boolean {
+  return /^\s*\|.*\|\s*$/.test(text);
+}
+
+// The "| --- | :--: | --- |"-style delimiter row that marks the line right
+// after a table's header — every cell (pipe-separated, outer pipes
+// optional) must be only dashes with optional leading/trailing colons
+// (alignment markers).
+function isTableSeparatorLine(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.includes("-")) return false;
+  const inner = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  const cells = inner.split("|").map((c) => c.trim());
+  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+}
+
+interface TableBlock {
+  from: number;
+  to: number;
+  headerLine: { from: number; to: number };
+  sepLine: { from: number; to: number };
+  dataLines: { from: number; to: number }[];
+}
+
+// Scans the whole document for contiguous table blocks (header line,
+// separator line, zero or more data lines) — line-based rather than
+// MATH_PATTERN's whole-doc regex since a table's shape is inherently about
+// which lines follow which, not a single matchable span.
+function findTableBlocks(state: EditorState): TableBlock[] {
+  const blocks: TableBlock[] = [];
+  const doc = state.doc;
+  let lineNo = 1;
+  while (lineNo <= doc.lines) {
+    const headerLine = doc.line(lineNo);
+    if (
+      isTableRowLine(headerLine.text) &&
+      lineNo + 1 <= doc.lines &&
+      isTableSeparatorLine(doc.line(lineNo + 1).text)
+    ) {
+      const sepLine = doc.line(lineNo + 1);
+      const dataLines: { from: number; to: number }[] = [];
+      let next = lineNo + 2;
+      while (next <= doc.lines && isTableRowLine(doc.line(next).text)) {
+        const l = doc.line(next);
+        dataLines.push({ from: l.from, to: l.to });
+        next++;
+      }
+      blocks.push({
+        from: headerLine.from,
+        to: dataLines.length > 0 ? dataLines[dataLines.length - 1].to : sepLine.to,
+        headerLine: { from: headerLine.from, to: headerLine.to },
+        sepLine: { from: sepLine.from, to: sepLine.to },
+        dataLines,
+      });
+      lineNo = next;
+    } else {
+      lineNo++;
+    }
+  }
+  return blocks;
+}
+
+// Conceals a row's "|" delimiters and marks the text between them as table
+// cells — CSS (display: table-row / table-cell, see editorTheme below) does
+// the actual grid alignment, browsers auto-generate the anonymous
+// display:table wrapper around each contiguous run of table-row lines, so
+// this never has to build or manage a real <table> DOM structure itself.
+function decorateTableRow(
+  state: EditorState,
+  line: { from: number; to: number },
+  isHeader: boolean,
+  ranges: Range<Decoration>[]
+) {
+  ranges.push(Decoration.line({ class: "cm-table-row" }).range(line.from));
+  const text = state.sliceDoc(line.from, line.to);
+  const pipes: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "|") pipes.push(line.from + i);
+  }
+  for (const p of pipes) {
+    ranges.push(Decoration.replace({}).range(p, p + 1));
+  }
+  for (let k = 0; k < pipes.length - 1; k++) {
+    const from = pipes[k] + 1;
+    const to = pipes[k + 1];
+    if (to > from) {
+      ranges.push(
+        Decoration.mark({
+          class: isHeader ? "cm-table-cell cm-table-cell-header" : "cm-table-cell",
+        }).range(from, to)
+      );
+    }
+  }
+}
+
+function liveTableFormatting(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    const sel = view.state.selection.main;
+    for (const block of findTableBlocks(view.state)) {
+      if (sel.from <= block.to && sel.to >= block.from) continue; // cursor inside -> reveal raw source
+      decorateTableRow(view.state, block.headerLine, true, ranges);
+      // The separator row carries no information once the grid itself
+      // communicates column boundaries — collapsed to near-zero height
+      // (editorTheme's .cm-table-sep-row) rather than shown as a row of
+      // literal dashes.
+      ranges.push(Decoration.line({ class: "cm-table-sep-row" }).range(block.sepLine.from));
+      if (block.sepLine.to > block.sepLine.from) {
+        ranges.push(Decoration.replace({}).range(block.sepLine.from, block.sepLine.to));
+      }
+      for (const dataLine of block.dataLines) {
+        decorateTableRow(view.state, dataLine, false, ranges);
+      }
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+
 // Whether `pos` sits inside an as-yet-unclosed math span — used to gate the
 // LaTeX command autocomplete (below) so it doesn't fire on a stray "\" in
 // ordinary prose. Deliberately looser than MATH_PATTERN (which only matches
@@ -1028,6 +1166,30 @@ const editorTheme = EditorView.theme({
     margin: "0.5em 0",
     textAlign: "center",
   },
+  // Live-preview table grid — see liveTableFormatting above. display:
+  // table-row on contiguous .cm-line siblings gets browsers' own anonymous
+  // table-wrapper generation for free (no real <table> element needed), so
+  // column widths line up across rows exactly like a real table would.
+  ".cm-table-row": { display: "table-row" },
+  ".cm-table-cell": {
+    display: "table-cell",
+    padding: "0.3em 0.8em",
+    borderBottom: "1px solid var(--border)",
+    verticalAlign: "top",
+  },
+  ".cm-table-cell-header": {
+    backgroundColor: "var(--muted)",
+    fontWeight: "700",
+    fontFamily: "var(--font-heading)",
+    borderBottom: "2px solid var(--border)",
+  },
+  // The "| --- | --- |" delimiter row carries no information once the grid
+  // itself shows column boundaries — collapsed to near-zero height rather
+  // than shown as a row of literal dashes.
+  ".cm-table-sep-row": {
+    fontSize: "0px",
+    lineHeight: "0px",
+  },
   "&.cm-editor .cm-tooltip-autocomplete": {
     borderRadius: "0.5rem",
     border: "1px solid var(--border)",
@@ -1155,6 +1317,16 @@ function NotePreview({
               </a>
             ),
           img: ({ src, alt }) => <NoteMarkdownImage src={src} alt={alt} />,
+          // A wide table shouldn't force the whole note wider (or scroll
+          // horizontally itself, per the artifact-design "wrap wide content
+          // in its own overflow-x container" rule) — the table scrolls
+          // inside this wrapper instead. See globals.css's .markdown-body
+          // table rules for the actual borders/header styling.
+          table: ({ children }) => (
+            <div className="markdown-body-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
         }}
       >
         {markdownForPreview(markdown, targets)}
@@ -1232,6 +1404,28 @@ function toggleHeading(view: EditorView, level: number) {
   } else {
     view.dispatch({ changes: { from: line.from, insert: want } });
   }
+  view.focus();
+}
+
+// Inserts a 3x3 GFM table skeleton as a snippet — empty ${} fields give the
+// header and first data row their own independent tab stops (see the
+// LATEX_COMPLETIONS snippets above for the same pattern), so filling one in
+// and pressing Tab moves straight to the next cell instead of needing the
+// mouse. Only the skeleton comes from here; adding more rows/columns after
+// that is just typing more "| ... |" — no dedicated UI for it, matching how
+// lightweight the rest of this editor's markdown authoring stays (e.g. no
+// rendered/aligned table in Edit mode itself, only in Preview).
+function insertTable(view: EditorView) {
+  const { state } = view;
+  const pos = state.selection.main.head;
+  const line = state.doc.lineAt(pos);
+  const before = line.text.slice(0, pos - line.from);
+  // A table's delimiter row only means anything at the start of its own
+  // line — glue it onto existing text instead and GFM won't recognize it as
+  // a table at all.
+  const needsBreakBefore = before.trim().length > 0;
+  const template = `${needsBreakBefore ? "\n\n" : ""}| \${} | \${} | \${} |\n| --- | --- | --- |\n| \${} | \${} | \${} |\n`;
+  snippet(template)(view, null, pos, pos);
   view.focus();
 }
 
@@ -1403,6 +1597,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       listHangingIndent(),
       liveMarkdownFormatting(),
       liveMathFormatting(),
+      liveTableFormatting(),
       highlightField,
       editorTheme,
     ],
@@ -1475,6 +1670,9 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
             <div className="mx-1 h-5 w-px bg-border" />
             <ToolbarButton label="Insert link" onClick={() => setInsertLinkOpen(true)}>
               <Link2 className="size-3.5" />
+            </ToolbarButton>
+            <ToolbarButton label="Insert table" onClick={() => withView(insertTable)}>
+              <TableIcon className="size-3.5" />
             </ToolbarButton>
           </>
         )}

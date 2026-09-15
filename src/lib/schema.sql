@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS generated_items (
   -- the course's default folder but its source material spans every folder,
   -- so folder_id alone isn't enough to know what counts as "new" later.
   source_folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  -- 1 when generated via a hand-picked "choose documents" selection, which
+  -- (like "all course material") also leaves source_folder_id NULL since it
+  -- isn't scoped to any single folder — distinguishes the two so
+  -- getNewDocumentsForItem (models.ts) knows a hand-picked item has no
+  -- coherent folder to check new uploads against, rather than treating it
+  -- as pooled across the whole course.
+  source_handpicked INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -145,6 +145,34 @@
   padding: 0;
 }
 
+/* GFM tables (remark-gfm) — .markdown-body-table-wrap (NotePreview's own
+   <table> override) gives this its horizontal scroll on narrow screens; the
+   table itself just needs to actually look like a table, which a bare
+   ReactMarkdown <table> otherwise wouldn't (no default browser styling this
+   app doesn't already override elsewhere). */
+.markdown-body-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 0.75em;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+
+.markdown-body th {
+  background-color: var(--muted);
+  font-family: var(--font-heading);
+  font-weight: 700;
+}
+
 /* Unscoped (not .markdown-body-prefixed) since rendered math also appears
    outside markdown — quiz questions/options and flashcard fronts/backs
    render via MathText.tsx, plain strings with no markdown wrapper. KaTeX's

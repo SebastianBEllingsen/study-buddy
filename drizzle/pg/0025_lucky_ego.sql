@@ -1,0 +1,1 @@
+ALTER TABLE "generated_items" ADD COLUMN "source_handpicked" boolean DEFAULT false NOT NULL;

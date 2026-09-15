@@ -133,6 +133,17 @@ function migrate(database: Database.Database) {
     }
   }
 
+  if (!hasColumn("generated_items", "source_handpicked")) {
+    // No way to reconstruct this retroactively (a pre-existing NULL
+    // source_folder_id item could have been either pooled or hand-picked
+    // across folders — see schema.sql) — default false treats existing
+    // ambiguous items as pooled, i.e. preserves today's behavior for them;
+    // only new hand-picked generations going forward get the new column.
+    database.exec(
+      "ALTER TABLE generated_items ADD COLUMN source_handpicked INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+
   if (!hasColumn("courses", "position")) {
     database.exec("ALTER TABLE courses ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
     // Backfill newest-first (matching the previous created_at DESC display

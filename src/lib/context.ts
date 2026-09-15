@@ -15,6 +15,10 @@ export interface CourseContext {
   courseId: number;
   courseName: string;
   folderId: number | null;
+  // True for a hand-picked "choose documents" selection — folderId is also
+  // null in this case (no single folder), but the two need to stay
+  // distinguishable; see getNewDocumentsForItem in models.ts.
+  handpicked: boolean;
   scopeLabel: string;
   documentIds: number[];
   combinedText: string;
@@ -64,11 +68,13 @@ export async function buildCourseContext(
   // folder — generateForCourse falls back to the course's default folder,
   // same as the "All course material" (folderId null) case below.
   let resolvedFolderId: number | null = null;
+  let handpicked = false;
 
   if (requestedDocumentIds && requestedDocumentIds.length > 0) {
     const idSet = new Set(requestedDocumentIds);
     documents = extracted.filter((d) => idSet.has(d.id));
     scopeLabel = `${documents.length} selected document${documents.length === 1 ? "" : "s"}`;
+    handpicked = true;
   } else if (folderId != null) {
     const folder = await getFolder(folderId);
     if (!folder || folder.course_id !== courseId) {
@@ -93,6 +99,7 @@ export async function buildCourseContext(
     courseId,
     courseName: course.name,
     folderId: resolvedFolderId,
+    handpicked,
     scopeLabel,
     documentIds: documents.map((d) => d.id),
     combinedText,

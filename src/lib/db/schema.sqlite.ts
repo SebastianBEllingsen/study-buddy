@@ -140,6 +140,11 @@ export const generated_items = sqliteTable("generated_items", {
   source_folder_id: integer("source_folder_id").references(() => folders.id, {
     onDelete: "set null",
   }),
+  // True for a hand-picked "choose documents" selection — also leaves
+  // source_folder_id null (not scoped to one folder) but is distinct from a
+  // pooled "all course material" generation. See schema.sql and
+  // getNewDocumentsForItem in models.ts.
+  source_handpicked: integer("source_handpicked", { mode: "boolean" }).notNull().default(false),
   // Which AI backend/model actually generated this item — see
   // lib/aiClient.ts's getModelInfo(). Both nullable: items created before
   // this column existed have neither.

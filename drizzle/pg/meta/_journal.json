@@ -169,6 +169,13 @@
       "when": 1789413061800,
       "tag": "0024_early_kinsey_walden",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789471027597,
+      "tag": "0025_lucky_ego",
+      "breakpoints": true
     }
   ]
 }
