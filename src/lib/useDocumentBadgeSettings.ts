@@ -1,26 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import useSWR from "swr";
+import type { AppSettings } from "@/lib/models";
 
 export interface DocumentBadgeSettings {
   enabled: boolean;
   detail: "detailed" | "minimal";
 }
 
-// Defaults match app_settings.document_badges_enabled/document_badge_detail's
-// own defaults so the badge doesn't flash in/change shape once this resolves
-// — same reasoning as useShowModelBadge.
-const DEFAULTS: DocumentBadgeSettings = { enabled: true, detail: "detailed" };
-
+// Reads from the same shared "/api/settings" SWR cache AppBranding seeds
+// with the full, server-rendered AppSettings on first paint (see
+// AppBranding.tsx) — so this resolves to the real persisted value
+// immediately on mount instead of a hardcoded default that then flashes
+// into place once its own independent fetch finishes, which is what a
+// plain useState+fetch hook here previously did.
 export function useDocumentBadgeSettings(): DocumentBadgeSettings {
-  const [settings, setSettings] = useState<DocumentBadgeSettings>(DEFAULTS);
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((body: { documentBadgesEnabled: boolean; documentBadgeDetail: "detailed" | "minimal" }) =>
-        setSettings({ enabled: body.documentBadgesEnabled, detail: body.documentBadgeDetail })
-      )
-      .catch(() => {});
-  }, []);
-  return settings;
+  const { data } = useSWR<AppSettings>("/api/settings");
+  return {
+    enabled: data?.documentBadgesEnabled ?? true,
+    detail: data?.documentBadgeDetail ?? "detailed",
+  };
 }

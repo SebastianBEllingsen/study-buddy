@@ -54,6 +54,8 @@ import {
   Table as TableIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -817,15 +819,93 @@ function findTableBlocks(state: EditorState): TableBlock[] {
   return blocks;
 }
 
+// Dispatched once the page's web font(s) finish loading — see
+// liveTableFormatting's constructor below for why a table's column widths
+// need an explicit nudge to recompute at that point instead of just waiting
+// for the next real edit/scroll.
+const tableFontsReadyEffect = StateEffect.define<null>();
+
+// A little breathing room beyond the widest cell's own measured content, and
+// a floor so a column of all-empty/tiny cells (a fresh table, say) doesn't
+// collapse to nothing.
+const TABLE_COLUMN_PADDING_PX = 22;
+const MIN_TABLE_COLUMN_PX = 48;
+// A hard ceiling regardless of content — without it, one cell holding a
+// markdown link with a long URL (see approximateCellWidthPx below for the
+// common case that's stripped out before measuring, and why raw source
+// length is the wrong thing to measure at all) or any other outlier could
+// force the whole column absurdly wide instead of just wrapping.
+const MAX_TABLE_COLUMN_PX = 420;
+
+// A single offscreen canvas reused for every measurement — creating one is
+// cheap but not free, and this can run on every keystroke inside a table.
+let tableMeasureCtx: CanvasRenderingContext2D | null = null;
+
+// Real rendered pixel width, not a `ch`-unit guess — `ch` resolves against
+// whichever font/weight the *element carrying it* happens to use, so a bold
+// header cell (or one in a different font, before this stopped happening —
+// see .cm-table-cell-header's own comment) would compute a different pixel
+// width than a data cell for the exact same `Nch` value, throwing the
+// header out of alignment with its own column. Measuring in px against one
+// canonical font (the editor's own base font, i.e. what a plain data cell
+// actually renders with) sidesteps that regardless of what styling any
+// particular cell carries.
+function measureCellWidthPx(view: EditorView, text: string): number {
+  if (!tableMeasureCtx) {
+    tableMeasureCtx = document.createElement("canvas").getContext("2d");
+  }
+  if (!tableMeasureCtx) return text.length * 8; // canvas unsupported — a rough fallback, better than crashing
+  tableMeasureCtx.font = getComputedStyle(view.contentDOM).font;
+  // A "[label](url)" link collapses to just its label once concealed (see
+  // markdownLinkPills), so measuring the full string including the URL
+  // would wildly overestimate that column's real width — strip it first.
+  const collapsed = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
+  return Math.min(tableMeasureCtx.measureText(collapsed).width, MAX_TABLE_COLUMN_PX);
+}
+
+// One width per header column, wide enough for that column's longest cell
+// anywhere in the block — computed from state.doc directly (the whole
+// document, not just what's currently rendered), which matters because
+// CodeMirror only keeps lines near the viewport in the DOM and substitutes
+// everything else with a single non-table-row `.cm-gap` placeholder (see
+// decorateTableRow's own comment below for why that number has to be
+// stamped onto every cell rather than left for the browser to figure out).
+// A data row with more cells than the header just has its overflow ignored
+// (nothing to compare against); one with fewer only contributes to the
+// columns it actually has.
+function computeColumnWidths(view: EditorView, block: TableBlock): number[] {
+  const state = view.state;
+  const widths = tableCellsInLine(state, block.headerLine).map((c) =>
+    Math.max(measureCellWidthPx(view, state.sliceDoc(c.from, c.to)) + TABLE_COLUMN_PADDING_PX, MIN_TABLE_COLUMN_PX)
+  );
+  for (const dataLine of block.dataLines) {
+    tableCellsInLine(state, dataLine).forEach((c, i) => {
+      if (i >= widths.length) return;
+      const width = measureCellWidthPx(view, state.sliceDoc(c.from, c.to)) + TABLE_COLUMN_PADDING_PX;
+      if (width > widths[i]) widths[i] = width;
+    });
+  }
+  return widths;
+}
+
 // Conceals a row's "|" delimiters and marks the text between them as table
 // cells — CSS (display: table-row / table-cell, see editorTheme below) does
-// the actual grid alignment, browsers auto-generate the anonymous
-// display:table wrapper around each contiguous run of table-row lines, so
-// this never has to build or manage a real <table> DOM structure itself.
+// the actual grid alignment. Adjacent display:table-row lines would get
+// browsers' own anonymous display:table wrapper for free (no real <table>
+// element needed) *if* they were always DOM siblings — but CodeMirror only
+// renders lines near the current viewport and stands the rest in with a
+// single `.cm-gap` div, which isn't a table-row and so breaks a long table
+// into several independent anonymous tables as the DOM re-renders around
+// scrolling. Each one would size its columns only from whichever rows it
+// happens to contain, drifting out of alignment with the others — stamping
+// every cell with the same explicit min-width (computed once across the
+// *whole* block in computeColumnWidths, not just the rendered rows) keeps
+// every fragment sized the same regardless of how the viewport splits them.
 function decorateTableRow(
   state: EditorState,
   line: { from: number; to: number },
   isHeader: boolean,
+  columnWidths: number[],
   ranges: Range<Decoration>[]
 ) {
   ranges.push(Decoration.line({ class: "cm-table-row" }).range(line.from));
@@ -841,9 +921,25 @@ function decorateTableRow(
     const from = pipes[k] + 1;
     const to = pipes[k + 1];
     if (to > from) {
+      const width = columnWidths[k] ?? MIN_TABLE_COLUMN_PX;
       ranges.push(
         Decoration.mark({
           class: isHeader ? "cm-table-cell cm-table-cell-header" : "cm-table-cell",
+          attributes: { style: `min-width: ${width}px` },
+          // A cell written as "|[label](url) |" (no space right after the
+          // pipe — common, since nothing enforces one) puts the link's own
+          // replace-widget decoration (see markdownLinkPills) at the exact
+          // same start offset as this mark. Without inclusiveStart, a mark
+          // decoration doesn't claim content that begins exactly at its own
+          // boundary, so the widget rendered as a sibling *before* this
+          // span instead of inside it — visually escaping the cell
+          // entirely and landing wherever normal (non-table) inline flow
+          // would have put it, which is what actually produced the
+          // "columns randomly drift" symptom, not a width miscalculation.
+          // inclusiveEnd for the same reason at a cell's closing boundary
+          // (e.g. "|...[label](url)|" with no trailing space either).
+          inclusiveStart: true,
+          inclusiveEnd: true,
         }).range(from, to)
       );
     }
@@ -856,7 +952,8 @@ function liveTableFormatting(): Extension {
     const sel = view.state.selection.main;
     for (const block of findTableBlocks(view.state)) {
       if (sel.from <= block.to && sel.to >= block.from) continue; // cursor inside -> reveal raw source
-      decorateTableRow(view.state, block.headerLine, true, ranges);
+      const columnWidths = computeColumnWidths(view, block);
+      decorateTableRow(view.state, block.headerLine, true, columnWidths, ranges);
       // The separator row carries no information once the grid itself
       // communicates column boundaries — collapsed to near-zero height
       // (editorTheme's .cm-table-sep-row) rather than shown as a row of
@@ -866,7 +963,7 @@ function liveTableFormatting(): Extension {
         ranges.push(Decoration.replace({}).range(block.sepLine.from, block.sepLine.to));
       }
       for (const dataLine of block.dataLines) {
-        decorateTableRow(view.state, dataLine, false, ranges);
+        decorateTableRow(view.state, dataLine, false, columnWidths, ranges);
       }
     }
     return Decoration.set(ranges, true);
@@ -877,9 +974,28 @@ function liveTableFormatting(): Extension {
       decorations: DecorationSet;
       constructor(view: EditorView) {
         this.decorations = build(view);
+        // measureCellWidthPx measures against whatever font is actually
+        // loaded at the instant it runs — on first paint, the page's web
+        // font can still be loading, so this initial build under-measures
+        // every cell and bakes that too-narrow width into the DOM as an
+        // inline style. Nothing below (docChanged/selectionSet/
+        // viewportChanged) ever fires just because a font finished loading
+        // in the background, so without this, whichever rows happened to
+        // render before the font was ready keep their stale, narrower
+        // width forever — misaligned against any row a later edit/scroll
+        // happens to re-decorate after the font *is* loaded, which is
+        // exactly the "some rows line up, some don't" pattern this caused.
+        document.fonts.ready.then(() => {
+          view.dispatch({ effects: tableFontsReadyEffect.of(null) });
+        });
       }
       update(update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (
+          update.docChanged ||
+          update.selectionSet ||
+          update.viewportChanged ||
+          update.transactions.some((tr) => tr.effects.some((e) => e.is(tableFontsReadyEffect)))
+        ) {
           this.decorations = build(update.view);
         }
       }
@@ -1180,13 +1296,29 @@ const editorTheme = EditorView.theme({
   ".cm-table-cell-header": {
     backgroundColor: "var(--muted)",
     fontWeight: "700",
-    fontFamily: "var(--font-heading)",
+    // Deliberately no heading-font override (unlike .cm-heading above) —
+    // computeColumnWidths' min-width is in `ch` units, which resolve
+    // against whichever font the element carrying them actually uses; a
+    // header row in a different font than its column's data rows would
+    // size to a different pixel width for the exact same `Nch` value,
+    // throwing the header out of alignment with the grid below it. Bold +
+    // the background/border below is enough to read as a header without it.
     borderBottom: "2px solid var(--border)",
   },
   // The "| --- | --- |" delimiter row carries no information once the grid
   // itself shows column boundaries — collapsed to near-zero height rather
-  // than shown as a row of literal dashes.
+  // than shown as a row of literal dashes. display: table-row (missing here
+  // for a while) matters beyond just visual consistency with the header/
+  // data rows around it: without it, this line's div reverts to a normal
+  // block box, which breaks the contiguous run of table-row siblings the
+  // header sits in from the one the data rows sit in — two separate
+  // anonymous tables instead of one, each free to size its own columns
+  // independently of the other's actual content despite sharing the same
+  // min-width (see computeColumnWidths), which is exactly what kept the
+  // header's columns drifting slightly out of alignment with the data
+  // grid below it even after that min-width fix.
   ".cm-table-sep-row": {
+    display: "table-row",
     fontSize: "0px",
     lineHeight: "0px",
   },
@@ -1407,15 +1539,24 @@ function toggleHeading(view: EditorView, level: number) {
   view.focus();
 }
 
-// Inserts a 3x3 GFM table skeleton as a snippet — empty ${} fields give the
-// header and first data row their own independent tab stops (see the
-// LATEX_COMPLETIONS snippets above for the same pattern), so filling one in
-// and pressing Tab moves straight to the next cell instead of needing the
-// mouse. Only the skeleton comes from here; adding more rows/columns after
-// that is just typing more "| ... |" — no dedicated UI for it, matching how
-// lightweight the rest of this editor's markdown authoring stays (e.g. no
-// rendered/aligned table in Edit mode itself, only in Preview).
-function insertTable(view: EditorView) {
+const DEFAULT_TABLE_ROWS = 3;
+const DEFAULT_TABLE_COLS = 3;
+// Arbitrary but generous — tableTabCommand can always grow a table by one
+// row at a time from here anyway, this cap just keeps the size popover's
+// inputs (and the snippet template below) from accepting something absurd.
+const MAX_TABLE_DIMENSION = 20;
+
+// Inserts a `rows`x`cols` GFM table skeleton as a snippet — a single ${}
+// field on the header's first cell gives it the initial cursor position
+// (see the LATEX_COMPLETIONS snippets above for the same mechanism); every
+// other cell is plain "  " padding, since tableTabCommand below (bound to
+// Tab/Shift-Tab whenever the cursor sits inside a table — see
+// findTableBlocks) is what actually drives cell-to-cell navigation and
+// appends further rows Obsidian-style, same as liveTableFormatting gives
+// tables their own live-rendered grid in Edit mode already.
+function insertTable(view: EditorView, rows: number = DEFAULT_TABLE_ROWS, cols: number = DEFAULT_TABLE_COLS) {
+  const clampedRows = Math.min(Math.max(Math.round(rows) || 1, 1), MAX_TABLE_DIMENSION);
+  const clampedCols = Math.min(Math.max(Math.round(cols) || 1, 1), MAX_TABLE_DIMENSION);
   const { state } = view;
   const pos = state.selection.main.head;
   const line = state.doc.lineAt(pos);
@@ -1424,9 +1565,117 @@ function insertTable(view: EditorView) {
   // line — glue it onto existing text instead and GFM won't recognize it as
   // a table at all.
   const needsBreakBefore = before.trim().length > 0;
-  const template = `${needsBreakBefore ? "\n\n" : ""}| \${} | \${} | \${} |\n| --- | --- | --- |\n| \${} | \${} | \${} |\n`;
+  const headerRow = `|${Array.from({ length: clampedCols }, (_, i) => (i === 0 ? " ${} " : "  ")).join("|")}|`;
+  const sepRow = `|${Array(clampedCols).fill(" --- ").join("|")}|`;
+  const dataRow = `|${Array(clampedCols).fill("  ").join("|")}|`;
+  const dataRows = Array.from({ length: clampedRows - 1 }, () => dataRow).join("\n");
+  const template = `${needsBreakBefore ? "\n\n" : ""}${headerRow}\n${sepRow}\n${dataRows}${dataRows ? "\n" : ""}`;
   snippet(template)(view, null, pos, pos);
   view.focus();
+}
+
+// One cell's interior span (the text between its two enclosing "|"s,
+// padding spaces included) within a single table row line.
+interface TableCellRange {
+  from: number;
+  to: number;
+}
+
+function tableCellsInLine(state: EditorState, line: { from: number; to: number }): TableCellRange[] {
+  const text = state.sliceDoc(line.from, line.to);
+  const pipes: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "|") pipes.push(line.from + i);
+  }
+  const cells: TableCellRange[] = [];
+  for (let k = 0; k < pipes.length - 1; k++) {
+    cells.push({ from: pipes[k] + 1, to: pipes[k + 1] });
+  }
+  return cells;
+}
+
+function tableBlockAt(state: EditorState, pos: number): TableBlock | null {
+  return findTableBlocks(state).find((b) => pos >= b.from && pos <= b.to) ?? null;
+}
+
+// Every cell in a table block, in reading order (header row, then each data
+// row) — flattened so "next/previous cell" is just index+1/index-1 across
+// the whole table, not something that needs separate row/column bookkeeping.
+function flattenTableCells(state: EditorState, block: TableBlock): TableCellRange[] {
+  const cells = tableCellsInLine(state, block.headerLine);
+  for (const dataLine of block.dataLines) cells.push(...tableCellsInLine(state, dataLine));
+  return cells;
+}
+
+// Selects a cell's content with its padding spaces trimmed off (so landing
+// on a cell and typing replaces just the text, not the " | " spacing that
+// keeps the raw source readable) — a collapsed cursor in the middle for an
+// already-empty cell, same as clicking into an empty spreadsheet cell.
+function trimmedCellSelection(state: EditorState, cell: TableCellRange) {
+  const text = state.sliceDoc(cell.from, cell.to);
+  const trimmed = text.trim();
+  // An empty/whitespace-only cell (the common case: every freshly inserted
+  // or newly appended row) has no trimmed content to select — text.trim()
+  // returning "" also makes text.indexOf(trimmed) below always match at 0,
+  // which would wrongly collapse to the cell's start rather than a sensible
+  // typing position, so land in the middle instead, same as clicking into an
+  // empty spreadsheet cell.
+  if (trimmed.length === 0) {
+    return EditorSelection.cursor(cell.from + Math.floor((cell.to - cell.from) / 2));
+  }
+  const from = cell.from + text.indexOf(trimmed);
+  return EditorSelection.range(from, from + trimmed.length);
+}
+
+// Obsidian's own table-authoring convenience: Tab/Shift-Tab step between
+// cells, and Tab on the table's last cell appends a new empty row and jumps
+// into it — the one piece of table editing that's awkward to do by hand
+// (adding a row means typing a whole new "| ... |" line in the right place).
+// Only fires with the cursor inside a table (tableBlockAt returns null
+// otherwise) — falls through (returns false) to CodeMirror's own Tab/
+// Shift-Tab handling everywhere else, same as any other keymap command.
+function tableTabCommand(forward: boolean) {
+  return (view: EditorView): boolean => {
+    const { state } = view;
+    const pos = state.selection.main.head;
+    const block = tableBlockAt(state, pos);
+    if (!block) return false;
+    const cells = flattenTableCells(state, block);
+    if (cells.length === 0) return false;
+    let idx = cells.findIndex((c) => pos >= c.from && pos <= c.to);
+    if (idx === -1) {
+      idx = 0;
+      let best = Math.abs(cells[0].from - pos);
+      for (let i = 1; i < cells.length; i++) {
+        const dist = Math.abs(cells[i].from - pos);
+        if (dist < best) {
+          best = dist;
+          idx = i;
+        }
+      }
+    }
+
+    if (forward && idx === cells.length - 1) {
+      // Last cell of the table — append a matching empty row right after it
+      // and land in its first cell, exactly like Obsidian's own Tab-to-
+      // extend-table behavior.
+      const cols = tableCellsInLine(state, block.headerLine).length;
+      const rowText = `|${Array(cols).fill("  ").join("|")}|`;
+      const insertPos = block.to;
+      const firstCellFrom = insertPos + "\n".length + "|".length;
+      view.dispatch({
+        changes: { from: insertPos, to: insertPos, insert: `\n${rowText}` },
+        selection: EditorSelection.cursor(firstCellFrom + 1),
+        scrollIntoView: true,
+      });
+      return true;
+    }
+
+    const nextIdx = idx + (forward ? 1 : -1);
+    if (nextIdx < 0 || nextIdx > cells.length - 1) return false;
+    view.dispatch({ selection: trimmedCellSelection(state, cells[nextIdx]), scrollIntoView: true });
+    return true;
+  };
 }
 
 function ToolbarButton({
@@ -1457,6 +1706,81 @@ function ToolbarButton({
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+// "Insert table"'s own toolbar button, but opening a small rows x columns
+// picker instead of inserting straight away — for anything bigger than the
+// 3x3 default, tableTabCommand can still grow it by one row at a time from
+// the toolbar's plain button, but typing out a wide table's "| | | | | |"
+// header by hand is exactly the tedium this popover exists to skip.
+function InsertTableButton({ onInsert }: { onInsert: (rows: number, cols: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(DEFAULT_TABLE_ROWS);
+  const [cols, setCols] = useState(DEFAULT_TABLE_COLS);
+
+  function submit() {
+    onInsert(rows, cols);
+    setOpen(false);
+  }
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) {
+          setRows(DEFAULT_TABLE_ROWS);
+          setCols(DEFAULT_TABLE_COLS);
+        }
+      }}
+    >
+      <PopoverTrigger
+        render={<Button type="button" variant="ghost" size="icon-sm" />}
+        aria-label="Insert table"
+      >
+        <TableIcon className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-3">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <p className="text-xs font-medium text-muted-foreground">Table size</p>
+          <div className="flex items-center gap-2">
+            <label className="flex-1 space-y-1">
+              <span className="text-xs text-muted-foreground">Rows</span>
+              <Input
+                type="number"
+                min={1}
+                max={MAX_TABLE_DIMENSION}
+                value={rows}
+                onChange={(e) => setRows(Number(e.target.value))}
+                className="h-7 text-sm"
+              />
+            </label>
+            <span className="pt-4 text-xs text-muted-foreground">×</span>
+            <label className="flex-1 space-y-1">
+              <span className="text-xs text-muted-foreground">Columns</span>
+              <Input
+                type="number"
+                min={1}
+                max={MAX_TABLE_DIMENSION}
+                value={cols}
+                onChange={(e) => setCols(Number(e.target.value))}
+                className="h-7 text-sm"
+              />
+            </label>
+          </div>
+          <Button type="submit" size="sm" className="w-full">
+            Insert
+          </Button>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1588,6 +1912,16 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       // way Obsidian's editor does. Prec.highest so it's checked before that
       // default Enter binding rather than after it.
       Prec.highest(keymap.of(markdownKeymap)),
+      // See tableTabCommand above — only intercepts Tab/Shift-Tab when the
+      // cursor is inside a table, and returns false (falling through to
+      // CodeMirror's own handling) everywhere else, so Prec.highest here is
+      // safe the same way it is for markdownKeymap just above.
+      Prec.highest(
+        keymap.of([
+          { key: "Tab", run: tableTabCommand(true) },
+          { key: "Shift-Tab", run: tableTabCommand(false) },
+        ])
+      ),
       EditorView.lineWrapping,
       autocompletion({ override: [noteLinkCompletionSource(targets), latexCompletionSource] }),
       wikilinkPills(targets, onNavigate),
@@ -1671,9 +2005,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
             <ToolbarButton label="Insert link" onClick={() => setInsertLinkOpen(true)}>
               <Link2 className="size-3.5" />
             </ToolbarButton>
-            <ToolbarButton label="Insert table" onClick={() => withView(insertTable)}>
-              <TableIcon className="size-3.5" />
-            </ToolbarButton>
+            <InsertTableButton onInsert={(rows, cols) => withView((view) => insertTable(view, rows, cols))} />
           </>
         )}
 

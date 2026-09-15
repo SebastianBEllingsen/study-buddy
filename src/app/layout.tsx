@@ -104,13 +104,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   the whole app into a fixed-height/nested-scroll shell. */}
               <header className="sticky top-0 z-40 shrink-0 border-b bg-card">
                 <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-                  <AppBranding
-                    initial={{
-                      appName: settings.appName,
-                      appIcon: settings.appIcon,
-                      appIconImage: settings.appIconImage,
-                    }}
-                  />
+                  <AppBranding initial={settings} />
                   <div className="flex items-center gap-2">
                     <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
                       <Calendar className="size-3.5" />
