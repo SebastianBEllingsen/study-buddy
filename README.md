@@ -20,6 +20,7 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 - 📅 **Google Calendar, built in** — connect your own calendar (read + write) and see it as a real month grid inside the app; add, edit, and delete events without leaving Study Buddy
 - 🔥 **Streak heatmap** — a GitHub-style view of your study activity over time
 - 🧩 **Customizable home screen** — a phone-widget-style "Upcoming events" agenda alongside your streak and heatmap; toggle any of them on/off and drag to reorder in Settings
+<img src="docs/images/Dashboard.png" width="500" alt="Customized dashboard">
 - ☁️ **Optional Supabase sync** — stays local-first by default, or point it at your own Supabase project to sync across devices
 - ➕ **Supplement, don't regenerate** — add newly-uploaded PDFs to an existing quiz/deck/notes instead of starting over
 - 🔍 **Search** — find any question, flashcard, or note across every course
