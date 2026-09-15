@@ -14,10 +14,10 @@ Upload the PDFs for a course and generate study material scoped strictly to that
   <table>
     <tr>
       <td>
-              <img src="docs/images/Coursepage1.png" width="500" alt="Customized dashboard">
+              <img src="docs/images/CoursePage1.png" width="500" alt="Customized dashboard">
       </td>
           <td>
-              <img src="docs/images/Coursepage2.png" width="500"></td>
+              <img src="docs/images/CoursePage2.png" width="500"></td>
     </tr>
   </table>
 
