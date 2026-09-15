@@ -73,7 +73,14 @@ export async function buildCourseContext(
   if (requestedDocumentIds && requestedDocumentIds.length > 0) {
     const idSet = new Set(requestedDocumentIds);
     documents = extracted.filter((d) => idSet.has(d.id));
-    scopeLabel = `${documents.length} selected document${documents.length === 1 ? "" : "s"}`;
+    // Actual filenames instead of just a count, so the item title says what
+    // it was generated from — e.g. "(Lecture4.pdf, Lecture5.pdf)". Capped at
+    // 3 named files to keep the title from running away on a big pick.
+    const names = documents.map((d) => d.filename);
+    scopeLabel =
+      names.length <= 3
+        ? names.join(", ")
+        : `${names.slice(0, 3).join(", ")}, and ${names.length - 3} more`;
     handpicked = true;
   } else if (folderId != null) {
     const folder = await getFolder(folderId);

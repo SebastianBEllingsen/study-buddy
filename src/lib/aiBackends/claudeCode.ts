@@ -65,6 +65,9 @@ async function runClaude(params: {
   userPrompt: string;
   systemPrompt: string;
   effort: "low" | "medium" | "high";
+  // See GenerateStructuredParams.efficient's doc comment in
+  // aiBackends/types.ts — "haiku" is the CLI's own alias, same as "sonnet".
+  efficient?: boolean;
 }): Promise<ClaudeResult> {
   const args = [
     "-p",
@@ -72,7 +75,7 @@ async function runClaude(params: {
     "--output-format",
     "json",
     "--model",
-    "sonnet",
+    params.efficient ? "haiku" : "sonnet",
     "--effort",
     params.effort,
     ...HARDENING_ARGS,
@@ -124,6 +127,7 @@ export async function generateStructured<T>(
     userPrompt: params.user,
     systemPrompt: params.system,
     effort,
+    efficient: params.efficient,
   });
   if (first.is_error) {
     throw new Error(first.result || `claude -p failed (${first.subtype})`);
@@ -137,6 +141,7 @@ export async function generateStructured<T>(
     const retry = await runClaude({
       systemPrompt: params.system,
       effort,
+      efficient: params.efficient,
       userPrompt: `${params.user}\n\nYour previous response was not valid JSON:\n${first.result}\n\nRespond again with ONLY the corrected, valid JSON — no prose, no markdown code fences.`,
     });
     if (retry.is_error) {
@@ -157,6 +162,7 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
     userPrompt: params.user,
     systemPrompt: params.system,
     effort,
+    efficient: params.efficient,
   });
   if (result.is_error) {
     throw new Error(result.result || `claude -p failed (${result.subtype})`);

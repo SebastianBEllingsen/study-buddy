@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "model_badge_detail" text;

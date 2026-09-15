@@ -190,6 +190,27 @@
       "when": 1789494615175,
       "tag": "0027_spooky_purple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1789506279932,
+      "tag": "0028_glorious_sandman",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789507710915,
+      "tag": "0029_elite_may_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1789507915135,
+      "tag": "0030_organic_angel",
+      "breakpoints": true
     }
   ]
 }

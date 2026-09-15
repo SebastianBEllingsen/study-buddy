@@ -6,6 +6,13 @@ import type { GenerateStructuredParams, GenerateTextParams } from "./types";
 // content from supplied text is closer to structured extraction than deep
 // reasoning, so we don't need Opus-tier pricing or max effort here.
 const MODEL = "claude-sonnet-5";
+// Efficiency mode's cheaper sibling — see params.efficient's doc comment in
+// aiBackends/types.ts and app_settings.ai_efficiency_mode in models.ts.
+const EFFICIENT_MODEL = "claude-haiku-4-5-20251001";
+
+function modelFor(efficient?: boolean): string {
+  return efficient ? EFFICIENT_MODEL : MODEL;
+}
 
 // Rebuilt on every call (not cached) since the key is user-editable at
 // runtime via Settings, unlike an env var fixed for the process lifetime.
@@ -70,13 +77,14 @@ function stripCodeFences(text: string): string {
 export async function generateStructured<T>(
   params: GenerateStructuredParams
 ): Promise<T> {
-  const { system, user, maxTokens = 8000, effort = "medium" } = params;
+  const { system, user, maxTokens = 8000, effort = "medium", efficient } = params;
+  const model = modelFor(efficient);
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: user }];
   const anthropic = await client();
 
   const response = await anthropic.messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system,
     messages,
@@ -96,7 +104,7 @@ export async function generateStructured<T>(
     });
 
     const retry = await anthropic.messages.create({
-      model: MODEL,
+      model,
       max_tokens: maxTokens,
       system,
       messages,
@@ -118,7 +126,8 @@ const ANTHROPIC_IMAGE_MEDIA_TYPES: readonly string[] = [
 
 /** Calls Claude for a plain-text (e.g. markdown) response — no JSON parsing. */
 export async function generateText(params: GenerateTextParams): Promise<string> {
-  const { system, user, maxTokens = 8000, effort = "medium", images } = params;
+  const { system, user, maxTokens = 8000, effort = "medium", efficient, images } = params;
+  const model = modelFor(efficient);
   const anthropic = await client();
 
   const content: Anthropic.ContentBlockParam[] = [
@@ -139,7 +148,7 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   ];
 
   const response = await anthropic.messages.create({
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
     system,
     messages: [{ role: "user", content }],

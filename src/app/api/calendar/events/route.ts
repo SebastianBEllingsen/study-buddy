@@ -38,7 +38,11 @@ export async function GET(request: Request) {
     listCalendarFeeds(),
   ]);
 
-  const allowedFeeds = excludeHiddenFeeds ? feeds.filter((f) => f.show_on_calendar) : feeds;
+  // Disabled feeds are skipped everywhere, unlike show_on_calendar (which
+  // only excludeHiddenFeeds callers honor) — a paused feed shouldn't show
+  // up in the Assignments widget or /calendar tab either.
+  const activeFeeds = feeds.filter((f) => f.enabled);
+  const allowedFeeds = excludeHiddenFeeds ? activeFeeds.filter((f) => f.show_on_calendar) : activeFeeds;
   const feedEvents = await fetchAllFeedEvents(allowedFeeds, {
     timeMin: now,
     timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS),

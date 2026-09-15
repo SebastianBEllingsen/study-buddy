@@ -367,6 +367,9 @@ function migrate(database: Database.Database) {
   if (!hasColumn("calendar_feeds", "show_in_widget")) {
     database.exec("ALTER TABLE calendar_feeds ADD COLUMN show_in_widget INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("calendar_feeds", "enabled")) {
+    database.exec("ALTER TABLE calendar_feeds ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
+  }
 
   if (!hasColumn("notes", "course_id")) {
     database.exec("ALTER TABLE notes ADD COLUMN course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE");
@@ -488,6 +491,14 @@ function migrate(database: Database.Database) {
   }
   if (!hasColumn("app_settings", "document_badge_detail")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN document_badge_detail TEXT");
+  }
+  if (!hasColumn("app_settings", "ai_efficiency_mode")) {
+    database.exec(
+      "ALTER TABLE app_settings ADD COLUMN ai_efficiency_mode INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!hasColumn("app_settings", "model_badge_detail")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN model_badge_detail TEXT");
   }
 }
 

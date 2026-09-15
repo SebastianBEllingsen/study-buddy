@@ -132,6 +132,12 @@ const NEW_FOLDER_SENTINEL = "__new__";
 // Resolving to `null` (rather than creating it up front) lets the server
 // create it lazily, only if the upload/paste actually goes through.
 const DEFAULT_FOLDER_SENTINEL = "__default__";
+// Generation's "Save to" destination defaults to this — same behavior as
+// before that control existed: file alongside the source folder when
+// scoped to one, otherwise the course's default folder (see
+// generateForCourse's own destinationFolderId doc comment). Picking a real
+// folder, Unsorted, or "+ Create new folder" below overrides it.
+const AUTO_DESTINATION_SENTINEL = "__auto__";
 
 // Folder-level key format is unchanged from before, so existing stored
 // preferences keep working; a section suffix (e.g. "documents", "generated")
@@ -537,7 +543,7 @@ function GeneratedItemList({
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
   const { push: pushWithTransition } = useViewTransitionRouter();
-  const showModelBadge = useShowModelBadge();
+  const modelBadge = useShowModelBadge();
 
   // See DocumentList's handleDrop — same reorder-by-drop-on-a-sibling-row
   // pattern (including why stopPropagation matters), mirrored here for
@@ -602,7 +608,7 @@ function GeneratedItemList({
               >
                 {item.title}
               </Link>
-              {showModelBadge && <ModelBadge info={item} />}
+              {modelBadge.show && <ModelBadge info={item} detail={modelBadge.detail} />}
               {!!dueByItemId.get(item.id) && (
                 <span className="shrink-0 rounded-full bg-amber/15 px-1.5 py-0.5 text-xs font-medium text-amber">
                   {dueByItemId.get(item.id)} due
@@ -1297,6 +1303,12 @@ export default function CoursePage() {
   // extra documents on top of it.
   const [generationDocIds, setGenerationDocIds] = useState<Set<number>>(new Set());
   const [docPickerOpen, setDocPickerOpen] = useState(false);
+  // Where to file the generated item — independent of `scope`/
+  // `generationDocIds` above, which only pick the source material. Same
+  // sentinel pattern as uploadDestination (see AUTO_DESTINATION_SENTINEL,
+  // DEFAULT_FOLDER_SENTINEL, NEW_FOLDER_SENTINEL).
+  const [generationDestination, setGenerationDestination] = useState<string>(AUTO_DESTINATION_SENTINEL);
+  const [generationNewFolderName, setGenerationNewFolderName] = useState("");
   const [quizDialogOpen, setQuizDialogOpen] = useState(false);
   // Collapsed by default — the folders above are the main event; this is a
   // secondary action tucked behind its own small trigger rather than a
@@ -1492,6 +1504,33 @@ export default function CoursePage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: uploadNewFolderName }),
+    });
+    const folder = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(folder.error ?? "Couldn't create the new folder");
+    }
+    return folder.id;
+  }
+
+  // Same idea as resolveDestinationFolderId above, for the Practice card's
+  // own "Save to" control — `undefined` (AUTO_DESTINATION_SENTINEL) omits
+  // the field entirely so the server falls back to its own default (see
+  // generateForCourse's destinationFolderId doc comment) instead of
+  // resolving it to a real id here.
+  async function resolveGenerationDestinationFolderId(): Promise<number | null | undefined> {
+    if (generationDestination === AUTO_DESTINATION_SENTINEL) {
+      return undefined;
+    }
+    if (generationDestination === DEFAULT_FOLDER_SENTINEL) {
+      return null;
+    }
+    if (generationDestination !== NEW_FOLDER_SENTINEL) {
+      return Number(generationDestination);
+    }
+    const res = await fetch(`/api/courses/${courseId}/folders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: generationNewFolderName }),
     });
     const folder = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -1864,9 +1903,17 @@ export default function CoursePage() {
   }
 
   async function handleGenerate(mode: GenerationMode, quizSettings?: QuizGenerationSettings) {
+    if (generationDestination === NEW_FOLDER_SENTINEL && !generationNewFolderName.trim()) return;
     setGenerating(mode);
     setError(null);
     try {
+      let destinationFolderId: number | null | undefined;
+      try {
+        destinationFolderId = await resolveGenerationDestinationFolderId();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't create the new folder");
+        return;
+      }
       const res = await fetch(`/api/courses/${courseId}/generate/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1875,12 +1922,19 @@ export default function CoursePage() {
             ? { documentIds: [...generationDocIds] }
             : { folderId: scope === ALL_MATERIAL ? null : Number(scope) }),
           ...(quizSettings ? { quizSettings } : {}),
+          ...(destinationFolderId !== undefined ? { destinationFolderId } : {}),
         }),
       });
       const body = await res.json();
       if (!res.ok) {
         setError(body.error ?? "Generation failed");
         return;
+      }
+      // Switch off "+ Create new folder" onto the folder that just got
+      // created — otherwise generating again would create yet another one.
+      if (generationDestination === NEW_FOLDER_SENTINEL && destinationFolderId != null) {
+        setGenerationDestination(String(destinationFolderId));
+        setGenerationNewFolderName("");
       }
       if (autoOpenGeneratedItems) {
         router.push(`/items/${body.id}`);
@@ -2752,6 +2806,45 @@ export default function CoursePage() {
             selected={generationDocIds}
             onApply={setGenerationDocIds}
           />
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-sm text-muted-foreground">Save to</Label>
+            <Select value={generationDestination} onValueChange={(v) => v && setGenerationDestination(v)}>
+              <SelectTrigger size="sm">
+                <SelectValue>
+                  {(v: string) =>
+                    v === AUTO_DESTINATION_SENTINEL
+                      ? "Same as source"
+                      : v === NEW_FOLDER_SENTINEL
+                        ? "+ Create new folder"
+                        : v === DEFAULT_FOLDER_SENTINEL
+                          ? "Unsorted"
+                          : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO_DESTINATION_SENTINEL}>Same as source</SelectItem>
+                {!hasDefaultFolder && (
+                  <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
+                )}
+                {detail.folders.map((folder) => (
+                  <SelectItem key={folder.id} value={String(folder.id)}>
+                    {folder.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
+              </SelectContent>
+            </Select>
+            {generationDestination === NEW_FOLDER_SENTINEL && (
+              <Input
+                autoFocus
+                value={generationNewFolderName}
+                onChange={(e) => setGenerationNewFolderName(e.target.value)}
+                placeholder="New folder name"
+                className="h-8 w-40 text-xs"
+              />
+            )}
+          </div>
           {!scopedHasExtracted && (
             <p className="text-sm text-muted-foreground">
               Upload at least one document that extracts successfully in this scope before generating.
@@ -2766,7 +2859,11 @@ export default function CoursePage() {
                   variant="outline"
                   className={`bg-card ${MODE_META[mode].borderClass}`}
                   onClick={() => (mode === "quiz" ? setQuizDialogOpen(true) : handleGenerate(mode))}
-                  disabled={!scopedHasExtracted || generating !== null}
+                  disabled={
+                    !scopedHasExtracted ||
+                    generating !== null ||
+                    (generationDestination === NEW_FOLDER_SENTINEL && !generationNewFolderName.trim())
+                  }
                 >
                   <Icon className={MODE_META[mode].textClass} />
                   {generating === mode ? "Generating…" : MODE_LABELS[mode]}

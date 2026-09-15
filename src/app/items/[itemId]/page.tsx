@@ -92,7 +92,7 @@ export default function ItemPage() {
   const notesRef = useRef<HTMLDivElement>(null);
   const noteEditorRef = useRef<NoteEditorHandle>(null);
   const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showModelBadge = useShowModelBadge();
+  const modelBadge = useShowModelBadge();
 
   // Screenshot-crop-to-ask for notes — useful for a rendered equation or
   // diagram a plain text selection (AskAiPanel below) can't capture. Reads
@@ -261,7 +261,7 @@ export default function ItemPage() {
         </Breadcrumb>
         <h1 className="flex flex-wrap items-center gap-2 font-heading text-2xl font-semibold">
           {item.title}
-          {showModelBadge && <ModelBadge info={item} />}
+          {modelBadge.show && <ModelBadge info={item} detail={modelBadge.detail} />}
           {item.mode === "quiz" && (
             <Button
               variant="ghost"

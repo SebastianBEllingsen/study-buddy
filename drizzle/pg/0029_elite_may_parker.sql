@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "ai_efficiency_mode" boolean DEFAULT false NOT NULL;

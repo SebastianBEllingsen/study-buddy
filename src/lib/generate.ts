@@ -4,8 +4,10 @@ import {
   createGeneratedItem,
   getOrCreateDefaultFolder,
   getCourse,
+  getFolder,
   getNewDocumentsForItem,
   updateGeneratedItemContent,
+  getAppSettings,
 } from "./models";
 import type { GenerationMode, GeneratedItem } from "./models";
 import { estimateTokens, CHUNK_THRESHOLD_TOKENS, chunkText } from "./chunking";
@@ -36,16 +38,25 @@ export class NoDocumentsError extends Error {
   }
 }
 
+// Normal maxTokens for all generation calls; efficiency mode (see
+// AppSettings.aiEfficiencyMode) halves it and drops effort/model, per the
+// call sites below that read it.
+const MAX_TOKENS = 8000;
+const EFFICIENT_MAX_TOKENS = 4000;
+
 async function generateQuiz(
   courseName: string,
   text: string,
   alreadyCovered?: string,
-  settings?: QuizGenerationSettings
+  settings?: QuizGenerationSettings,
+  efficient?: boolean
 ): Promise<QuizContent> {
   const content = await generateStructured<QuizContent>({
     system: quizSystemPrompt(courseName, settings),
     user: quizUserPrompt(text, alreadyCovered),
-    maxTokens: 8000,
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
   });
   return sanitizeQuizContent(content);
 }
@@ -54,10 +65,11 @@ async function generateQuizChunked(
   courseName: string,
   chunks: string[],
   alreadyCovered?: string,
-  settings?: QuizGenerationSettings
+  settings?: QuizGenerationSettings,
+  efficient?: boolean
 ): Promise<QuizContent> {
   const perChunk = await Promise.all(
-    chunks.map((chunk) => generateQuiz(courseName, chunk, alreadyCovered, settings))
+    chunks.map((chunk) => generateQuiz(courseName, chunk, alreadyCovered, settings, efficient))
   );
   return { questions: perChunk.flatMap((c) => c.questions) };
 }
@@ -65,12 +77,15 @@ async function generateQuizChunked(
 async function generateFlashcards(
   courseName: string,
   text: string,
-  alreadyCovered?: string
+  alreadyCovered?: string,
+  efficient?: boolean
 ): Promise<FlashcardsContent> {
   const content = await generateStructured<FlashcardsContent>({
     system: flashcardsSystemPrompt(courseName),
     user: flashcardsUserPrompt(text, alreadyCovered),
-    maxTokens: 8000,
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
   });
   return sanitizeFlashcardsContent(content);
 }
@@ -78,10 +93,11 @@ async function generateFlashcards(
 async function generateFlashcardsChunked(
   courseName: string,
   chunks: string[],
-  alreadyCovered?: string
+  alreadyCovered?: string,
+  efficient?: boolean
 ): Promise<FlashcardsContent> {
   const perChunk = await Promise.all(
-    chunks.map((chunk) => generateFlashcards(courseName, chunk, alreadyCovered))
+    chunks.map((chunk) => generateFlashcards(courseName, chunk, alreadyCovered, efficient))
   );
   return { cards: perChunk.flatMap((c) => c.cards) };
 }
@@ -89,23 +105,27 @@ async function generateFlashcardsChunked(
 async function generateNotes(
   courseName: string,
   text: string,
-  alreadyCovered?: string
+  alreadyCovered?: string,
+  efficient?: boolean
 ): Promise<NotesContent> {
   const markdown = await generateText({
     system: notesSystemPrompt(courseName),
     user: notesUserPrompt(text, alreadyCovered),
-    maxTokens: 8000,
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
   });
   return sanitizeNotesContent({ markdown });
 }
 
 async function generateNotesChunked(
   courseName: string,
-  chunks: string[]
+  chunks: string[],
+  efficient?: boolean
 ): Promise<NotesContent> {
   // Map: summarize each chunk independently.
   const chunkSummaries = await Promise.all(
-    chunks.map((chunk) => generateNotes(courseName, chunk))
+    chunks.map((chunk) => generateNotes(courseName, chunk, undefined, efficient))
   );
   // Reduce: merge the chunk-level notes into one coherent document.
   const merged = await generateText({
@@ -113,7 +133,9 @@ async function generateNotesChunked(
     user: chunkSummaries
       .map((s, i) => `--- Section ${i + 1} notes ---\n${s.markdown}`)
       .join("\n\n"),
-    maxTokens: 8000,
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
   });
   return sanitizeNotesContent({ markdown: merged });
 }
@@ -124,11 +146,33 @@ const MODE_LABELS: Record<GenerationMode, string> = {
   flashcards: "Flashcards",
 };
 
+export class DestinationFolderNotFoundError extends Error {
+  constructor() {
+    super("That destination folder no longer exists.");
+    this.name = "DestinationFolderNotFoundError";
+  }
+}
+
 export async function generateForCourse(
   courseId: number,
   mode: GenerationMode,
-  options?: { folderId?: number | null; documentIds?: number[] | null; quizSettings?: QuizGenerationSettings }
+  options?: {
+    folderId?: number | null;
+    documentIds?: number[] | null;
+    quizSettings?: QuizGenerationSettings;
+    // Where the generated item gets filed. `undefined` (the default): same
+    // as before this existed — the source folder (options.folderId) when
+    // scoped to one, otherwise the course's default folder. `null`: force
+    // the default folder even when generating from a specific source folder
+    // or a hand-picked document set. A number: file it there instead,
+    // independent of the source scope — same "pick a folder, or create a
+    // new one" choice as uploading a document (see resolveDestinationFolderId
+    // in the course page).
+    destinationFolderId?: number | null;
+  }
 ) {
+  const { aiEfficiencyMode: efficient } = await getAppSettings();
+
   const context = await buildCourseContext(courseId, options);
   if (context.documentIds.length === 0) {
     throw new NoDocumentsError();
@@ -141,27 +185,41 @@ export async function generateForCourse(
   switch (mode) {
     case "quiz":
       content = chunks
-        ? await generateQuizChunked(context.courseName, chunks, undefined, options?.quizSettings)
-        : await generateQuiz(context.courseName, context.combinedText, undefined, options?.quizSettings);
+        ? await generateQuizChunked(context.courseName, chunks, undefined, options?.quizSettings, efficient)
+        : await generateQuiz(context.courseName, context.combinedText, undefined, options?.quizSettings, efficient);
       break;
     case "flashcards":
       content = chunks
-        ? await generateFlashcardsChunked(context.courseName, chunks)
-        : await generateFlashcards(context.courseName, context.combinedText);
+        ? await generateFlashcardsChunked(context.courseName, chunks, undefined, efficient)
+        : await generateFlashcards(context.courseName, context.combinedText, undefined, efficient);
       break;
     case "notes":
       content = chunks
-        ? await generateNotesChunked(context.courseName, chunks)
-        : await generateNotes(context.courseName, context.combinedText);
+        ? await generateNotesChunked(context.courseName, chunks, efficient)
+        : await generateNotes(context.courseName, context.combinedText, undefined, efficient);
       break;
   }
 
   const title = `${MODE_LABELS[mode]} — ${context.courseName} (${context.scopeLabel})`;
 
-  // Scoped to a specific folder -> the result is filed right there,
-  // alongside the documents it was generated from. Pooled ("All course
-  // material", context.folderId null) -> the course's default folder.
-  const storageFolderId = context.folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
+  let storageFolderId: number;
+  if (options?.destinationFolderId !== undefined) {
+    if (options.destinationFolderId === null) {
+      storageFolderId = (await getOrCreateDefaultFolder(courseId)).id;
+    } else {
+      const destination = await getFolder(options.destinationFolderId);
+      if (!destination || destination.course_id !== courseId) {
+        throw new DestinationFolderNotFoundError();
+      }
+      storageFolderId = destination.id;
+    }
+  } else {
+    // No explicit destination given: same as before this existed — scoped
+    // to a specific folder -> filed right there, alongside the documents it
+    // was generated from. Pooled ("All course material", context.folderId
+    // null) -> the course's default folder.
+    storageFolderId = context.folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
+  }
 
   return createGeneratedItem({
     courseId,
@@ -172,7 +230,7 @@ export async function generateForCourse(
     title,
     contentJson: content,
     sourceDocumentIds: context.documentIds,
-    model: await getModelInfo(),
+    model: await getModelInfo(efficient),
   });
 }
 
@@ -236,6 +294,8 @@ function mergeGeneratedContent(
 // generation, just fed a smaller document set plus an "already covered"
 // hint to reduce duplicate questions/cards on overlapping material.
 export async function supplementGeneratedItem(item: GeneratedItem): Promise<GeneratedItem> {
+  const { aiEfficiencyMode: efficient } = await getAppSettings();
+
   const newDocs = await getNewDocumentsForItem(item);
   if (newDocs.length === 0) {
     throw new NoNewDocumentsError();
@@ -252,18 +312,18 @@ export async function supplementGeneratedItem(item: GeneratedItem): Promise<Gene
   switch (item.mode) {
     case "quiz":
       delta = chunks
-        ? await generateQuizChunked(courseName, chunks, alreadyCovered)
-        : await generateQuiz(courseName, combinedText, alreadyCovered);
+        ? await generateQuizChunked(courseName, chunks, alreadyCovered, undefined, efficient)
+        : await generateQuiz(courseName, combinedText, alreadyCovered, undefined, efficient);
       break;
     case "flashcards":
       delta = chunks
-        ? await generateFlashcardsChunked(courseName, chunks, alreadyCovered)
-        : await generateFlashcards(courseName, combinedText, alreadyCovered);
+        ? await generateFlashcardsChunked(courseName, chunks, alreadyCovered, efficient)
+        : await generateFlashcards(courseName, combinedText, alreadyCovered, efficient);
       break;
     case "notes":
       delta = chunks
-        ? await generateNotesChunked(courseName, chunks)
-        : await generateNotes(courseName, combinedText, alreadyCovered);
+        ? await generateNotesChunked(courseName, chunks, efficient)
+        : await generateNotes(courseName, combinedText, alreadyCovered, efficient);
       break;
   }
 
@@ -278,7 +338,7 @@ export async function supplementGeneratedItem(item: GeneratedItem): Promise<Gene
     id: item.id,
     contentJson: merged,
     sourceDocumentIds: [...existingSourceIds, ...newDocs.map((d) => d.id)],
-    model: await getModelInfo(),
+    model: await getModelInfo(efficient),
   });
 }
 
@@ -319,13 +379,17 @@ export async function createRetryQuiz(
       explanation: q.explanation,
     }));
 
+  const { aiEfficiencyMode: efficient } = await getAppSettings();
+
   const course = await getCourse(item.course_id);
   const courseName = course?.name ?? "this course";
 
   const rawRetryContent = await generateStructured<QuizContent>({
     system: retryQuizSystemPrompt(courseName),
     user: retryQuizUserPrompt(missed),
-    maxTokens: 8000,
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
   });
   const retryContent = sanitizeQuizContent(rawRetryContent);
 
@@ -338,6 +402,6 @@ export async function createRetryQuiz(
     title: `Retry: ${item.title}`,
     contentJson: retryContent,
     sourceDocumentIds: [],
-    model: await getModelInfo(),
+    model: await getModelInfo(efficient),
   });
 }

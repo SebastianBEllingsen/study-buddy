@@ -1,0 +1,1 @@
+ALTER TABLE "calendar_feeds" ADD COLUMN "enabled" boolean DEFAULT true NOT NULL;

@@ -120,6 +120,12 @@ export const app_settings = pgTable("app_settings", {
   // column/comment in schema.sqlite.ts and the AppSettings.documentBadgeDetail
   // doc comment in models.ts.
   document_badge_detail: text("document_badge_detail"),
+  // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
+  ai_efficiency_mode: boolean("ai_efficiency_mode").notNull().default(false),
+  // "detailed" | "minimal" | null (null == "detailed") — see the matching
+  // column/comment in schema.sqlite.ts and the AppSettings.modelBadgeDetail
+  // doc comment in models.ts.
+  model_badge_detail: text("model_badge_detail"),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -244,6 +250,11 @@ export const calendar_feeds = pgTable("calendar_feeds", {
   url: text("url").notNull(),
   show_on_calendar: boolean("show_on_calendar").notNull().default(true),
   show_in_widget: boolean("show_in_widget").notNull().default(true),
+  // Master switch — off means this feed isn't fetched at all (see
+  // fetchAllFeedEvents' caller in api/calendar/events/route.ts), not just
+  // hidden from one place the way show_on_calendar/show_in_widget are.
+  // Pausing a feed like this keeps its URL/label around, unlike deleting it.
+  enabled: boolean("enabled").notNull().default(true),
   created_at: text("created_at").notNull(),
 });
 

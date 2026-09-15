@@ -155,6 +155,8 @@ interface SettingsRow {
   dashboard_transparent_widgets: boolean;
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
+  ai_efficiency_mode: boolean;
+  model_badge_detail: string | null;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -183,6 +185,8 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
+      ai_efficiency_mode: app_settings.ai_efficiency_mode,
+      model_badge_detail: app_settings.model_badge_detail,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -298,6 +302,19 @@ export interface AppSettings {
   // files — processing/failure text is short enough already and doesn't
   // shrink further. Meaningless with documentBadgesEnabled off.
   documentBadgeDetail: "detailed" | "minimal";
+  // Off (the default): generation/chat calls use the main model at their
+  // normal effort/maxTokens, same as before this setting existed. On: every
+  // AI call in lib/generate.ts and lib/chat.ts asks its backend for a
+  // cheaper/faster model where one exists (see `efficient` in
+  // aiBackends/types.ts) and drops effort/maxTokens — a blunt cost lever for
+  // people who'd rather save tokens than get today's default quality. Never
+  // touches the source text/input fed to the model, only how hard it thinks
+  // and which model answers.
+  aiEfficiencyMode: boolean;
+  // "detailed" (default): the model badge shows its provider logo and full
+  // label/model text, same as before this setting existed. "minimal": just
+  // the logo/icon, no text. Meaningless with showModelBadge off.
+  modelBadgeDetail: "detailed" | "minimal";
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -325,6 +342,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
+    aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
+    modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
   };
 }
 
@@ -360,6 +379,20 @@ export async function setDocumentBadgeDetail(detail: "detailed" | "minimal"): Pr
   await db
     .update(app_settings)
     .set({ document_badge_detail: detail === "minimal" ? "minimal" : null, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setAiEfficiencyMode(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ ai_efficiency_mode: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setModelBadgeDetail(detail: "detailed" | "minimal"): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ model_badge_detail: detail === "minimal" ? "minimal" : null, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -481,6 +514,11 @@ export interface CalendarFeed {
   // month grid (show_on_calendar), or vice versa. Both default true.
   show_on_calendar: boolean;
   show_in_widget: boolean;
+  // Master switch — off means this feed is skipped entirely wherever feeds
+  // get fetched (see fetchAllFeedEvents' caller), not just hidden from one
+  // place the way show_on_calendar/show_in_widget are. Defaults true, same
+  // as those two.
+  enabled: boolean;
   created_at: string;
 }
 
@@ -498,7 +536,7 @@ export async function addCalendarFeed(label: string, url: string): Promise<Calen
 
 export async function updateCalendarFeedVisibility(
   id: number,
-  fields: { show_on_calendar?: boolean; show_in_widget?: boolean }
+  fields: { show_on_calendar?: boolean; show_in_widget?: boolean; enabled?: boolean }
 ): Promise<void> {
   await db.update(calendar_feeds).set(fields).where(eq(calendar_feeds.id, id));
 }

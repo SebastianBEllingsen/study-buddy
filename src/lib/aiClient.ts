@@ -58,12 +58,12 @@ export interface ModelInfo {
 // / generateText only return the generated content, not any metadata about
 // what produced it. Used to tag each generated_items row so the UI can show
 // which model made it (see createGeneratedItem/updateGeneratedItemContent).
-export async function getModelInfo(): Promise<ModelInfo> {
+export async function getModelInfo(efficient?: boolean): Promise<ModelInfo> {
   const provider = await getAiBackend();
   switch (provider) {
     case "claude_code":
       // --model flag in aiBackends/claudeCode.ts.
-      return { provider, model: "sonnet" };
+      return { provider, model: efficient ? "haiku" : "sonnet" };
     case "codex_cli":
       // No --model flag is passed (see aiBackends/codexCli.ts) — whatever
       // the installed Codex CLI defaults to, which this app can't see.
@@ -78,6 +78,7 @@ export async function getModelInfo(): Promise<ModelInfo> {
       return { provider, model: "unknown" };
     case "api":
     default:
-      return { provider, model: "claude-sonnet-5" };
+      // EFFICIENT_MODEL in aiBackends/anthropicApi.ts.
+      return { provider, model: efficient ? "claude-haiku-4-5-20251001" : "claude-sonnet-5" };
   }
 }

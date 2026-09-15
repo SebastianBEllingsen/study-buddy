@@ -1,6 +1,9 @@
 import { generateText } from "./aiClient";
-import { addChatMessage, getChatConversation } from "./models";
+import { addChatMessage, getChatConversation, getAppSettings } from "./models";
 import type { ChatMessage } from "./models";
+
+const MAX_TOKENS = 4000;
+const EFFICIENT_MAX_TOKENS = 2000;
 
 const SYSTEM_PROMPT = `You are the AI assistant built into Study Buddy, a study app for courses, notes, quizzes, and flashcards. Have a natural, helpful conversation with the user — you can help with studying, explain concepts, or just chat.
 
@@ -29,10 +32,14 @@ export async function sendChatMessage(conversationId: number, content: string): 
     throw new Error(`Conversation ${conversationId} not found`);
   }
 
+  const { aiEfficiencyMode: efficient } = await getAppSettings();
+
   const reply = await generateText({
     system: SYSTEM_PROMPT,
     user: buildTranscriptPrompt(detail.messages),
-    maxTokens: 4000,
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
   });
 
   return addChatMessage(conversationId, "assistant", reply.trim());

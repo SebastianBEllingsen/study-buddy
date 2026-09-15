@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "cn";
 import { useAppTheme, type AppTheme } from "@/components/AppThemeProvider";
 import ThemeToggle from "@/components/ThemeToggle";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
@@ -26,6 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTab, TabsIndicator, TabsPanel } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
@@ -88,11 +90,18 @@ const DOCUMENT_BADGE_DETAIL_LABELS: Record<AppSettings["documentBadgeDetail"], s
   minimal: "Minimal",
 };
 
+const MODEL_BADGE_DETAIL_LABELS: Record<AppSettings["modelBadgeDetail"], string> = {
+  detailed: "Detailed",
+  minimal: "Minimal",
+};
+
 function AiSection() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [backend, setBackendState] = useState<AiBackend>("api");
   const [keyInput, setKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [gradingSaving, setGradingSaving] = useState(false);
+  const [efficiencySaving, setEfficiencySaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -134,6 +143,50 @@ function AiSection() {
       toast.error("Couldn't save AI settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleGradingToggle(next: boolean) {
+    if (!settings) return;
+    setSettings({ ...settings, aiGradingEnabled: next });
+    setGradingSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiGradingEnabled: next }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save AI settings");
+        setSettings((prev) => (prev ? { ...prev, aiGradingEnabled: !next } : prev));
+      }
+    } catch {
+      toast.error("Couldn't save AI settings");
+      setSettings((prev) => (prev ? { ...prev, aiGradingEnabled: !next } : prev));
+    } finally {
+      setGradingSaving(false);
+    }
+  }
+
+  async function handleEfficiencyToggle(next: boolean) {
+    if (!settings) return;
+    setSettings({ ...settings, aiEfficiencyMode: next });
+    setEfficiencySaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiEfficiencyMode: next }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save AI settings");
+        setSettings((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev));
+      }
+    } catch {
+      toast.error("Couldn't save AI settings");
+      setSettings((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev));
+    } finally {
+      setEfficiencySaving(false);
     }
   }
 
@@ -190,6 +243,42 @@ function AiSection() {
       <Button size="sm" onClick={handleSave} disabled={saving}>
         {saving ? "Saving…" : "Save"}
       </Button>
+
+      <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
+        <span>
+          AI grading for quiz short-answer questions
+          <span className="block text-xs text-muted-foreground">
+            Off (default): graded locally by keyword match against the model answer — no API
+            call, no partial credit. On: the AI judges each answer and gives written feedback.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.aiGradingEnabled}
+          disabled={gradingSaving}
+          onChange={(e) => handleGradingToggle(e.target.checked)}
+        />
+      </label>
+
+      <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
+        <span>
+          Efficiency mode
+          <span className="block text-xs text-muted-foreground">
+            Off (default): normal generation quality. On: lower reasoning effort and a shorter
+            response cap everywhere, plus a cheaper, faster model where the provider offers one
+            (Claude backends switch to Haiku) — trades some quality for lower cost/token usage.
+            Never changes what source text is sent to the model.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.aiEfficiencyMode}
+          disabled={efficiencySaving}
+          onChange={(e) => handleEfficiencyToggle(e.target.checked)}
+        />
+      </label>
     </div>
   );
 }
@@ -258,6 +347,9 @@ function CalendarSection() {
       <h3 className="flex items-center gap-1.5 text-sm font-medium">
         <Calendar className="size-3.5" />
         Google Calendar
+        {settings.googleCalendarConnected && (
+          <span className="text-xs font-normal text-sage"> — Connected</span>
+        )}
       </h3>
       <p className="text-xs text-muted-foreground">
         Bring your own Google Cloud OAuth client (same &quot;bring your own key&quot; idea as the
@@ -282,46 +374,44 @@ function CalendarSection() {
           placeholder={settings.hasGoogleClientCredentials ? "configured" : "not set"}
         />
       </div>
-      <Button size="sm" onClick={handleSaveCredentials} disabled={saving}>
-        {saving ? "Saving…" : "Save credentials"}
-      </Button>
 
-      <div className="space-y-1.5 border-t pt-3">
+      {/* Connect/Disconnect is part of the same Google Calendar setup as
+          the credentials above it, not a separate step — same row as Save
+          credentials (rather than its own section below a divider) makes
+          that relationship visually obvious. */}
+      <div className="flex items-center justify-between gap-2">
+        <Button size="sm" onClick={handleSaveCredentials} disabled={saving}>
+          {saving ? "Saving…" : "Save credentials"}
+        </Button>
         {settings.googleCalendarConnected ? (
-          <>
-            <p className="text-xs text-sage">Connected.</p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleDisconnect}
-              disabled={disconnecting}
-            >
-              {disconnecting ? "Disconnecting…" : "Disconnect"}
-            </Button>
-          </>
-        ) : settings.hasGoogleClientCredentials ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            nativeButton={false}
-            render={<a href="/api/calendar/auth" />}
+            onClick={handleDisconnect}
+            disabled={disconnecting}
           >
-            Connect Google Calendar
+            {disconnecting ? "Disconnecting…" : "Disconnect"}
           </Button>
         ) : (
-          // A disabled <a> has no real browser meaning (unlike a disabled
-          // form control), so this stays a plain disabled <button> — no
-          // credentials saved yet means nothing to actually link to.
-          <Button type="button" variant="outline" size="sm" disabled>
-            Connect Google Calendar
-          </Button>
-        )}
-        {!settings.hasGoogleClientCredentials && (
-          <p className="text-xs text-muted-foreground">Save your Client ID/Secret first.</p>
+          settings.hasGoogleClientCredentials && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<a href="/api/calendar/auth" />}
+            >
+              Connect Google Calendar
+            </Button>
+          )
         )}
       </div>
+      {!settings.hasGoogleClientCredentials && (
+        <p className="text-xs text-muted-foreground">
+          Save your Client ID/Secret first, then Connect appears here.
+        </p>
+      )}
     </div>
   );
 }
@@ -332,6 +422,7 @@ interface CalendarFeed {
   url: string;
   show_on_calendar: boolean;
   show_in_widget: boolean;
+  enabled: boolean;
 }
 
 // Read-only external ICS calendar subscriptions (a university student
@@ -388,7 +479,7 @@ function CalendarFeedsSection() {
     }
   }
 
-  async function toggleFeedField(feed: CalendarFeed, field: "show_on_calendar" | "show_in_widget") {
+  async function toggleFeedField(feed: CalendarFeed, field: "show_on_calendar" | "show_in_widget" | "enabled") {
     const next = !feed[field];
     setFeeds((prev) => prev?.map((f) => (f.id === feed.id ? { ...f, [field]: next } : f)) ?? null);
     const res = await fetch(`/api/calendar-feeds/${feed.id}`, {
@@ -417,21 +508,35 @@ function CalendarFeedsSection() {
         Calendar feeds
       </h3>
       <p className="text-xs text-muted-foreground">
-        Add a read-only ICS feed URL — a university portal&apos;s timetable, an LMS&apos;s
-        assignment-due-dates feed — and its events show up alongside Google Calendar. Each feed is
-        independently toggleable: on the calendar (/calendar and the dashboard&apos;s Upcoming
-        widget) and in the dashboard&apos;s Assignments widget.
+        Add a read-only ICS feed URL — any standard iCalendar link: a university portal&apos;s
+        timetable, an LMS&apos;s (e.g. Canvas&apos;s) assignment-due-dates export, a Google Calendar
+        &quot;secret address in iCal format&quot;, an Outlook/Office 365 published calendar — and
+        its events show up alongside Google Calendar. Uncheck &quot;Enabled&quot; to pause a feed
+        without losing it; the two checkboxes below that control where an enabled feed shows up.
       </p>
 
       {feeds && feeds.length > 0 && (
         <ul className="space-y-1.5">
           {feeds.map((feed) => (
-            <li key={feed.id} className="space-y-1.5 rounded-lg border bg-muted/30 px-2.5 py-1.5">
+            <li
+              key={feed.id}
+              className={cn(
+                "space-y-1.5 rounded-lg border bg-muted/30 px-2.5 py-1.5",
+                !feed.enabled && "opacity-60"
+              )}
+            >
               <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{feed.label}</p>
-                  <p className="truncate text-xs text-muted-foreground">{feed.url}</p>
-                </div>
+                <label className="flex min-w-0 items-center gap-2">
+                  <Checkbox
+                    checked={feed.enabled}
+                    onCheckedChange={() => toggleFeedField(feed, "enabled")}
+                    aria-label={feed.enabled ? `Disable ${feed.label}` : `Enable ${feed.label}`}
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{feed.label}</p>
+                    <p className="truncate text-xs text-muted-foreground">{feed.url}</p>
+                  </div>
+                </label>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -442,10 +547,11 @@ function CalendarFeedsSection() {
                   <X className="size-3.5" />
                 </Button>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3 pl-6">
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Checkbox
                     checked={feed.show_on_calendar}
+                    disabled={!feed.enabled}
                     onCheckedChange={() => toggleFeedField(feed, "show_on_calendar")}
                   />
                   On calendar
@@ -453,6 +559,7 @@ function CalendarFeedsSection() {
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Checkbox
                     checked={feed.show_in_widget}
+                    disabled={!feed.enabled}
                     onCheckedChange={() => toggleFeedField(feed, "show_in_widget")}
                   />
                   In assignments widget
@@ -1025,7 +1132,7 @@ function DisplaySection() {
   }, []);
 
   async function handleToggle(
-    field: "showModelBadge" | "autoOpenGeneratedItems" | "aiGradingEnabled" | "documentBadgesEnabled",
+    field: "showModelBadge" | "autoOpenGeneratedItems" | "documentBadgesEnabled",
     next: boolean
   ) {
     if (!settings) return;
@@ -1072,26 +1179,34 @@ function DisplaySection() {
     }
   }
 
+  async function saveModelBadgeDetail(detail: AppSettings["modelBadgeDetail"]) {
+    if (!settings) return;
+    const prev = settings.modelBadgeDetail;
+    setSettings({ ...settings, modelBadgeDetail: detail });
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelBadgeDetail: detail }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save display settings");
+        setSettings((s) => (s ? { ...s, modelBadgeDetail: prev } : s));
+      }
+    } catch {
+      toast.error("Couldn't save display settings");
+      setSettings((s) => (s ? { ...s, modelBadgeDetail: prev } : s));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!settings) return null;
 
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-medium">Display</h3>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
-          Show which model generated each item
-          <span className="block text-xs text-muted-foreground">
-            A small badge next to notes, quizzes, and flashcards.
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.showModelBadge}
-          disabled={saving}
-          onChange={(e) => handleToggle("showModelBadge", e.target.checked)}
-        />
-      </label>
       <label className="flex items-center justify-between gap-3 text-sm">
         <span>
           Jump to newly generated content automatically
@@ -1106,24 +1221,6 @@ function DisplaySection() {
           checked={settings.autoOpenGeneratedItems}
           disabled={saving}
           onChange={(e) => handleToggle("autoOpenGeneratedItems", e.target.checked)}
-        />
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
-          AI grading for quiz short-answer questions
-          <span className="block text-xs text-muted-foreground">
-            Off (default): graded locally by keyword match against the model answer — no API call,
-            no partial credit. On: the AI judges each answer and gives written feedback, same as
-            before this setting existed. Multiple-choice questions are always graded locally
-            either way.
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.aiGradingEnabled}
-          disabled={saving}
-          onChange={(e) => handleToggle("aiGradingEnabled", e.target.checked)}
         />
       </label>
       <label className="flex items-center justify-between gap-3 text-sm">
@@ -1167,6 +1264,47 @@ function DisplaySection() {
           </Select>
         </div>
       )}
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          Show which model generated each item
+          <span className="block text-xs text-muted-foreground">
+            A small badge next to notes, quizzes, and flashcards.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.showModelBadge}
+          disabled={saving}
+          onChange={(e) => handleToggle("showModelBadge", e.target.checked)}
+        />
+      </label>
+      {settings.showModelBadge && (
+        <div className="flex items-center justify-between gap-3 pl-1 text-xs">
+          <span className="text-muted-foreground">Detail level</span>
+          <Select
+            value={settings.modelBadgeDetail}
+            onValueChange={(value: AppSettings["modelBadgeDetail"] | null) =>
+              value && saveModelBadgeDetail(value)
+            }
+          >
+            <SelectTrigger className="h-8 w-32 text-xs">
+              <SelectValue>
+                {(v: AppSettings["modelBadgeDetail"]) => MODEL_BADGE_DETAIL_LABELS[v] ?? v}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(MODEL_BADGE_DETAIL_LABELS) as AppSettings["modelBadgeDetail"][]).map(
+                (value) => (
+                  <SelectItem key={value} value={value}>
+                    {MODEL_BADGE_DETAIL_LABELS[value]}
+                  </SelectItem>
+                )
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   );
 }
@@ -1176,14 +1314,8 @@ export default function SettingsDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5 px-3 text-xs"
-        onClick={() => setOpen(true)}
-      >
-        <SettingsIcon className="size-3.5" />
-        Settings
+      <Button variant="ghost" size="icon-sm" aria-label="Settings" onClick={() => setOpen(true)}>
+        <SettingsIcon className="size-4 text-muted-foreground" />
       </Button>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
@@ -1194,19 +1326,35 @@ export default function SettingsDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <AiSection />
-        <Separator />
-        <CalendarSection />
-        <Separator />
-        <CalendarFeedsSection />
-        <Separator />
-        <StorageSection />
-        <Separator />
-        <BrandingSection />
-        <Separator />
-        <AppearanceSection />
-        <Separator />
-        <DisplaySection />
+        <Tabs defaultValue="ai">
+          <TabsList>
+            <TabsTab value="ai">AI</TabsTab>
+            <TabsTab value="calendar">Calendar</TabsTab>
+            <TabsTab value="storage">Storage</TabsTab>
+            <TabsTab value="appearance">Appearance</TabsTab>
+            <TabsTab value="display">Display</TabsTab>
+            <TabsIndicator />
+          </TabsList>
+          <TabsPanel value="ai">
+            <AiSection />
+          </TabsPanel>
+          <TabsPanel value="calendar">
+            <CalendarSection />
+            <Separator />
+            <CalendarFeedsSection />
+          </TabsPanel>
+          <TabsPanel value="storage">
+            <StorageSection />
+          </TabsPanel>
+          <TabsPanel value="appearance">
+            <AppearanceSection />
+            <Separator />
+            <BrandingSection />
+          </TabsPanel>
+          <TabsPanel value="display">
+            <DisplaySection />
+          </TabsPanel>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

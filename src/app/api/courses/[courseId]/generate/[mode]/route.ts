@@ -1,4 +1,4 @@
-import { generateForCourse, NoDocumentsError } from "@/lib/generate";
+import { generateForCourse, NoDocumentsError, DestinationFolderNotFoundError } from "@/lib/generate";
 import { describeAiError } from "@/lib/aiClient";
 import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
@@ -40,12 +40,23 @@ export async function POST(request: Request, { params }: Params) {
     ? body.documentIds.filter((id: unknown): id is number => typeof id === "number" && Number.isInteger(id))
     : null;
   const quizSettings = parseQuizSettings(body?.quizSettings);
+  // undefined (key omitted): keep generateForCourse's own default (file
+  // alongside the source folder, or the course default folder). null: force
+  // the course default folder. A number: an explicit destination — see
+  // destinationFolderId's doc comment on generateForCourse.
+  const destinationFolderId =
+    "destinationFolderId" in body
+      ? typeof body.destinationFolderId === "number" && Number.isInteger(body.destinationFolderId)
+        ? body.destinationFolderId
+        : null
+      : undefined;
 
   try {
     const item = await generateForCourse(id, mode as GenerationMode, {
       folderId,
       documentIds,
       quizSettings,
+      destinationFolderId,
     });
     // Only when the user has opted out of being taken straight there —
     // otherwise there's nothing left to notify about by the time they'd see it.
@@ -55,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
     }
     return Response.json(item, { status: 201 });
   } catch (err) {
-    if (err instanceof NoDocumentsError) {
+    if (err instanceof NoDocumentsError || err instanceof DestinationFolderNotFoundError) {
       return Response.json({ error: err.message }, { status: 400 });
     }
     console.error("Generation failed:", err);

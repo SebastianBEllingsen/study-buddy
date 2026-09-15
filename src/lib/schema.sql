@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
   -- versa. Both default on (a newly added feed shows up everywhere).
   show_on_calendar INTEGER NOT NULL DEFAULT 1,
   show_in_widget INTEGER NOT NULL DEFAULT 1,
+  -- Master switch: off means this feed isn't fetched at all, not just
+  -- hidden from one place. Pausing keeps its URL/label around, unlike
+  -- deleting it.
+  enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

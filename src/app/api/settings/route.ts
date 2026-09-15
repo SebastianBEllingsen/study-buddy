@@ -7,6 +7,8 @@ import {
   setAiGradingEnabled,
   setDocumentBadgesEnabled,
   setDocumentBadgeDetail,
+  setAiEfficiencyMode,
+  setModelBadgeDetail,
   setGoogleClientCredentials,
   setHomeWidgets,
   setAppBranding,
@@ -103,6 +105,23 @@ export async function POST(request: Request) {
       );
     }
     await setDocumentBadgeDetail(body.documentBadgeDetail);
+  }
+
+  if (body?.aiEfficiencyMode !== undefined) {
+    if (typeof body.aiEfficiencyMode !== "boolean") {
+      return Response.json({ error: "aiEfficiencyMode must be a boolean" }, { status: 400 });
+    }
+    await setAiEfficiencyMode(body.aiEfficiencyMode);
+  }
+
+  if (body?.modelBadgeDetail !== undefined) {
+    if (body.modelBadgeDetail !== "detailed" && body.modelBadgeDetail !== "minimal") {
+      return Response.json(
+        { error: "modelBadgeDetail must be \"detailed\" or \"minimal\"" },
+        { status: 400 }
+      );
+    }
+    await setModelBadgeDetail(body.modelBadgeDetail);
   }
 
   if (body?.googleClientId !== undefined || body?.googleClientSecret !== undefined) {

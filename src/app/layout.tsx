@@ -106,14 +106,25 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
                   <AppBranding initial={settings} />
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
-                      <Calendar className="size-3.5" />
-                      Calendar
-                    </Button>
-                    <SearchDialog />
-                    <ChatDialog />
-                    <SettingsDialog />
-                    <HelpDialog />
+                    {/* Two visual groups instead of five buttons in a row with
+                        mismatched labeled/icon-only/variant styling: named
+                        destinations first (Calendar, Search), then a divider,
+                        then equally-weighted icon-only utility actions (Chat,
+                        Settings, Help) — same order as before, just grouped so
+                        the header reads as two decisions instead of five. */}
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
+                        <Calendar className="size-3.5" />
+                        Calendar
+                      </Button>
+                      <SearchDialog />
+                    </div>
+                    <div className="h-5 w-px shrink-0 bg-border" />
+                    <div className="flex items-center gap-1">
+                      <ChatDialog />
+                      <SettingsDialog />
+                      <HelpDialog />
+                    </div>
                   </div>
                 </div>
               </header>
