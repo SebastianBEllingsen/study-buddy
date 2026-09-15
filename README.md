@@ -8,6 +8,17 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
 <img src="docs/images/Dashboard.png" width="100%" alt="Study Buddy dashboard">
 
+## Contents
+
+- [Features](#features)
+- [Getting started](#getting-started)
+  - [Connect an AI backend](#connect-an-ai-backend)
+  - [Connect Google Calendar (optional)](#connect-google-calendar-optional)
+- [How to use it](#how-to-use-it)
+- [Tech stack](#tech-stack)
+- [Known limitations](#known-limitations)
+- [License](#license)
+
 ---
 
 ## Features
