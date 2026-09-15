@@ -11,6 +11,16 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 ## Features
 
 - 🗂️ **Courses & folders** — upload PDFs, organize them however you like, drag to reorder
+  <table>
+    <tr>
+      <td>
+              <img src="docs/images/Coursepage1.png" width="500" alt="Customized dashboard">
+      </td>
+          <td>
+              <img src="docs/images/Coursepage2.png" width="500"></td>
+    </tr>
+  </table>
+
 - 📝 **Notes, quizzes & flashcards** — generated from your own material, one click each
 - ✅ **Quiz grading** — MCQ graded instantly, short answers graded by AI, with a **"Retry what you got wrong"** button for fresh practice on missed concepts
 - 🧠 **Real spaced repetition** — flashcards only show what's actually due
