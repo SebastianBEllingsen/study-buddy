@@ -618,6 +618,11 @@ li .katex {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  /* Being absolutely positioned takes this out of the Card's normal flow,
+     so it no longer inherits the Card's own px-6 py-8 padding the way the
+     front face does — without this it sits flush against the card border
+     instead of matching the front face's inset. */
+  padding: 2rem 1.5rem;
   transform: rotateY(180deg);
 }
 

@@ -8,6 +8,8 @@ import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-mar
 import { syntaxTree } from "@codemirror/language";
 import {
   autocompletion,
+  snippetCompletion,
+  type Completion,
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
@@ -25,6 +27,7 @@ import {
   Prec,
   StateEffect,
   StateField,
+  type EditorState,
   type Extension,
   type Range,
 } from "@codemirror/state";
@@ -33,7 +36,9 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import katex from "katex";
 import { toast } from "sonner";
+import { MATH_PATTERN } from "@/lib/mathSanitizer";
 import {
   Bold,
   Italic,
@@ -668,6 +673,163 @@ function liveMarkdownFormatting(): Extension {
   );
 }
 
+// Renders a matched $...$/$$...$$ span as actual KaTeX, concealing the raw
+// delimiters — same Obsidian-style live-preview idea as liveMarkdownFormatting
+// above, just driven by MATH_PATTERN (regex) instead of the syntax tree,
+// since @codemirror/lang-markdown doesn't parse math as its own node type.
+class MathWidget extends WidgetType {
+  constructor(
+    readonly tex: string,
+    readonly displayMode: boolean
+  ) {
+    super();
+  }
+
+  eq(other: MathWidget): boolean {
+    return other.tex === this.tex && other.displayMode === this.displayMode;
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement("span");
+    span.className = this.displayMode ? "cm-math cm-math-display" : "cm-math cm-math-inline";
+    try {
+      katex.render(this.tex, span, { displayMode: this.displayMode, throwOnError: false });
+    } catch {
+      span.textContent = this.tex;
+    }
+    return span;
+  }
+
+  // false — a click inside the rendered widget should still place the
+  // cursor there via CodeMirror's normal posAtDOM handling, which makes the
+  // decoration's range overlap the selection and reveals the raw source on
+  // the next rebuild (matches every other concealable span in this file).
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+function liveMathFormatting(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    const doc = view.state.doc.toString();
+    const sel = view.state.selection.main;
+    for (const match of doc.matchAll(MATH_PATTERN)) {
+      const from = match.index ?? 0;
+      const to = from + match[0].length;
+      if (sel.from <= to && sel.to >= from) continue; // cursor inside -> reveal raw source
+      // A replace decoration can't span multiple lines unless marked
+      // `block`, which in turn requires the range to sit exactly on line
+      // boundaries — not guaranteed for a $$...$$ that wraps mid-line.
+      // Multi-line display math is rare enough to just leave un-rendered
+      // in Edit mode (it still renders fine in Preview) rather than take on
+      // that complexity.
+      if (view.state.doc.lineAt(from).number !== view.state.doc.lineAt(to).number) continue;
+      const [, display, inline] = match;
+      const tex = display ?? inline ?? "";
+      ranges.push(
+        Decoration.replace({ widget: new MathWidget(tex, display !== undefined) }).range(from, to)
+      );
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+
+// Whether `pos` sits inside an as-yet-unclosed math span — used to gate the
+// LaTeX command autocomplete (below) so it doesn't fire on a stray "\" in
+// ordinary prose. Deliberately looser than MATH_PATTERN (which only matches
+// a *complete* pair): while composing an expression the closing delimiter
+// hasn't been typed yet, and that's exactly when autocomplete is useful.
+function isInsideMathAt(state: EditorState, pos: number): boolean {
+  // Display math ($$...$$) can legitimately span multiple lines, so this
+  // needs the whole document up to the cursor.
+  const before = state.doc.toString().slice(0, pos);
+  const displayOpen = (before.match(/\$\$/g)?.length ?? 0) % 2 === 1;
+  if (displayOpen) return true;
+
+  // Inline math ($...$) never crosses a line (MATH_PATTERN itself forbids
+  // it), so this only looks at the current line — an unrelated stray "$"
+  // elsewhere in the note (e.g. a price) can't corrupt the open/closed
+  // state for a line it isn't even on.
+  const line = state.doc.lineAt(pos);
+  const lineBefore = state.doc.sliceString(line.from, pos).replace(/\$\$/g, "");
+  const inlineOpen = (lineBefore.match(/\$/g)?.length ?? 0) % 2 === 1;
+  return inlineOpen;
+}
+
+// Overleaf-style "\command" completion, active only inside a math span.
+// Commands that take arguments insert `{}` as snippet tab stops (Tab moves
+// through them, same as any other CodeMirror snippet) rather than plain
+// text, so e.g. picking \frac lands the cursor ready to type the numerator.
+const LATEX_COMPLETIONS: Completion[] = [
+  snippetCompletion("\\frac{${}}{${}}", { label: "\\frac", detail: "fraction" }),
+  snippetCompletion("\\sqrt{${}}", { label: "\\sqrt", detail: "square root" }),
+  snippetCompletion("\\sqrt[${}]{${}}", { label: "\\sqrt[n]", detail: "nth root" }),
+  snippetCompletion("\\sum_{${}}^{${}}", { label: "\\sum", detail: "summation" }),
+  snippetCompletion("\\prod_{${}}^{${}}", { label: "\\prod", detail: "product" }),
+  snippetCompletion("\\int_{${}}^{${}}", { label: "\\int", detail: "integral" }),
+  snippetCompletion("\\lim_{${} \\to ${}}", { label: "\\lim", detail: "limit" }),
+  snippetCompletion("\\binom{${}}{${}}", { label: "\\binom", detail: "binomial coefficient" }),
+  snippetCompletion("\\text{${}}", { label: "\\text", detail: "text in math mode" }),
+  snippetCompletion("\\mathbb{${}}", { label: "\\mathbb", detail: "blackboard bold" }),
+  snippetCompletion("\\mathbf{${}}", { label: "\\mathbf", detail: "bold" }),
+  snippetCompletion("\\mathcal{${}}", { label: "\\mathcal", detail: "calligraphic" }),
+  snippetCompletion("\\overline{${}}", { label: "\\overline", detail: "overline" }),
+  snippetCompletion("\\underline{${}}", { label: "\\underline", detail: "underline" }),
+  snippetCompletion("\\hat{${}}", { label: "\\hat", detail: "hat accent" }),
+  snippetCompletion("\\vec{${}}", { label: "\\vec", detail: "vector arrow" }),
+  snippetCompletion("\\dot{${}}", { label: "\\dot", detail: "dot accent" }),
+  snippetCompletion("\\begin{pmatrix} ${a} & ${b} \\\\ ${c} & ${d} \\end{pmatrix}", {
+    label: "\\begin{pmatrix}",
+    detail: "2x2 matrix",
+  }),
+  ...[
+    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+    "iota", "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma",
+    "tau", "upsilon", "phi", "chi", "psi", "omega",
+  ].map((name) =>
+    snippetCompletion(`\\${name}`, { label: `\\${name}`, detail: "greek letter", type: "constant" })
+  ),
+  ...["Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Phi", "Psi", "Omega"].map((name) =>
+    snippetCompletion(`\\${name}`, { label: `\\${name}`, detail: "greek letter (upper)", type: "constant" })
+  ),
+  ...(
+    [
+      ["cdot", "·"], ["times", "×"], ["div", "÷"], ["pm", "±"], ["mp", "∓"],
+      ["infty", "∞"], ["partial", "∂"], ["nabla", "∇"],
+      ["leq", "≤"], ["geq", "≥"], ["neq", "≠"], ["approx", "≈"], ["equiv", "≡"], ["propto", "∝"],
+      ["in", "∈"], ["notin", "∉"], ["subset", "⊂"], ["subseteq", "⊆"], ["cup", "∪"], ["cap", "∩"],
+      ["forall", "∀"], ["exists", "∃"],
+      ["rightarrow", "→"], ["leftarrow", "←"], ["Rightarrow", "⇒"], ["Leftarrow", "⇐"],
+      ["leftrightarrow", "↔"], ["Leftrightarrow", "⇔"],
+    ] as const
+  ).map(([name, symbol]) =>
+    snippetCompletion(`\\${name}`, { label: `\\${name}`, detail: symbol, type: "keyword" })
+  ),
+];
+
+function latexCompletionSource(context: CompletionContext): CompletionResult | null {
+  const before = context.matchBefore(/\\[a-zA-Z]*/);
+  if (!before) return null;
+  if (!isInsideMathAt(context.state, context.pos)) return null;
+  return { from: before.from, options: LATEX_COMPLETIONS, validFor: /^\\[a-zA-Z]*$/ };
+}
+
 // Typing "[[" opens a fuzzy note picker and inserts [[note:ID|Title]] on
 // selection — the quick path for note-to-note links. Documents/generated
 // items go through the "Insert link" dialog instead (see InsertLinkDialog),
@@ -857,6 +1019,14 @@ const editorTheme = EditorView.theme({
     backgroundColor: "var(--muted)",
     padding: "0.05em 0.35em",
     borderRadius: "0.3em",
+  },
+  // Rendered KaTeX — see MathWidget/liveMathFormatting above.
+  ".cm-math": { cursor: "text" },
+  ".cm-math-inline": { display: "inline-block", verticalAlign: "middle" },
+  ".cm-math-display": {
+    display: "block",
+    margin: "0.5em 0",
+    textAlign: "center",
   },
   "&.cm-editor .cm-tooltip-autocomplete": {
     borderRadius: "0.5rem",
@@ -1225,13 +1395,14 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       // default Enter binding rather than after it.
       Prec.highest(keymap.of(markdownKeymap)),
       EditorView.lineWrapping,
-      autocompletion({ override: [noteLinkCompletionSource(targets)] }),
+      autocompletion({ override: [noteLinkCompletionSource(targets), latexCompletionSource] }),
       wikilinkPills(targets, onNavigate),
       markdownLinkPills(),
       noteImagePills(),
       noteImagePasteDrop(),
       listHangingIndent(),
       liveMarkdownFormatting(),
+      liveMathFormatting(),
       highlightField,
       editorTheme,
     ],
