@@ -19,12 +19,8 @@ import {
 } from "@/lib/models";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
-import { isValidPageBackgroundImage } from "@/lib/dataUrlImage";
-
-// Same reasoning/cap family as course customization's icon image (see
-// api/courses/[courseId]/route.ts) — the app icon plays the same "small
-// square badge" role, just at the app level instead of per-course.
-const MAX_APP_ICON_IMAGE_LENGTH = 1_500_000;
+import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
+import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
 
 const VALID_BACKENDS: AiBackend[] = [
   "api",
@@ -202,12 +198,7 @@ export async function POST(request: Request) {
     branding.appIcon = body.appIcon;
   }
   if ("appIconImage" in body) {
-    if (
-      body.appIconImage !== null &&
-      (typeof body.appIconImage !== "string" ||
-        !body.appIconImage.startsWith("data:image/") ||
-        body.appIconImage.length > MAX_APP_ICON_IMAGE_LENGTH)
-    ) {
+    if (body.appIconImage !== null && !isValidIconImage(body.appIconImage)) {
       return Response.json({ error: "Invalid appIconImage" }, { status: 400 });
     }
     branding.appIconImage = body.appIconImage;
@@ -247,7 +238,24 @@ export async function POST(request: Request) {
     branding.dashboardTransparentWidgets = body.dashboardTransparentWidgets;
   }
   if (Object.keys(branding).length > 0) {
+    // Captured before the write so a replaced/cleared appIconImage or
+    // dashboardBackgroundImage's old blob can be cleaned up after — see the
+    // cleanupReplacedImage calls below.
+    const existing =
+      "appIconImage" in branding || "dashboardBackgroundImage" in branding
+        ? await getAppSettings()
+        : null;
     await setAppBranding(branding);
+    if (existing) {
+      await Promise.all([
+        "appIconImage" in branding
+          ? cleanupReplacedImage(existing.appIconImage, branding.appIconImage)
+          : Promise.resolve(),
+        "dashboardBackgroundImage" in branding
+          ? cleanupReplacedImage(existing.dashboardBackgroundImage, branding.dashboardBackgroundImage)
+          : Promise.resolve(),
+      ]);
+    }
   }
 
   return Response.json(await getAppSettings());

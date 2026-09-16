@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { createCourse, listCourses } from "@/lib/models";
+import { createCourse, listCourseSummaries } from "@/lib/models";
 
 export async function GET() {
-  return Response.json(await listCourses());
+  return Response.json(await listCourseSummaries());
 }
 
 export async function POST(request: NextRequest) {

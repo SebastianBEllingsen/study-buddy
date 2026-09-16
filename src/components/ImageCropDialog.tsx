@@ -44,7 +44,7 @@ export function ImageCropDialog({
   // opaque background, which is fine and much smaller for a cover photo.
   outputFormat?: "jpeg" | "png";
   title: string;
-  onCropped: (dataUrl: string) => void;
+  onCropped: (blob: Blob) => void;
 }) {
   // A callback ref (not a plain ref read inside an effect keyed on `open`)
   // because Dialog mounts its content one render after `open` flips true —
@@ -180,9 +180,11 @@ export function ImageCropDialog({
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas not supported");
       ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
-      onCropped(
-        outputFormat === "png" ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85)
+      const blob = await new Promise<Blob | null>((resolve) =>
+        outputFormat === "png" ? canvas.toBlob(resolve, "image/png") : canvas.toBlob(resolve, "image/jpeg", 0.85)
       );
+      if (!blob) throw new Error("Canvas produced no image data");
+      onCropped(blob);
       onOpenChange(false);
     } catch {
       toast.error("Couldn't process that image");

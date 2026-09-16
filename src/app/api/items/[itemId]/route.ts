@@ -1,7 +1,7 @@
 import {
   getGeneratedItem,
-  listQuizAttemptsForItem,
-  listFlashcardReviewsForItem,
+  listRecentQuizAttemptsForItem,
+  getBestQuizScoreForItem,
   moveGeneratedItem,
   deleteGeneratedItem,
   getNewDocumentsForItem,
@@ -51,9 +51,11 @@ export async function GET(_request: Request, { params }: Params) {
       return Response.json({ error: "Item not found" }, { status: 404 });
     }
 
-    const [attempts, reviews, newDocuments, schedule] = await Promise.all([
-      item.mode === "quiz" ? listQuizAttemptsForItem(id) : Promise.resolve([]),
-      item.mode === "flashcards" ? listFlashcardReviewsForItem(id) : Promise.resolve([]),
+    // Reviews (flashcard_reviews rows) aren't rendered anywhere on the item
+    // detail page — dropped here rather than fetched and left unused.
+    const [attempts, bestScore, newDocuments, schedule] = await Promise.all([
+      item.mode === "quiz" ? listRecentQuizAttemptsForItem(id) : Promise.resolve([]),
+      item.mode === "quiz" ? getBestQuizScoreForItem(id) : Promise.resolve(null),
       getNewDocumentsForItem(item),
       item.mode === "flashcards" ? getFlashcardScheduleForItem(id) : Promise.resolve([]),
     ]);
@@ -61,7 +63,7 @@ export async function GET(_request: Request, { params }: Params) {
     return Response.json({
       item,
       attempts,
-      reviews,
+      bestScore,
       availableNewDocuments: newDocuments.map((d) => ({
         id: d.id,
         filename: d.filename,

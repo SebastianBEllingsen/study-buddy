@@ -30,7 +30,7 @@ export function ImageLibraryDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   kind: UploadedImageKind;
-  onSelect: (dataUrl: string) => void;
+  onSelect: (url: string) => void;
 }) {
   const [images, setImages] = useState<UploadedImage[] | null>(null);
 
@@ -65,8 +65,8 @@ export function ImageLibraryDialog({
     }
   }
 
-  function handleSelect(dataUrl: string) {
-    onSelect(dataUrl);
+  function handleSelect(url: string) {
+    onSelect(url);
     onOpenChange(false);
   }
 
@@ -105,18 +105,18 @@ export function ImageLibraryDialog({
                   key={img.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => handleSelect(img.dataUrl)}
+                  onClick={() => handleSelect(img.url)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      handleSelect(img.dataUrl);
+                      handleSelect(img.url);
                     }
                   }}
                   className={cn(
                     "group relative cursor-pointer overflow-hidden rounded-lg border bg-cover bg-center outline-none hover:ring-2 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary",
                     aspectClass
                   )}
-                  style={{ backgroundImage: `url(${img.dataUrl})` }}
+                  style={{ backgroundImage: `url(${img.url})` }}
                 >
                   <Button
                     type="button"

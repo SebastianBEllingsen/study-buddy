@@ -1,4 +1,5 @@
 import { deleteUploadedImage, getUploadedImage } from "@/lib/models";
+import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ id: string }> };
@@ -18,6 +19,11 @@ export async function DELETE(_request: Request, { params }: Params) {
   const { id: idParam } = await params;
   const id = parseId(idParam);
   if (id === null) return new Response(null, { status: 204 });
+  // Fetched before deleting so cleanupReplacedImage can check whether the
+  // underlying blob is still referenced elsewhere (a course, or the app's
+  // branding) once this library row is gone — see its own comment.
+  const existing = await getUploadedImage(id);
   await deleteUploadedImage(id);
+  if (existing) await cleanupReplacedImage(existing.url);
   return new Response(null, { status: 204 });
 }

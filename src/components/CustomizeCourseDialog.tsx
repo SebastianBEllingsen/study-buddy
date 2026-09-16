@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import useSWR from "swr";
 import { toast } from "sonner";
 import { Image as ImageIcon, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { uploadImage } from "@/lib/uploadImage";
 import { ICON_CHOICES, COLOR_CHOICES } from "@/lib/pickerChoices";
 import {
   ICON_ASPECT,
@@ -27,7 +29,7 @@ import {
   BACKGROUND_OUTPUT_WIDTH,
   BACKGROUND_OUTPUT_HEIGHT,
 } from "@/lib/imageCropPresets";
-import type { Course, UploadedImageKind } from "@/lib/models";
+import type { CourseSummary, UploadedImageKind } from "@/lib/models";
 
 export function CustomizeCourseDialog({
   course,
@@ -35,7 +37,7 @@ export function CustomizeCourseDialog({
   onOpenChange,
   onSaved,
 }: {
-  course: Course;
+  course: CourseSummary;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
@@ -44,7 +46,7 @@ export function CustomizeCourseDialog({
   const [color, setColor] = useState(course.color);
   const [coverImage, setCoverImage] = useState(course.cover_image);
   const [iconImage, setIconImage] = useState(course.icon_image);
-  const [backgroundImage, setBackgroundImage] = useState(course.page_background_image);
+  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [showCoverOnCard, setShowCoverOnCard] = useState(course.show_cover_on_card);
   const [showIconFrame, setShowIconFrame] = useState(course.show_icon_frame);
   const [saving, setSaving] = useState(false);
@@ -54,6 +56,15 @@ export function CustomizeCourseDialog({
   const coverInputRef = useRef<HTMLInputElement>(null);
   const iconInputRef = useRef<HTMLInputElement>(null);
   const backgroundInputRef = useRef<HTMLInputElement>(null);
+
+  // The dashboard's course list deliberately omits page_background_image
+  // (see listCourseSummaries) to avoid pulling every course's large backdrop
+  // image on every dashboard load, so this dialog fetches it on demand —
+  // only while it's actually open — instead of trusting a field that isn't
+  // on the `course` prop at all.
+  const { data: bgData } = useSWR<{ pageBackgroundImage: string | null }>(
+    open ? `/api/courses/${course.id}/page-background` : null
+  );
 
   // Re-seeds drafts from the course the moment a fresh course id opens the
   // dialog, so a previous open's edits (or a cancel) never leak into a
@@ -67,31 +78,45 @@ export function CustomizeCourseDialog({
     setColor(course.color);
     setCoverImage(course.cover_image);
     setIconImage(course.icon_image);
-    setBackgroundImage(course.page_background_image);
     setShowCoverOnCard(course.show_cover_on_card);
     setShowIconFrame(course.show_icon_frame);
     setSeededFor(course.id);
   }
 
-  function handleCropped(dataUrl: string) {
-    if (cropTarget === "icon") setIconImage(dataUrl);
-    else if (cropTarget === "cover") setCoverImage(dataUrl);
-    else if (cropTarget === "background") setBackgroundImage(dataUrl);
-    if (cropTarget) {
+  // backgroundImage is seeded separately, once its own on-demand fetch
+  // resolves for the currently open course — it can't be seeded above
+  // alongside the rest since it isn't available synchronously from the prop.
+  const [bgSeededFor, setBgSeededFor] = useState<number | null>(null);
+  if (open && bgData && bgSeededFor !== course.id) {
+    setBackgroundImage(bgData.pageBackgroundImage);
+    setBgSeededFor(course.id);
+  }
+  const bgReady = bgSeededFor === course.id;
+
+  async function handleCropped(blob: Blob) {
+    if (!cropTarget) return;
+    const target = cropTarget;
+    try {
+      const url = await uploadImage(blob, target);
+      if (target === "icon") setIconImage(url);
+      else if (target === "cover") setCoverImage(url);
+      else if (target === "background") setBackgroundImage(url);
       // Feeds the "Choose from previous uploads" gallery — fire-and-forget,
       // a failed write here shouldn't block using the image you just cropped.
       fetch("/api/uploaded-images", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: cropTarget, dataUrl }),
+        body: JSON.stringify({ kind: target, url }),
       }).catch(() => {});
+    } catch {
+      toast.error("Couldn't upload that image");
     }
   }
 
-  function handlePickFromLibrary(dataUrl: string) {
-    if (libraryTarget === "icon") setIconImage(dataUrl);
-    else if (libraryTarget === "cover") setCoverImage(dataUrl);
-    else if (libraryTarget === "background") setBackgroundImage(dataUrl);
+  function handlePickFromLibrary(url: string) {
+    if (libraryTarget === "icon") setIconImage(url);
+    else if (libraryTarget === "cover") setCoverImage(url);
+    else if (libraryTarget === "background") setBackgroundImage(url);
   }
 
   function handleRemoveCover() {
@@ -100,6 +125,10 @@ export function CustomizeCourseDialog({
   }
 
   async function handleSave() {
+    // backgroundImage stays null until bgReady, same as its "no backdrop
+    // set" value — saving before then would silently wipe a real one, so
+    // the Save button is disabled until the fetch resolves (see JSX below).
+    if (!bgReady) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/courses/${course.id}`, {
@@ -412,7 +441,7 @@ export function CustomizeCourseDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving || !bgReady}>
             {saving ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

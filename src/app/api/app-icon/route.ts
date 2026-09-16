@@ -23,6 +23,10 @@ export async function GET(request: Request) {
         headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=300" },
       });
     }
+    // A real URL (local /api/blobs/... or a Supabase Storage public URL,
+    // see src/lib/blobStorage) rather than an inline data URL — hand the
+    // browser straight to it instead of proxying the bytes ourselves.
+    return Response.redirect(settings.appIconImage, 307);
   }
 
   if (settings.appIcon) {

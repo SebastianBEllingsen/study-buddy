@@ -40,7 +40,7 @@ import {
 interface ItemDetail {
   item: GeneratedItem;
   attempts: QuizAttempt[];
-  reviews: unknown[];
+  bestScore: number | null;
   availableNewDocuments: { id: number; filename: string }[];
   dueCardIndices: number[];
 }
@@ -231,17 +231,16 @@ export default function ItemPage() {
     );
   }
 
-  const { item, attempts } = detail;
+  const { item, attempts, bestScore } = detail;
   const content = JSON.parse(item.content_json);
-  // attempts is already ORDER BY started_at DESC, so [0] is the most recent.
+  // attempts is only the most recent RECENT_QUIZ_ATTEMPTS_LIMIT (see
+  // listRecentQuizAttemptsForItem) — fine for "last score" (the most recent
+  // completed attempt is always in range) but bestScore comes from the
+  // server's full-history MAX aggregate instead, not this list.
   const completedAttempts = attempts.filter(
     (a): a is QuizAttempt & { completed_at: string; score: number } =>
       a.completed_at != null && a.score != null
   );
-  const bestScore =
-    completedAttempts.length > 0
-      ? Math.max(...completedAttempts.map((a) => a.score))
-      : null;
 
   return (
     <div className="space-y-6">

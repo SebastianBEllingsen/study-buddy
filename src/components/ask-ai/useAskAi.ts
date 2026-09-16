@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export type AskKind = "hint" | "explain";
 
@@ -11,8 +11,15 @@ export function useAskAi(endpoint: string) {
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Guards against a slower, earlier request's response landing after a
+  // later one and silently overwriting it — nothing else stops a user from
+  // firing a second ask (a new text selection, or Hint then Explain) while
+  // the first is still in flight. Same pattern as SearchDialog.tsx's
+  // requestIdRef.
+  const requestIdRef = useRef(0);
 
   async function post(body: Record<string, unknown>) {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     setAnswer(null);
@@ -23,15 +30,17 @@ export function useAskAi(endpoint: string) {
         body: JSON.stringify(body),
       });
       const resBody = await res.json();
+      if (requestId !== requestIdRef.current) return;
       if (!res.ok) {
         setError(resBody.error ?? "Something went wrong");
         return;
       }
       setAnswer(resBody.answer);
     } catch {
+      if (requestId !== requestIdRef.current) return;
       setError("Network error — check your connection and try again.");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }
 
@@ -48,6 +57,10 @@ export function useAskAi(endpoint: string) {
   }
 
   function dismiss() {
+    // Invalidates any still-in-flight request too — without this, a slow
+    // response could land after a manual dismiss and repopulate an answer
+    // the user already closed.
+    requestIdRef.current++;
     setAnswer(null);
     setError(null);
   }

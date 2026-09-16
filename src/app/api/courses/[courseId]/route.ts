@@ -1,14 +1,15 @@
 import {
   deleteCourse,
   getCourse,
-  listDocumentsForCourse,
+  listDocumentSummariesForCourse,
   listFoldersForCourse,
-  listGeneratedItemsForCourse,
+  listGeneratedItemSummariesForCourse,
   listNotesForCourse,
   renameCourse,
   updateCourseCustomization,
 } from "@/lib/models";
 import { isValidCoverImage, isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
+import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
@@ -23,8 +24,8 @@ export async function GET(_request: Request, { params }: Params) {
   }
   const [folders, documents, items, notes] = await Promise.all([
     listFoldersForCourse(id),
-    listDocumentsForCourse(id),
-    listGeneratedItemsForCourse(id),
+    listDocumentSummariesForCourse(id),
+    listGeneratedItemSummariesForCourse(id),
     listNotesForCourse(id),
   ]);
   return Response.json({ course, folders, documents, items, notes });
@@ -35,6 +36,11 @@ export async function PATCH(request: Request, { params }: Params) {
   const id = parseId(courseId);
   if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
   const body = await request.json().catch(() => ({}));
+  // Captured before the update so a replaced/cleared image's old blob can
+  // be cleaned up afterward (see the cleanupReplacedImage calls below) —
+  // undefined if the course doesn't exist, in which case there's nothing to
+  // clean up either.
+  const existing = await getCourse(id);
 
   if (typeof body?.name === "string") {
     const name = body.name.trim();
@@ -101,6 +107,23 @@ export async function PATCH(request: Request, { params }: Params) {
     await updateCourseCustomization(id, customization);
   }
 
+  // After the write, not before — cleanupReplacedImage's "is this URL still
+  // referenced anywhere" check needs this course's own row already holding
+  // its new value, or the old value would always look self-referenced.
+  if (existing) {
+    await Promise.all([
+      "cover_image" in customization
+        ? cleanupReplacedImage(existing.cover_image, customization.cover_image)
+        : Promise.resolve(),
+      "icon_image" in customization
+        ? cleanupReplacedImage(existing.icon_image, customization.icon_image)
+        : Promise.resolve(),
+      "page_background_image" in customization
+        ? cleanupReplacedImage(existing.page_background_image, customization.page_background_image)
+        : Promise.resolve(),
+    ]);
+  }
+
   return Response.json({ ok: true });
 }
 
@@ -108,6 +131,14 @@ export async function DELETE(_request: Request, { params }: Params) {
   const { courseId } = await params;
   const id = parseId(courseId);
   if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
+  const existing = await getCourse(id);
   await deleteCourse(id);
+  if (existing) {
+    await Promise.all([
+      cleanupReplacedImage(existing.cover_image),
+      cleanupReplacedImage(existing.icon_image),
+      cleanupReplacedImage(existing.page_background_image),
+    ]);
+  }
   return new Response(null, { status: 204 });
 }

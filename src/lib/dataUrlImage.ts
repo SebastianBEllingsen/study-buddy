@@ -31,22 +31,39 @@ export const MAX_PAGE_BACKGROUND_IMAGE_LENGTH = 4_000_000;
 // cover/icon caps for the same pixel count.
 export const MAX_NOTE_IMAGE_LENGTH = 4_000_000;
 
-export function isValidCoverImage(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_COVER_IMAGE_LENGTH;
-}
+// A stored image field is now either the original inline data URL (existing
+// rows, or the /api/blobs fallback when no blob store is configured — see
+// src/app/api/blobs/route.ts) or a real URL a blob store handed back
+// (/api/blobs/... locally, or the Storage bucket's own public URL on
+// Supabase). Real size/mimetype enforcement for uploads now happens against
+// the actual file in /api/blobs's POST handler — this length cap is just a
+// backstop against a URL-shaped request built some other way.
+const MAX_IMAGE_URL_LENGTH = 2000;
 
-export function isValidIconImage(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_ICON_IMAGE_LENGTH;
-}
-
-export function isValidPageBackgroundImage(value: unknown): value is string {
+function isImageUrl(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    value.startsWith("data:image/") &&
-    value.length <= MAX_PAGE_BACKGROUND_IMAGE_LENGTH
+    value.length <= MAX_IMAGE_URL_LENGTH &&
+    (value.startsWith("/api/blobs/") || value.startsWith("http://") || value.startsWith("https://"))
   );
 }
 
+function isDataUrlImage(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.startsWith("data:image/") && value.length <= maxLength;
+}
+
+export function isValidCoverImage(value: unknown): value is string {
+  return isDataUrlImage(value, MAX_COVER_IMAGE_LENGTH) || isImageUrl(value);
+}
+
+export function isValidIconImage(value: unknown): value is string {
+  return isDataUrlImage(value, MAX_ICON_IMAGE_LENGTH) || isImageUrl(value);
+}
+
+export function isValidPageBackgroundImage(value: unknown): value is string {
+  return isDataUrlImage(value, MAX_PAGE_BACKGROUND_IMAGE_LENGTH) || isImageUrl(value);
+}
+
 export function isValidNoteImage(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("data:image/") && value.length <= MAX_NOTE_IMAGE_LENGTH;
+  return isDataUrlImage(value, MAX_NOTE_IMAGE_LENGTH) || isImageUrl(value);
 }

@@ -35,7 +35,7 @@ export async function resizeImageForNote(
   maxWidth = 1400,
   maxHeight = 1400,
   quality = 0.85
-): Promise<string> {
+): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
   const width = Math.round(bitmap.width * scale);
@@ -49,5 +49,9 @@ export async function resizeImageForNote(
   ctx.drawImage(bitmap, 0, 0, width, height);
 
   const preserveAlpha = ["image/png", "image/gif", "image/webp"].includes(file.type);
-  return preserveAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", quality);
+  const blob = await new Promise<Blob | null>((resolve) =>
+    preserveAlpha ? canvas.toBlob(resolve, "image/png") : canvas.toBlob(resolve, "image/jpeg", quality)
+  );
+  if (!blob) throw new Error("Canvas produced no image data");
+  return blob;
 }

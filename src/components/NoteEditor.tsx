@@ -72,6 +72,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { LinkTargets } from "@/lib/models";
 import { buildNoteLinkSyntax, parseNoteLinks, type NoteLinkMatch, type NoteLinkType } from "@/lib/noteLinks";
 import { resizeImageForNote } from "@/lib/resizeImage";
+import { uploadImage } from "@/lib/uploadImage";
 
 const EMPTY_TARGETS: LinkTargets = { notes: [], documents: [], items: [] };
 
@@ -305,11 +306,11 @@ function fetchNoteImage(id: number): Promise<string> {
   if (inFlight) return inFlight;
   const promise = fetch(`/api/uploaded-images/${id}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((body: { image?: { dataUrl: string } } | null) => {
-      const dataUrl = body?.image?.dataUrl ?? "";
-      if (dataUrl) noteImageCache.set(id, dataUrl);
+    .then((body: { image?: { url: string } } | null) => {
+      const url = body?.image?.url ?? "";
+      if (url) noteImageCache.set(id, url);
       noteImageFetches.delete(id);
-      return dataUrl;
+      return url;
     });
   noteImageFetches.set(id, promise);
   return promise;
@@ -465,15 +466,16 @@ async function insertNoteImage(view: EditorView, file: File, insertPos: number):
   }
 
   try {
-    const dataUrl = await resizeImageForNote(file);
+    const blob = await resizeImageForNote(file);
+    const url = await uploadImage(blob, "note");
     const res = await fetch("/api/uploaded-images", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "note", dataUrl }),
+      body: JSON.stringify({ kind: "note", url }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body?.error ?? "Upload failed");
-    noteImageCache.set(body.image.id, dataUrl);
+    noteImageCache.set(body.image.id, url);
     replacePlaceholder(`![](${NOTE_IMAGE_SCHEME}${body.image.id})`);
   } catch {
     replacePlaceholder("");

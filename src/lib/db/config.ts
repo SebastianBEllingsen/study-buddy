@@ -3,7 +3,18 @@ import path from "node:path";
 
 export type StorageConfig =
   | { mode: "local" }
-  | { mode: "supabase"; connectionString: string };
+  | {
+      mode: "supabase";
+      connectionString: string;
+      // Optional: where uploaded images go when this backend is active (see
+      // src/lib/blobStorage). Left unset, blob uploads fall back to inlining
+      // a base64 data URL straight into the DB column — today's behavior —
+      // so an existing config saved before this feature existed keeps
+      // working unchanged.
+      storageUrl?: string;
+      storageServiceKey?: string;
+      storageBucket?: string;
+    };
 
 const configPath = path.join(process.cwd(), "data", "storage-config.json");
 
@@ -14,7 +25,13 @@ const configPath = path.join(process.cwd(), "data", "storage-config.json");
 // app needs to know which database to open before it can query that row.
 export function resolveStorageConfig(): StorageConfig {
   if (process.env.DATABASE_URL) {
-    return { mode: "supabase", connectionString: process.env.DATABASE_URL };
+    return {
+      mode: "supabase",
+      connectionString: process.env.DATABASE_URL,
+      storageUrl: process.env.SUPABASE_STORAGE_URL,
+      storageServiceKey: process.env.SUPABASE_STORAGE_SERVICE_KEY,
+      storageBucket: process.env.SUPABASE_STORAGE_BUCKET,
+    };
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8")) as StorageConfig;

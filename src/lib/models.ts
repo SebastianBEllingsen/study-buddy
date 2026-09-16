@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, max, or, sql } from "drizzle-orm";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import Fuse from "fuse.js";
 import {
   db,
@@ -753,7 +754,12 @@ export type UploadedImageKind = "icon" | "cover" | "background" | "note";
 export interface UploadedImage {
   id: number;
   kind: UploadedImageKind;
-  dataUrl: string;
+  // Either a real blob-storage URL or (no blob store configured, see
+  // src/lib/blobStorage) a data: URL — the underlying `data_url` DB column
+  // name predates that and is left as-is (purely internal, an app-facing
+  // rename isn't worth its own schema migration), but everywhere this
+  // value is read from or written to JS, it's called `url` now.
+  url: string;
   createdAt: string;
 }
 
@@ -764,13 +770,13 @@ export async function listUploadedImages(kind: UploadedImageKind, limit = 40): P
     .where(eq(uploaded_images.kind, kind))
     .orderBy(desc(uploaded_images.created_at), desc(uploaded_images.id))
     .limit(limit);
-  return rows.map((r) => ({ id: r.id, kind: r.kind as UploadedImageKind, dataUrl: r.data_url, createdAt: r.created_at }));
+  return rows.map((r) => ({ id: r.id, kind: r.kind as UploadedImageKind, url: r.data_url, createdAt: r.created_at }));
 }
 
-export async function recordUploadedImage(kind: UploadedImageKind, dataUrl: string): Promise<UploadedImage> {
+export async function recordUploadedImage(kind: UploadedImageKind, url: string): Promise<UploadedImage> {
   const created_at = nowUtc();
-  const [row] = await db.insert(uploaded_images).values({ kind, data_url: dataUrl, created_at }).returning();
-  return { id: row.id, kind, dataUrl, createdAt: created_at };
+  const [row] = await db.insert(uploaded_images).values({ kind, data_url: url, created_at }).returning();
+  return { id: row.id, kind, url, createdAt: created_at };
 }
 
 export async function deleteUploadedImage(id: number): Promise<void> {
@@ -779,13 +785,53 @@ export async function deleteUploadedImage(id: number): Promise<void> {
 
 // Looks up one image by id regardless of kind — used to resolve a
 // studybuddy-image:<id> reference embedded in a note's markdown (see
-// NoteEditor.tsx) back into a real data URL for rendering, since the note's
-// own source text only ever carries the short id, not the (often huge)
-// data URL itself.
+// NoteEditor.tsx) back into a real URL for rendering, since the note's own
+// source text only ever carries the short id, not the (often huge) data URL
+// or the blob-storage URL itself.
 export async function getUploadedImage(id: number): Promise<UploadedImage | undefined> {
   const [row] = await db.select().from(uploaded_images).where(eq(uploaded_images.id, id)).limit(1);
   if (!row) return undefined;
-  return { id: row.id, kind: row.kind as UploadedImageKind, dataUrl: row.data_url, createdAt: row.created_at };
+  return { id: row.id, kind: row.kind as UploadedImageKind, url: row.data_url, createdAt: row.created_at };
+}
+
+// True if `url` is still the current value of any course's cover/icon/
+// background image, the app's branding icon or dashboard backdrop, or any
+// uploaded_images library row — checked before actually deleting a blob
+// (see src/lib/blobStorage/cleanup.ts) so replacing one field's image can
+// never delete a blob that's still in use somewhere else. The same URL
+// legitimately ends up in more than one place: every crop-and-save in
+// CustomizeCourseDialog/SettingsDialog also records a library entry
+// pointing at that same URL, and picking an image from the library can
+// point more than one course (or the app's own branding) at it.
+export async function isImageUrlReferenced(url: string): Promise<boolean> {
+  const [courseRows, uploadedRows, settings] = await Promise.all([
+    db
+      .select({ id: courses.id })
+      .from(courses)
+      .where(
+        or(eq(courses.cover_image, url), eq(courses.icon_image, url), eq(courses.page_background_image, url))
+      )
+      .limit(1),
+    db.select({ id: uploaded_images.id }).from(uploaded_images).where(eq(uploaded_images.data_url, url)).limit(1),
+    getAppSettings(),
+  ]);
+  if (courseRows.length > 0 || uploadedRows.length > 0) return true;
+  return settings.appIconImage === url || settings.dashboardBackgroundImage === url;
+}
+
+// Migration-only (see /api/storage-settings/migrate-images): every
+// uploaded_images row across every kind, unlike listUploadedImages which is
+// always scoped to one kind for the library picker.
+export async function listAllUploadedImages(): Promise<UploadedImage[]> {
+  const rows = await db.select().from(uploaded_images);
+  return rows.map((r) => ({ id: r.id, kind: r.kind as UploadedImageKind, url: r.data_url, createdAt: r.created_at }));
+}
+
+// Migration-only — rewrites an existing row's url in place (e.g. a data:
+// URL replaced by the blob-storage URL it was just uploaded to), unlike
+// recordUploadedImage which always inserts a new row.
+export async function updateUploadedImageUrl(id: number, url: string): Promise<void> {
+  await db.update(uploaded_images).set({ data_url: url }).where(eq(uploaded_images.id, id));
 }
 
 // --- The Vault: personal Obsidian-style notes ---
@@ -892,15 +938,24 @@ export async function moveNote(id: number, folderId: number): Promise<void> {
 }
 
 // Same pattern as reorderDocuments — scoped to one folder at a time.
+// A "CASE id WHEN … THEN … END" SQL expression mapping each ordered id to
+// its new position — lets every reorder* function below issue a single
+// batched UPDATE instead of one UPDATE per item being reordered. Standard
+// SQL, so it works unchanged against both the SQLite and Postgres backends
+// (see db/index.ts's note on the shared table typing this relies on).
+function positionCases(idColumn: AnySQLiteColumn, orderedIds: number[]) {
+  return sql.join(
+    [sql`CASE ${idColumn}`, ...orderedIds.map((id, index) => sql`WHEN ${id} THEN ${index}`), sql`END`],
+    sql` `
+  );
+}
+
 export async function reorderNotes(folderId: number, orderedIds: number[]): Promise<void> {
-  await runTransaction(async (tx) => {
-    for (const [index, id] of orderedIds.entries()) {
-      await tx
-        .update(notes)
-        .set({ position: index })
-        .where(and(eq(notes.id, id), eq(notes.folder_id, folderId)));
-    }
-  });
+  if (orderedIds.length === 0) return;
+  await db
+    .update(notes)
+    .set({ position: positionCases(notes.id, orderedIds) })
+    .where(and(eq(notes.folder_id, folderId), inArray(notes.id, orderedIds)));
 }
 
 export async function deleteNote(id: number): Promise<void> {
@@ -1145,6 +1200,49 @@ export async function getCourse(id: number): Promise<Course | undefined> {
   return rows[0];
 }
 
+// The one field listCourseSummaries leaves out (see its own comment) —
+// fetched narrowly, only while CustomizeCourseDialog is actually open,
+// rather than through getCourse's full row (which would also mean paying
+// for cover_image/icon_image a second time on top of what the dashboard
+// list already sent) or the course page's own bundle (which would mean
+// pulling its folders/documents/items/notes just to open an image picker).
+export async function getCoursePageBackground(id: number): Promise<string | null | undefined> {
+  const rows = await db
+    .select({ page_background_image: courses.page_background_image })
+    .from(courses)
+    .where(eq(courses.id, id))
+    .limit(1);
+  return rows[0]?.page_background_image;
+}
+
+export type CourseSummary = Omit<Course, "page_background_image">;
+
+// For the home dashboard's course grid — page_background_image (the course
+// page's own full-bleed backdrop, capped at 4MB) is never rendered on a
+// dashboard card, only on that course's own page (see getCourse, still the
+// full version). cover_image/icon_image stay: the dashboard card does render
+// those directly, so unlike page_background_image they can't be dropped
+// here without an actual behavior change — cutting the egress they cost on
+// every dashboard load needs moving image storage off Postgres entirely
+// (e.g. Supabase Storage, with real HTTP caching), not a narrower SELECT.
+export async function listCourseSummaries(): Promise<CourseSummary[]> {
+  return db
+    .select({
+      id: courses.id,
+      name: courses.name,
+      position: courses.position,
+      icon: courses.icon,
+      color: courses.color,
+      cover_image: courses.cover_image,
+      icon_image: courses.icon_image,
+      show_cover_on_card: courses.show_cover_on_card,
+      show_icon_frame: courses.show_icon_frame,
+      created_at: courses.created_at,
+    })
+    .from(courses)
+    .orderBy(asc(courses.position), desc(courses.created_at));
+}
+
 export async function listCourses(): Promise<Course[]> {
   return db.select().from(courses).orderBy(asc(courses.position), desc(courses.created_at));
 }
@@ -1173,11 +1271,11 @@ export async function updateCourseCustomization(
 // Applies a new drag-and-drop order in one transaction, same pattern as
 // reorderFolders below.
 export async function reorderCourses(orderedIds: number[]): Promise<void> {
-  await runTransaction(async (tx) => {
-    for (const [index, id] of orderedIds.entries()) {
-      await tx.update(courses).set({ position: index }).where(eq(courses.id, id));
-    }
-  });
+  if (orderedIds.length === 0) return;
+  await db
+    .update(courses)
+    .set({ position: positionCases(courses.id, orderedIds) })
+    .where(inArray(courses.id, orderedIds));
 }
 
 export async function deleteCourse(id: number): Promise<void> {
@@ -1309,14 +1407,11 @@ export async function nestFolder(id: number, parentFolderId: number | null): Pro
 // present in orderedIds (there shouldn't be one, but defensively) keeps its
 // existing position rather than erroring.
 export async function reorderFolders(courseId: number, orderedIds: number[]): Promise<void> {
-  await runTransaction(async (tx) => {
-    for (const [index, id] of orderedIds.entries()) {
-      await tx
-        .update(folders)
-        .set({ position: index })
-        .where(and(eq(folders.id, id), eq(folders.course_id, courseId)));
-    }
-  });
+  if (orderedIds.length === 0) return;
+  await db
+    .update(folders)
+    .set({ position: positionCases(folders.id, orderedIds) })
+    .where(and(eq(folders.course_id, courseId), inArray(folders.id, orderedIds)));
 }
 
 export async function listFoldersForCourse(courseId: number): Promise<Folder[]> {
@@ -1447,25 +1542,44 @@ export async function getDocumentFile(
   return rows[0];
 }
 
-// Explicitly excludes file_base64 — this feeds the course page's document
-// list, sent on every course-page load, and a several-MB base64 blob per
-// document in that response would be a serious payload regression.
+// Explicitly excludes file_base64 — this feeds both course-page document
+// queries below, and a several-MB base64 blob per document in that response
+// would be a serious payload (and, on the Supabase backend, database
+// egress) regression.
+const documentListColumns = {
+  id: documents.id,
+  course_id: documents.course_id,
+  folder_id: documents.folder_id,
+  position: documents.position,
+  filename: documents.filename,
+  file_path: documents.file_path,
+  page_count: documents.page_count,
+  char_count: documents.char_count,
+  status: documents.status,
+  error_message: documents.error_message,
+  created_at: documents.created_at,
+};
+
+export type DocumentSummaryRow = Omit<DocumentRow, "extracted_text">;
+
+// For the course page's document list — every row's full extracted_text
+// (which can run tens of KB+ per document, sometimes far more) is not
+// needed to render filename/status/page-count rows, only once a specific
+// document is actually opened (see api/documents/[documentId]/route.ts,
+// already fetched narrowly on demand by the document viewer for exactly
+// this reason). listDocumentsForCourse below stays the full version, still
+// used where the actual text is needed (generation context, data export).
+export async function listDocumentSummariesForCourse(courseId: number): Promise<DocumentSummaryRow[]> {
+  return db
+    .select(documentListColumns)
+    .from(documents)
+    .where(eq(documents.course_id, courseId))
+    .orderBy(asc(documents.position), asc(documents.created_at)) as Promise<DocumentSummaryRow[]>;
+}
+
 export async function listDocumentsForCourse(courseId: number): Promise<DocumentRow[]> {
   return db
-    .select({
-      id: documents.id,
-      course_id: documents.course_id,
-      folder_id: documents.folder_id,
-      position: documents.position,
-      filename: documents.filename,
-      file_path: documents.file_path,
-      extracted_text: documents.extracted_text,
-      page_count: documents.page_count,
-      char_count: documents.char_count,
-      status: documents.status,
-      error_message: documents.error_message,
-      created_at: documents.created_at,
-    })
+    .select({ ...documentListColumns, extracted_text: documents.extracted_text })
     .from(documents)
     .where(eq(documents.course_id, courseId))
     .orderBy(asc(documents.position), asc(documents.created_at)) as Promise<DocumentRow[]>;
@@ -1526,14 +1640,11 @@ export async function renameDocument(id: number, filename: string): Promise<void
 // per-folder, see listDocumentsForCourse), so `folderId` guards against
 // reordering documents that aren't actually there.
 export async function reorderDocuments(folderId: number, orderedIds: number[]): Promise<void> {
-  await runTransaction(async (tx) => {
-    for (const [index, id] of orderedIds.entries()) {
-      await tx
-        .update(documents)
-        .set({ position: index })
-        .where(and(eq(documents.id, id), eq(documents.folder_id, folderId)));
-    }
-  });
+  if (orderedIds.length === 0) return;
+  await db
+    .update(documents)
+    .set({ position: positionCases(documents.id, orderedIds) })
+    .where(and(eq(documents.folder_id, folderId), inArray(documents.id, orderedIds)));
 }
 
 // --- Generated items ---
@@ -1669,14 +1780,11 @@ export async function moveGeneratedItem(id: number, folderId: number): Promise<v
 // Applies a new drag-and-drop order in one transaction, same pattern as
 // reorderDocuments/reorderFolders.
 export async function reorderGeneratedItems(folderId: number, orderedIds: number[]): Promise<void> {
-  await runTransaction(async (tx) => {
-    for (const [index, id] of orderedIds.entries()) {
-      await tx
-        .update(generated_items)
-        .set({ position: index })
-        .where(and(eq(generated_items.id, id), eq(generated_items.folder_id, folderId)));
-    }
-  });
+  if (orderedIds.length === 0) return;
+  await db
+    .update(generated_items)
+    .set({ position: positionCases(generated_items.id, orderedIds) })
+    .where(and(eq(generated_items.folder_id, folderId), inArray(generated_items.id, orderedIds)));
 }
 
 // quiz_attempts/flashcard_reviews reference generated_items ON DELETE CASCADE,
@@ -1688,6 +1796,39 @@ export async function deleteGeneratedItem(id: number): Promise<void> {
 export async function getGeneratedItem(id: number): Promise<GeneratedItem | undefined> {
   const rows = await db.select().from(generated_items).where(eq(generated_items.id, id)).limit(1);
   return rows[0] as GeneratedItem | undefined;
+}
+
+export type GeneratedItemSummary = Omit<GeneratedItem, "content_json">;
+
+// For the course page's item list — content_json (the full generated
+// quiz/notes/flashcard payload) isn't needed to render a title/mode/date
+// row, only once a specific item is actually opened (getGeneratedItem
+// above, already fetched narrowly on demand by the item page). Sibling of
+// listDocumentSummariesForCourse for the same reason — see its comment.
+export async function listGeneratedItemSummariesForCourse(
+  courseId: number
+): Promise<GeneratedItemSummary[]> {
+  return db
+    .select({
+      id: generated_items.id,
+      course_id: generated_items.course_id,
+      folder_id: generated_items.folder_id,
+      position: generated_items.position,
+      mode: generated_items.mode,
+      title: generated_items.title,
+      source_document_ids: generated_items.source_document_ids,
+      source_folder_id: generated_items.source_folder_id,
+      source_handpicked: generated_items.source_handpicked,
+      model_provider: generated_items.model_provider,
+      model_name: generated_items.model_name,
+      created_at: generated_items.created_at,
+      updated_at: generated_items.updated_at,
+    })
+    .from(generated_items)
+    .where(eq(generated_items.course_id, courseId))
+    .orderBy(asc(generated_items.position), desc(generated_items.created_at)) as Promise<
+    GeneratedItemSummary[]
+  >;
 }
 
 export async function listGeneratedItemsForCourse(courseId: number): Promise<GeneratedItem[]> {
@@ -1734,6 +1875,31 @@ export async function listQuizAttemptsForItem(generatedItemId: number): Promise<
     .from(quiz_attempts)
     .where(eq(quiz_attempts.generated_item_id, generatedItemId))
     .orderBy(desc(quiz_attempts.started_at));
+}
+
+const RECENT_QUIZ_ATTEMPTS_LIMIT = 20;
+
+// Capped variant for the item detail page's "Previous attempts" list.
+// listQuizAttemptsForItem (unbounded) is kept as-is for the data export
+// route, which needs full fidelity. The item detail page's "best score"
+// is deliberately NOT derived from this capped list — see
+// getBestQuizScoreForItem — since the true best could be older than the
+// most recent RECENT_QUIZ_ATTEMPTS_LIMIT attempts.
+export async function listRecentQuizAttemptsForItem(generatedItemId: number): Promise<QuizAttempt[]> {
+  return db
+    .select()
+    .from(quiz_attempts)
+    .where(eq(quiz_attempts.generated_item_id, generatedItemId))
+    .orderBy(desc(quiz_attempts.started_at))
+    .limit(RECENT_QUIZ_ATTEMPTS_LIMIT);
+}
+
+export async function getBestQuizScoreForItem(generatedItemId: number): Promise<number | null> {
+  const rows = await db
+    .select({ best: max(quiz_attempts.score) })
+    .from(quiz_attempts)
+    .where(eq(quiz_attempts.generated_item_id, generatedItemId));
+  return rows[0]?.best ?? null;
 }
 
 // --- Flashcard reviews ---
@@ -1962,7 +2128,32 @@ function noteCandidates(markdown: string, key: string): SearchCandidate[] {
     .map((line) => ({ key, text: line }));
 }
 
-export async function searchAll(query: string, courseId?: number): Promise<SearchResult[]> {
+interface SearchCorpus {
+  candidates: SearchCandidate[];
+  metaByKey: Map<string, ItemSearchResult | DocumentSearchResult | NoteSearchResult>;
+}
+
+// The search box is debounced (see SearchDialog.tsx) but still fires once
+// per pause in typing, and each call previously re-pulled every item's
+// content_json plus every document's and note's full text from the DB —
+// on a slow typist, a single query could trigger several full-library
+// re-fetches in a row. Caching the assembled corpus for a few seconds per
+// (course scope) means consecutive keystrokes in one search session reuse
+// it instead of re-fetching. A short TTL (rather than write-path
+// invalidation, which would mean touching every create/update/delete for
+// items/documents/notes) is an acceptable tradeoff for a personal,
+// single-user instance: a just-created item can take up to the TTL to
+// become searchable.
+const SEARCH_CORPUS_TTL_MS = 15_000;
+const searchCorpusCache = new Map<string, { corpus: SearchCorpus; expiresAt: number }>();
+
+async function loadSearchCorpus(courseId?: number): Promise<SearchCorpus> {
+  const cacheKey = courseId ?? "all";
+  const cached = searchCorpusCache.get(String(cacheKey));
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.corpus;
+  }
+
   const itemsBase = db
     .select()
     .from(generated_items)
@@ -2041,6 +2232,14 @@ export async function searchAll(query: string, courseId?: number): Promise<Searc
     });
   }
 
+  const corpus: SearchCorpus = { candidates, metaByKey };
+  searchCorpusCache.set(String(cacheKey), { corpus, expiresAt: Date.now() + SEARCH_CORPUS_TTL_MS });
+  return corpus;
+}
+
+export async function searchAll(query: string, courseId?: number): Promise<SearchResult[]> {
+  const { candidates, metaByKey } = await loadSearchCorpus(courseId);
+
   if (candidates.length === 0) return [];
 
   const fuse = new Fuse(candidates, {
@@ -2074,51 +2273,52 @@ export async function searchAll(query: string, courseId?: number): Promise<Searc
 
 // --- Study stats (home page dashboard) ---
 
-// Every distinct UTC day ("YYYY-MM-DD") with at least one completed quiz
-// attempt or flashcard review — the input to streak.ts's computeStreak.
-// Extracted in JS (not a DB date() function) so the same code works
-// whichever backend is active — every timestamp is already a plain
-// "YYYY-MM-DD HH:MM:SS" string (see lib/time.ts).
-export async function listStudyDates(): Promise<string[]> {
-  const [quizRows, reviewRows] = await Promise.all([
-    db
-      .select({ completed_at: quiz_attempts.completed_at })
-      .from(quiz_attempts)
-      .where(isNotNull(quiz_attempts.completed_at)),
-    db.select({ reviewed_at: flashcard_reviews.reviewed_at }).from(flashcard_reviews),
-  ]);
-  const dates = new Set<string>();
-  for (const row of quizRows) {
-    if (row.completed_at) dates.add(row.completed_at.slice(0, 10));
-  }
-  for (const row of reviewRows) {
-    dates.add(row.reviewed_at.slice(0, 10));
-  }
-  return [...dates];
+// One year back, in the same "YYYY-MM-DD HH:MM:SS" format as every other
+// timestamp column (see lib/time.ts's nowUtc) — both consumers below
+// (streak.ts's computeStreak and StudyHeatmap's 14-week grid) only ever
+// look at the last few months, so a full unbounded history scan of
+// quiz_attempts/flashcard_reviews (which only ever grows) is wasted egress.
+function oneYearAgoUtc(): string {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - 1);
+  return d.toISOString().slice(0, 19).replace("T", " ");
 }
 
-// Same underlying rows as listStudyDates, but keyed by date with a count
-// instead of just presence — feeds the home page's activity heatmap, where
-// a day with one review and a day with twenty should look different.
-export async function listStudyActivityCounts(): Promise<Record<string, number>> {
+export interface StudyActivity {
+  dates: string[];
+  counts: Record<string, number>;
+}
+
+// Combines what were previously two separate functions (listStudyDates,
+// listStudyActivityCounts) issuing the exact same two queries — one pass
+// over quiz_attempts/flashcard_reviews now feeds both the streak counter's
+// date set and the activity heatmap's per-day counts.
+export async function listStudyActivity(): Promise<StudyActivity> {
+  const cutoff = oneYearAgoUtc();
   const [quizRows, reviewRows] = await Promise.all([
     db
       .select({ completed_at: quiz_attempts.completed_at })
       .from(quiz_attempts)
-      .where(isNotNull(quiz_attempts.completed_at)),
-    db.select({ reviewed_at: flashcard_reviews.reviewed_at }).from(flashcard_reviews),
+      .where(and(isNotNull(quiz_attempts.completed_at), gte(quiz_attempts.completed_at, cutoff))),
+    db
+      .select({ reviewed_at: flashcard_reviews.reviewed_at })
+      .from(flashcard_reviews)
+      .where(gte(flashcard_reviews.reviewed_at, cutoff)),
   ]);
+  const dates = new Set<string>();
   const counts: Record<string, number> = {};
   for (const row of quizRows) {
     if (!row.completed_at) continue;
     const day = row.completed_at.slice(0, 10);
+    dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
   }
   for (const row of reviewRows) {
     const day = row.reviewed_at.slice(0, 10);
+    dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
   }
-  return counts;
+  return { dates: [...dates], counts };
 }
 
 export interface DueFlashcardItem {
@@ -2135,17 +2335,22 @@ export interface DueFlashcardItem {
 // content_json, not a column, so per-item due-ness has to go through
 // computeDueCardIndices the same way the single-item route does.
 export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
-  const [rows, allSchedule] = await Promise.all([
+  const [rows, dueSchedule] = await Promise.all([
     db
       .select()
       .from(generated_items)
       .innerJoin(courses, eq(courses.id, generated_items.course_id))
       .where(eq(generated_items.mode, "flashcards")),
-    db.select().from(flashcard_schedule),
+    // computeDueCardIndices only ever treats a row as significant when its
+    // due_at has passed (a missing row is already "due" by default, and a
+    // future due_at row is skipped) — so filtering to due_at <= now() here
+    // is equivalent to pulling the whole table and filtering in JS, without
+    // the egress cost of every not-yet-due row across the whole library.
+    db.select().from(flashcard_schedule).where(lte(flashcard_schedule.due_at, nowUtc())),
   ]);
 
   const scheduleByItem = new Map<number, FlashcardScheduleRow[]>();
-  for (const row of allSchedule) {
+  for (const row of dueSchedule) {
     const list = scheduleByItem.get(row.generated_item_id) ?? [];
     list.push(row);
     scheduleByItem.set(row.generated_item_id, list);

@@ -30,10 +30,10 @@ import {
 import { toast } from "sonner";
 import type {
   Course,
-  DocumentRow,
+  DocumentSummaryRow,
   DueFlashcardItem,
   Folder,
-  GeneratedItem,
+  GeneratedItemSummary,
   GenerationMode,
   GenerationNotification,
   Note,
@@ -96,15 +96,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import DocumentViewer from "@/components/DocumentViewer";
+import DocumentViewer, { type ViewedDocument } from "@/components/DocumentViewer";
 import { resizeImageToDataUrl } from "@/lib/resizeImage";
 import { UPLOAD_ACCEPT, extensionOf, isImageExtension } from "@/lib/documentFormats";
 
 interface CourseDetail {
   course: Course;
   folders: Folder[];
-  documents: DocumentRow[];
-  items: GeneratedItem[];
+  documents: DocumentSummaryRow[];
+  items: GeneratedItemSummary[];
   notes: Note[];
 }
 
@@ -266,7 +266,7 @@ function DocumentPickerDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  documents: DocumentRow[];
+  documents: DocumentSummaryRow[];
   folders: Folder[];
   selected: Set<number>;
   onApply: (ids: Set<number>) => void;
@@ -292,7 +292,7 @@ function DocumentPickerDialog({
     });
   }
 
-  const byFolder = new Map<number, DocumentRow[]>();
+  const byFolder = new Map<number, DocumentSummaryRow[]>();
   for (const doc of documents) {
     const list = byFolder.get(doc.folder_id) ?? [];
     list.push(doc);
@@ -369,14 +369,14 @@ function DocumentList({
   onView,
   onReorder,
 }: {
-  documents: DocumentRow[];
+  documents: DocumentSummaryRow[];
   folderId: number;
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (documentId: number) => void;
   onDelete: (documentId: number) => void;
   onRename: (documentId: number, filename: string) => void;
-  onView: (doc: DocumentRow) => void;
+  onView: (doc: DocumentSummaryRow) => void;
   onReorder: (folderId: number, orderedIds: number[]) => void;
 }) {
   // A single renamingId (not one useState per row) — only one document's
@@ -386,12 +386,12 @@ function DocumentList({
   const [nameDraft, setNameDraft] = useState("");
   const documentBadges = useDocumentBadgeSettings();
 
-  function startRename(doc: DocumentRow) {
+  function startRename(doc: DocumentSummaryRow) {
     setRenamingId(doc.id);
     setNameDraft(doc.filename);
   }
 
-  function commitRename(doc: DocumentRow) {
+  function commitRename(doc: DocumentSummaryRow) {
     setRenamingId(null);
     const trimmed = nameDraft.trim();
     if (!trimmed || trimmed === doc.filename) return;
@@ -533,7 +533,7 @@ function GeneratedItemList({
   onDelete,
   onReorder,
 }: {
-  items: GeneratedItem[];
+  items: GeneratedItemSummary[];
   folderId: number;
   dueByItemId: Map<number, number>;
   notifiedItemIds: Set<number>;
@@ -766,8 +766,8 @@ function FolderCard({
 }: {
   folder: Folder;
   folders: Folder[];
-  docsByFolder: (folderId: number) => DocumentRow[];
-  itemsByFolder: (folderId: number) => GeneratedItem[];
+  docsByFolder: (folderId: number) => DocumentSummaryRow[];
+  itemsByFolder: (folderId: number) => GeneratedItemSummary[];
   notesByFolder: (folderId: number) => Note[];
   dueByItemId: Map<number, number>;
   notifiedItemIds: Set<number>;
@@ -780,7 +780,7 @@ function FolderCard({
   onDeleteDocument: (documentId: number) => void;
   onMoveDocument: (documentId: number, folderId: number) => void;
   onRenameDocument: (documentId: number, filename: string) => void;
-  onViewDocument: (doc: DocumentRow) => void;
+  onViewDocument: (doc: DocumentSummaryRow) => void;
   onMoveItem: (itemId: number, folderId: number) => void;
   onDeleteItem: (itemId: number) => void;
   onMoveNote: (noteId: number, folderId: number) => void;
@@ -1398,6 +1398,17 @@ export default function CoursePage() {
     const idParam = searchParams.get("document");
     return idParam ? Number(idParam) : null;
   })();
+
+  // Fetched fresh rather than read off detail.documents (the course-wide
+  // list, which deliberately leaves extracted_text out — see
+  // listDocumentSummariesForCourse — so opening one document doesn't cost
+  // pulling every document's full extracted text on every course-page
+  // load). Same endpoint the detached document view
+  // (app/documents/[documentId]/view) already uses for exactly this. Must
+  // stay above the !detail early returns below (Rules of Hooks).
+  const { data: viewingDocumentData } = useSWR<{ document: ViewedDocument }>(
+    viewingDocumentId !== null ? `/api/documents/${viewingDocumentId}` : null
+  );
 
   // Feeds the "Recent activity" dashboard widget — fire-and-forget, a failed
   // write here shouldn't interrupt viewing the document itself.
@@ -2030,16 +2041,7 @@ export default function CoursePage() {
   // destination dropdown offers DEFAULT_FOLDER_SENTINEL in its place.
   const hasDefaultFolder = detail.folders.some((f) => f.is_master);
 
-  const viewedDoc = detail.documents.find((d) => d.id === viewingDocumentId);
-  const viewingDocument = viewedDoc
-    ? {
-        id: viewedDoc.id,
-        courseId: detail.course.id,
-        filename: viewedDoc.filename,
-        extracted_text: viewedDoc.extracted_text,
-        filePath: viewedDoc.file_path,
-      }
-    : null;
+  const viewingDocument = viewingDocumentData?.document ?? null;
 
   return (
     <>

@@ -27,14 +27,14 @@ export async function POST(request: Request) {
 
   const valid =
     kind === "cover"
-      ? isValidCoverImage(body?.dataUrl)
+      ? isValidCoverImage(body?.url)
       : kind === "background"
-        ? isValidPageBackgroundImage(body?.dataUrl)
+        ? isValidPageBackgroundImage(body?.url)
         : kind === "note"
-          ? isValidNoteImage(body?.dataUrl)
-          : isValidIconImage(body?.dataUrl);
+          ? isValidNoteImage(body?.url)
+          : isValidIconImage(body?.url);
   if (!valid) return Response.json({ error: "Invalid image" }, { status: 400 });
 
-  const image = await recordUploadedImage(kind, body.dataUrl);
+  const image = await recordUploadedImage(kind, body.url);
   return Response.json({ image });
 }

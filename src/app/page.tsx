@@ -25,7 +25,7 @@ import { cn } from "cn";
 import type {
   AppSettings,
   CalendarFeed,
-  Course,
+  CourseSummary,
   DueFlashcardItem,
   GenerationNotification,
   HomeWidgetConfig,
@@ -63,7 +63,7 @@ function CourseCard({
   onReorder,
   onCustomized,
 }: {
-  course: Course;
+  course: CourseSummary;
   // Cards due, or a pending generation popup not yet opened/dismissed.
   hasNotification: boolean;
   onRename: (courseId: number, name: string) => Promise<void>;
@@ -898,7 +898,7 @@ function HomePageContent() {
   // window focus (see SWRProvider) — coming back to "/" shows the whole
   // dashboard instantly from cache instead of every widget blanking out
   // and re-fetching from zero, which was the actual "weird pop-in".
-  const { data: courses, mutate: refresh } = useSWR<Course[]>("/api/courses");
+  const { data: courses, mutate: refresh } = useSWR<CourseSummary[]>("/api/courses");
   const { data: stats } = useSWR<Stats>("/api/stats");
   const { data: settings, mutate: mutateSettings } = useSWR<AppSettings>("/api/settings");
   const { data: feedsData } = useSWR<{ feeds: CalendarFeed[] }>("/api/calendar-feeds");

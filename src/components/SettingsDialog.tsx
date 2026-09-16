@@ -21,6 +21,7 @@ import { useAppTheme, type AppTheme } from "@/components/AppThemeProvider";
 import ThemeToggle from "@/components/ThemeToggle";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { uploadImage } from "@/lib/uploadImage";
 import { ICON_ASPECT, ICON_OUTPUT, BACKGROUND_ASPECT, BACKGROUND_OUTPUT_WIDTH, BACKGROUND_OUTPUT_HEIGHT } from "@/lib/imageCropPresets";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -74,6 +75,9 @@ interface StorageSettingsState {
   mode: StorageMode;
   hasConnectionString: boolean;
   connectionError: string | null;
+  storageUrl: string;
+  hasStorageServiceKey: boolean;
+  storageBucket: string;
 }
 
 const STORAGE_LABELS: Record<StorageMode, string> = {
@@ -684,7 +688,11 @@ function StorageSection() {
   const [settings, setSettings] = useState<StorageSettingsState | null>(null);
   const [mode, setMode] = useState<StorageMode>("local");
   const [connectionString, setConnectionString] = useState("");
+  const [storageUrl, setStorageUrl] = useState("");
+  const [storageServiceKey, setStorageServiceKey] = useState("");
+  const [storageBucket, setStorageBucket] = useState("");
   const [migrating, setMigrating] = useState(false);
+  const [migratingImages, setMigratingImages] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -693,6 +701,11 @@ function StorageSection() {
       .then((body: StorageSettingsState) => {
         setSettings(body);
         setMode(body.mode);
+        // storageUrl/storageBucket aren't secret, so (unlike
+        // connectionString/storageServiceKey) they're safe to prefill from
+        // the GET response instead of starting blank every time.
+        setStorageUrl(body.storageUrl ?? "");
+        setStorageBucket(body.storageBucket ?? "");
       });
   }, []);
 
@@ -724,6 +737,32 @@ function StorageSection() {
     }
   }
 
+  // Rewrites existing base64 images into the now-configured Storage bucket —
+  // separate from handleSave (which must already have succeeded, since this
+  // needs the *saved* config's blob store, not whatever's currently typed
+  // into the form). Reads every matching row's full image data out of the
+  // database to re-upload it, so this has a real one-time egress cost —
+  // only meant to be run once storage is actually configured and it's a
+  // good time to pay that cost.
+  async function handleMigrateImages() {
+    setMigratingImages(true);
+    try {
+      const res = await fetch("/api/storage-settings/migrate-images", { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) {
+        toast.error(body.error ?? "Image migration failed");
+        return;
+      }
+      toast.success(
+        `Moved images for ${body.coursesMigrated} course(s)${body.brandingMigrated ? ", app branding," : ""} and ${body.imagesMigrated} library image(s) to Storage`
+      );
+    } catch {
+      toast.error("Image migration failed");
+    } finally {
+      setMigratingImages(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -731,7 +770,15 @@ function StorageSection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          mode === "supabase" ? { mode, connectionString: connectionString.trim() } : { mode }
+          mode === "supabase"
+            ? {
+                mode,
+                connectionString: connectionString.trim(),
+                storageUrl: storageUrl.trim(),
+                storageServiceKey: storageServiceKey.trim(),
+                storageBucket: storageBucket.trim(),
+              }
+            : { mode }
         ),
       });
       const body = await res.json();
@@ -740,7 +787,14 @@ function StorageSection() {
         return;
       }
       if (!body.ok) {
-        setSettings({ mode, hasConnectionString: true, connectionError: body.error });
+        setSettings({
+          mode,
+          hasConnectionString: true,
+          connectionError: body.error,
+          storageUrl,
+          hasStorageServiceKey: settings?.hasStorageServiceKey || !!storageServiceKey.trim(),
+          storageBucket,
+        });
         toast.error(`Couldn't connect — still on local. ${body.error ?? ""}`);
         return;
       }
@@ -748,7 +802,15 @@ function StorageSection() {
         mode,
         hasConnectionString: mode === "supabase" && !!connectionString.trim(),
         connectionError: null,
+        storageUrl,
+        hasStorageServiceKey: settings?.hasStorageServiceKey || !!storageServiceKey.trim(),
+        storageBucket,
       });
+      // Cleared, not kept — matches connectionString's own treatment; the
+      // server already folded it into the saved config (see
+      // /api/storage-settings's "leave blank to keep the existing key"
+      // handling), so nothing is lost by clearing the input.
+      setStorageServiceKey("");
       toast.success(mode === "supabase" ? "Now syncing live with Supabase" : "Switched to local");
     } catch {
       toast.error("Couldn't save storage settings");
@@ -813,6 +875,52 @@ function StorageSection() {
           <Button type="button" variant="outline" size="sm" onClick={handleMigrate} disabled={migrating}>
             {migrating ? "Migrating…" : "Migrate my local data to Supabase"}
           </Button>
+
+          <div className="space-y-1.5 border-t pt-3">
+            <Label>Image storage (optional)</Label>
+            <p className="text-xs text-muted-foreground">
+              Left blank, course covers/icons and other images keep syncing as part of your
+              database rows like everything else — this just moves them to a Supabase Storage
+              bucket instead, which is lighter on your project&apos;s database bandwidth. From
+              your Supabase project: Settings → API for the URL and service_role key, and Storage
+              to create a public bucket.
+            </p>
+            <Input
+              value={storageUrl}
+              onChange={(e) => setStorageUrl(e.target.value)}
+              placeholder="https://<project-ref>.supabase.co"
+            />
+            <Input
+              type="password"
+              value={storageServiceKey}
+              onChange={(e) => setStorageServiceKey(e.target.value)}
+              placeholder={settings.hasStorageServiceKey ? "configured" : "service_role key"}
+            />
+            <Input
+              value={storageBucket}
+              onChange={(e) => setStorageBucket(e.target.value)}
+              placeholder="Bucket name (must be public)"
+            />
+            {settings.hasStorageServiceKey && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Once saved, move your existing course/app images out of the database and into
+                  this bucket. This reads every one of them out of the database first, so it has a
+                  real one-time bandwidth cost — a good time to run it is whenever that&apos;s not
+                  a concern, not necessarily right now.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleMigrateImages}
+                  disabled={migratingImages}
+                >
+                  {migratingImages ? "Moving…" : "Move existing images to Storage"}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -1187,7 +1295,14 @@ function BrandingSection() {
         outputHeight={ICON_OUTPUT}
         outputFormat="png"
         title="Position app icon"
-        onCropped={(dataUrl) => saveBranding({ appIconImage: dataUrl })}
+        onCropped={async (blob) => {
+          try {
+            const url = await uploadImage(blob, "app-icon");
+            saveBranding({ appIconImage: url });
+          } catch {
+            toast.error("Couldn't upload that image");
+          }
+        }}
       />
       <ImageCropDialog
         open={backgroundCropOpen}
@@ -1201,20 +1316,25 @@ function BrandingSection() {
         outputHeight={BACKGROUND_OUTPUT_HEIGHT}
         outputFormat="jpeg"
         title="Position dashboard backdrop"
-        onCropped={(dataUrl) => {
-          saveBranding({ dashboardBackgroundImage: dataUrl });
-          fetch("/api/uploaded-images", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: "background", dataUrl }),
-          }).catch(() => {});
+        onCropped={async (blob) => {
+          try {
+            const url = await uploadImage(blob, "dashboard-background");
+            saveBranding({ dashboardBackgroundImage: url });
+            fetch("/api/uploaded-images", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: "background", url }),
+            }).catch(() => {});
+          } catch {
+            toast.error("Couldn't upload that image");
+          }
         }}
       />
       <ImageLibraryDialog
         open={backgroundLibraryOpen}
         onOpenChange={setBackgroundLibraryOpen}
         kind="background"
-        onSelect={(dataUrl) => saveBranding({ dashboardBackgroundImage: dataUrl })}
+        onSelect={(url) => saveBranding({ dashboardBackgroundImage: url })}
       />
     </div>
   );
