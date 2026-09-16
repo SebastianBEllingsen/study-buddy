@@ -129,10 +129,17 @@ export interface QuizAttempt {
 
 export type AiBackend = "api" | "claude_code" | "codex_cli" | "openai" | "gemini" | "free";
 
+// Re-exported for server code's convenience (e.g. api/settings/route.ts) —
+// the canonical definition lives in aiBackendChoices.ts, kept out of this
+// file so a client component can import it without dragging in the DB layer
+// below (see that file's own comment).
+export { IMAGE_CAPABLE_BACKENDS } from "./aiBackendChoices";
+
 export type AiProviderKeyName = "anthropic" | "openai" | "gemini" | "openrouter";
 
 interface SettingsRow {
   ai_provider: AiBackend;
+  image_ai_provider: AiBackend | null;
   anthropic_api_key: string | null;
   openai_api_key: string | null;
   gemini_api_key: string | null;
@@ -164,6 +171,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
   const rows = await db
     .select({
       ai_provider: app_settings.ai_provider,
+      image_ai_provider: app_settings.image_ai_provider,
       anthropic_api_key: app_settings.anthropic_api_key,
       openai_api_key: app_settings.openai_api_key,
       gemini_api_key: app_settings.gemini_api_key,
@@ -201,6 +209,15 @@ export async function getAiBackend(): Promise<AiBackend> {
   return row?.ai_provider ?? "api";
 }
 
+// Returns the raw override — null means "use ai_provider" (see
+// AppSettings.imageAiBackend), left for aiClient.ts to resolve against the
+// main backend rather than baking that fallback in here, since only it
+// knows which calls actually carry images.
+export async function getImageAiBackend(): Promise<AiBackend | null> {
+  const row = await getSettingsRow();
+  return row?.image_ai_provider ?? null;
+}
+
 // The master "AI enabled" switch (app_settings.ai_enabled, default true) —
 // see AppSettings.aiEnabled's doc comment. Checked directly by
 // aiClient.ts's generateStructured/generateText, the single choke point
@@ -216,6 +233,15 @@ export async function setAiBackend(backend: AiBackend): Promise<void> {
   await db
     .update(app_settings)
     .set({ ai_provider: backend, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+// null clears the override back to "use ai_provider" (see
+// AppSettings.imageAiBackend).
+export async function setImageAiBackend(backend: AiBackend | null): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ image_ai_provider: backend, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -264,6 +290,14 @@ export interface AppSettings {
   // (PDF/DOCX/PPTX parsing is local, not AI) or anything else non-AI.
   aiEnabled: boolean;
   aiBackend: AiBackend;
+  // null (default): image-bearing requests (Crop & Ask) use aiBackend above
+  // too, same as before this setting existed — except that throws if
+  // aiBackend is claude_code/codex_cli, since neither can take image input
+  // (see aiBackends/claudeCode.ts, codexCli.ts). A non-null value overrides
+  // the backend for those requests only, to one of IMAGE_CAPABLE_BACKENDS,
+  // without having to switch the main model away from a CLI-subscription
+  // backend just to use Crop & Ask.
+  imageAiBackend: AiBackend | null;
   hasAnthropicKey: boolean;
   hasOpenAiKey: boolean;
   hasGeminiKey: boolean;
@@ -345,6 +379,7 @@ export async function getAppSettings(): Promise<AppSettings> {
   return {
     aiEnabled: row?.ai_enabled ?? true,
     aiBackend: row?.ai_provider ?? "api",
+    imageAiBackend: row?.image_ai_provider ?? null,
     hasAnthropicKey: !!row?.anthropic_api_key,
     hasOpenAiKey: !!row?.openai_api_key,
     hasGeminiKey: !!row?.gemini_api_key,

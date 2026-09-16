@@ -6,12 +6,12 @@ import { Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
-import { AskAiAnswer } from "@/components/ask-ai/AskAiAnswer";
 import { useCropToAsk } from "@/components/ask-ai/useCropToAsk";
 import {
   CropToAskButton,
   CropSelectionOverlay,
   CropPreviewCard,
+  CropAskThread,
 } from "@/components/ask-ai/CropToAskUI";
 import { captureElementRegion } from "@/lib/cropCapture";
 import { scrollToHighlight } from "@/lib/scrollToHighlight";
@@ -67,6 +67,7 @@ export default function DocumentContent({
   highlight,
   onTidied,
   onHasPdfChange,
+  bare = false,
 }: {
   document: ViewedDocument;
   highlight: string | null;
@@ -80,6 +81,11 @@ export default function DocumentContent({
   // ANY original (pdf, docx, or a LibreOffice-converted odt/pptx) is
   // viewable, not just a pdf.
   onHasPdfChange?: (hasOriginal: boolean | null) => void;
+  // Drops the bordered/rounded-box treatment — the detached full-window
+  // view (DetachedDocumentView) wants this content covering its window
+  // edge-to-edge rather than sitting in an inset card the way it does
+  // inside DocumentViewer's dialog.
+  bare?: boolean;
 }) {
   // Keyed by document id (not just a plain boolean) so a stale result from
   // the previous document can't flash while the new one is still loading —
@@ -117,8 +123,10 @@ export default function DocumentContent({
     setQuestion: setCropQuestion,
     confirmAsk: confirmCropAsk,
     cancelPending: cancelCropPending,
+    image: cropImage,
+    turns: cropTurns,
+    askFollowUp: askCropFollowUp,
     loading: cropLoading,
-    answer: cropAnswer,
     error: cropError,
     dismiss: dismissCrop,
   } = useCropToAsk(
@@ -178,7 +186,7 @@ export default function DocumentContent({
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border">
+      <div className={`min-h-0 flex-1 overflow-hidden ${bare ? "" : "rounded-lg border"}`}>
         {hasOriginal === null && (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Loading…
@@ -282,11 +290,15 @@ export default function DocumentContent({
           loading={cropLoading}
         />
       )}
-      {(cropLoading || cropAnswer || cropError) && (
-        <AskAiAnswer
+      {cropImage && (
+        <CropAskThread
+          image={cropImage}
+          turns={cropTurns}
           loading={cropLoading}
-          answer={cropAnswer}
           error={cropError}
+          question={cropQuestion}
+          onQuestionChange={setCropQuestion}
+          onAskFollowUp={askCropFollowUp}
           onDismiss={dismissCrop}
         />
       )}

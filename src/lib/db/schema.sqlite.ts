@@ -44,6 +44,8 @@ export const courses = sqliteTable("courses", {
 export const app_settings = sqliteTable("app_settings", {
   id: integer("id").primaryKey(),
   ai_provider: text("ai_provider").notNull().default("api").$type<AiBackend>(),
+  // NULL means "use ai_provider" — see the same column in schema.sql.
+  image_ai_provider: text("image_ai_provider").$type<AiBackend>(),
   anthropic_api_key: text("anthropic_api_key"),
   openai_api_key: text("openai_api_key"),
   gemini_api_key: text("gemini_api_key"),

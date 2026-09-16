@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS app_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   ai_backend TEXT NOT NULL DEFAULT 'api' CHECK (ai_backend IN ('api', 'claude_code')), -- legacy; superseded by ai_provider (see migrate() in db.ts)
   ai_provider TEXT NOT NULL DEFAULT 'api', -- 'api' | 'claude_code' | 'openai' | 'gemini' | 'free'
+  -- NULL (default) means "use ai_provider above" — an override for image-
+  -- bearing requests only (Crop & Ask), since claude_code/codex_cli can't
+  -- take image input at all (see aiBackends/claudeCode.ts, codexCli.ts).
+  -- Restricted to the 4 backends that actually support images: 'api' |
+  -- 'openai' | 'gemini' | 'free'.
+  image_ai_provider TEXT,
   anthropic_api_key TEXT,
   openai_api_key TEXT,
   gemini_api_key TEXT,

@@ -13,12 +13,12 @@ import FlashcardViewer from "@/components/FlashcardViewer";
 import EditFlashcardsDialog from "@/components/EditFlashcardsDialog";
 import NoteEditor, { type NoteEditorHandle } from "@/components/NoteEditor";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
-import { AskAiAnswer } from "@/components/ask-ai/AskAiAnswer";
 import { useCropToAsk } from "@/components/ask-ai/useCropToAsk";
 import {
   CropToAskButton,
   CropSelectionOverlay,
   CropPreviewCard,
+  CropAskThread,
 } from "@/components/ask-ai/CropToAskUI";
 import { captureElementRegion } from "@/lib/cropCapture";
 import ModelBadge from "@/components/ModelBadge";
@@ -112,8 +112,10 @@ export default function ItemPage() {
     setQuestion: setNotesCropQuestion,
     confirmAsk: confirmNotesCropAsk,
     cancelPending: cancelNotesCropPending,
+    image: notesCropImage,
+    turns: notesCropTurns,
+    askFollowUp: askNotesCropFollowUp,
     loading: notesCropLoading,
-    answer: notesCropAnswer,
     error: notesCropError,
     dismiss: dismissNotesCrop,
   } = useCropToAsk(`/api/items/${params.itemId}/ask`, (rect) =>
@@ -326,11 +328,15 @@ export default function ItemPage() {
               loading={notesCropLoading}
             />
           )}
-          {(notesCropLoading || notesCropAnswer || notesCropError) && (
-            <AskAiAnswer
+          {notesCropImage && (
+            <CropAskThread
+              image={notesCropImage}
+              turns={notesCropTurns}
               loading={notesCropLoading}
-              answer={notesCropAnswer}
               error={notesCropError}
+              question={notesCropQuestion}
+              onQuestionChange={setNotesCropQuestion}
+              onAskFollowUp={askNotesCropFollowUp}
               onDismiss={dismissNotesCrop}
             />
           )}

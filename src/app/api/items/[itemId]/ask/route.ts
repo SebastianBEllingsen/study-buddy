@@ -6,9 +6,24 @@ import {
   explainImageSystemPrompt,
   askImageUserPrompt,
   askUserPrompt,
+  type AskImageTurn,
 } from "@/lib/prompts/ask";
 import { parseDataUrlImage } from "@/lib/dataUrlImage";
 import { parseId } from "@/lib/routeParams";
+
+// Follow-up questions about the same cropped image (see useCropToAsk.ts) —
+// each prior turn only ever comes back from this same route's own response
+// shape ({answer: string}), so validating question/answer are both strings
+// is enough; anything malformed is just dropped rather than rejecting the
+// whole request over it.
+function parsePriorTurns(value: unknown): AskImageTurn[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const turns = value.filter(
+    (t): t is AskImageTurn =>
+      !!t && typeof t === "object" && typeof t.question === "string" && typeof t.answer === "string"
+  );
+  return turns.length > 0 ? turns : undefined;
+}
 
 type Params = { params: Promise<{ itemId: string }> };
 
@@ -27,6 +42,7 @@ export async function POST(request: Request, { params }: Params) {
   const selection = typeof body?.selection === "string" ? body.selection : undefined;
   const image = parseDataUrlImage(body?.image);
   const question = typeof body?.question === "string" ? body.question : undefined;
+  const priorTurns = parsePriorTurns(body?.priorTurns);
 
   if (kind !== "hint" && kind !== "explain") {
     return Response.json({ error: "kind must be 'hint' or 'explain'" }, { status: 400 });
@@ -47,7 +63,7 @@ export async function POST(request: Request, { params }: Params) {
     const answer = image
       ? await generateText({
           system: explainImageSystemPrompt(courseName),
-          user: askImageUserPrompt(question),
+          user: askImageUserPrompt(question, priorTurns),
           images: [image],
           effort: "low",
           maxTokens: 500,
@@ -64,6 +80,6 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: err.message }, { status: 400 });
     }
     console.error("Ask AI failed:", err);
-    return Response.json({ error: await describeAiError(err) }, { status: 502 });
+    return Response.json({ error: await describeAiError(err, !!image) }, { status: 502 });
   }
 }

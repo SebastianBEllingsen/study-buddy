@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "image_ai_provider" text;

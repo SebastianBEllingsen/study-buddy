@@ -6,11 +6,22 @@ import {
   explainImageSystemPrompt,
   askImageUserPrompt,
   askUserPrompt,
+  type AskImageTurn,
 } from "@/lib/prompts/ask";
 import { parseDataUrlImage } from "@/lib/dataUrlImage";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ documentId: string }> };
+
+// Sibling of items/[itemId]/ask's own copy of this — see its comment.
+function parsePriorTurns(value: unknown): AskImageTurn[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const turns = value.filter(
+    (t): t is AskImageTurn =>
+      !!t && typeof t === "object" && typeof t.question === "string" && typeof t.answer === "string"
+  );
+  return turns.length > 0 ? turns : undefined;
+}
 
 // Sibling of /api/items/[itemId]/ask, same shape — just resolves courseName
 // from a document instead of a generated item. Only "explain" is offered
@@ -32,6 +43,7 @@ export async function POST(request: Request, { params }: Params) {
   const selection = typeof body?.selection === "string" ? body.selection : undefined;
   const image = parseDataUrlImage(body?.image);
   const question = typeof body?.question === "string" ? body.question : undefined;
+  const priorTurns = parsePriorTurns(body?.priorTurns);
 
   if (kind !== "hint" && kind !== "explain") {
     return Response.json({ error: "kind must be 'hint' or 'explain'" }, { status: 400 });
@@ -54,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
     const answer = image
       ? await generateText({
           system: explainImageSystemPrompt(courseName),
-          user: askImageUserPrompt(question),
+          user: askImageUserPrompt(question, priorTurns),
           images: [image],
           effort: "low",
           maxTokens: 500,
@@ -71,6 +83,6 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: err.message }, { status: 400 });
     }
     console.error("Ask AI failed:", err);
-    return Response.json({ error: await describeAiError(err) }, { status: 502 });
+    return Response.json({ error: await describeAiError(err, !!image) }, { status: 502 });
   }
 }

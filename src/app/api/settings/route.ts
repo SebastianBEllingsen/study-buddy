@@ -1,6 +1,7 @@
 import {
   getAppSettings,
   setAiBackend,
+  setImageAiBackend,
   setProviderKey,
   setShowModelBadge,
   setAutoOpenGeneratedItems,
@@ -14,6 +15,7 @@ import {
   setHomeWidgets,
   setAppBranding,
   HOME_WIDGET_IDS,
+  IMAGE_CAPABLE_BACKENDS,
 } from "@/lib/models";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
@@ -64,6 +66,19 @@ export async function POST(request: Request) {
       );
     }
     await setAiBackend(body.aiBackend);
+  }
+
+  if (body?.imageAiBackend !== undefined) {
+    // null clears the override back to "use aiBackend" — the only other
+    // valid values are the backends that actually support image input (see
+    // IMAGE_CAPABLE_BACKENDS's doc comment).
+    if (body.imageAiBackend !== null && !IMAGE_CAPABLE_BACKENDS.includes(body.imageAiBackend)) {
+      return Response.json(
+        { error: `imageAiBackend must be one of: ${IMAGE_CAPABLE_BACKENDS.join(", ")}, or null` },
+        { status: 400 }
+      );
+    }
+    await setImageAiBackend(body.imageAiBackend);
   }
 
   for (const [field, providerName] of Object.entries(KEY_FIELDS)) {

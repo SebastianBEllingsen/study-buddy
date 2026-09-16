@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { IMAGE_CAPABLE_BACKENDS } from "@/lib/aiBackendChoices";
 import type { AiBackend, AppSettings } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
 
@@ -103,6 +104,7 @@ function AiSection() {
   const [gradingSaving, setGradingSaving] = useState(false);
   const [efficiencySaving, setEfficiencySaving] = useState(false);
   const [aiEnabledSaving, setAiEnabledSaving] = useState(false);
+  const [imageBackendSaving, setImageBackendSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -144,6 +146,30 @@ function AiSection() {
       toast.error("Couldn't save AI settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleImageBackendChange(value: string) {
+    if (!settings) return;
+    const imageAiBackend = value === "same" ? null : (value as AiBackend);
+    const previous = settings.imageAiBackend;
+    setSettings({ ...settings, imageAiBackend });
+    setImageBackendSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageAiBackend }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save image AI model");
+        setSettings((prev) => (prev ? { ...prev, imageAiBackend: previous } : prev));
+      }
+    } catch {
+      toast.error("Couldn't save image AI model");
+      setSettings((prev) => (prev ? { ...prev, imageAiBackend: previous } : prev));
+    } finally {
+      setImageBackendSaving(false);
     }
   }
 
@@ -286,6 +312,34 @@ function AiSection() {
       <Button size="sm" onClick={handleSave} disabled={saving}>
         {saving ? "Saving…" : "Save"}
       </Button>
+
+      <div className="space-y-1.5 border-t pt-3">
+        <Label>Image model (for Crop &amp; Ask)</Label>
+        <p className="text-xs text-muted-foreground">
+          Claude Code and Codex CLI can&apos;t take image input at all — pick a different model
+          just for image-bearing requests (Crop &amp; Ask on a PDF/image) without switching your
+          main model away from a CLI subscription.
+        </p>
+        <Select
+          value={settings.imageAiBackend ?? "same"}
+          onValueChange={(v) => v && handleImageBackendChange(v)}
+          disabled={imageBackendSaving}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              {(v: string) => (v === "same" ? "Same as AI model above" : (AI_LABELS[v as AiBackend] ?? v))}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="same">Same as AI model above</SelectItem>
+            {IMAGE_CAPABLE_BACKENDS.map((value) => (
+              <SelectItem key={value} value={value}>
+                {AI_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
         <span>

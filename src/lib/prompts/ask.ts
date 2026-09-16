@@ -32,11 +32,29 @@ Rules:
 - Answer from your own general knowledge of the subject — you don't have access to this course's other source material, only the image shown.`;
 }
 
+// A prior question/answer pair about the same cropped image — see
+// askImageUserPrompt below.
+export interface AskImageTurn {
+  question: string;
+  answer: string;
+}
+
 // The optional free-text question typed into the crop preview (see
 // useCropToAsk.ts) before sending — falls back to a generic "explain this"
-// when left blank.
-export function askImageUserPrompt(question?: string): string {
-  return question && question.trim() ? question.trim() : "Explain what's shown in this image.";
+// when left blank. `priorTurns`, when given, is every earlier question/
+// answer about this same crop (see useCropToAsk's follow-up support) folded
+// into the prompt as a plain transcript — the same "resend the whole history
+// every call" technique lib/chat.ts uses for its own multi-turn support,
+// since none of the six generateText backends have a native messages[] path.
+// The image itself is re-sent by the caller alongside this on every turn
+// (generateText has no server-side memory across calls either), so the
+// model always has the actual pixels in front of it, not just a description
+// of what it said last time.
+export function askImageUserPrompt(question?: string, priorTurns?: AskImageTurn[]): string {
+  const q = question && question.trim() ? question.trim() : "Explain what's shown in this image.";
+  if (!priorTurns?.length) return q;
+  const transcript = priorTurns.map((t) => `Q: ${t.question}\nA: ${t.answer}`).join("\n\n");
+  return `The student already asked about this same image:\n${transcript}\n\nFollow-up question: ${q}`;
 }
 
 export function askUserPrompt(params: { context: string; selection?: string }): string {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   getDocument,
   GlobalWorkerOptions,
@@ -19,12 +19,12 @@ import { ZoomIn, ZoomOut, Download } from "lucide-react";
 import { scrollToHighlight } from "@/lib/scrollToHighlight";
 import { prefersReducedMotion } from "@/lib/motion";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
-import { AskAiAnswer } from "@/components/ask-ai/AskAiAnswer";
 import { useCropToAsk, type CropRect } from "@/components/ask-ai/useCropToAsk";
 import {
   CropToAskButton,
   CropSelectionOverlay,
   CropPreviewCard,
+  CropAskThread,
 } from "@/components/ask-ai/CropToAskUI";
 
 // The modern bundler-friendly way to point PDF.js at its worker file —
@@ -35,9 +35,9 @@ GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-const MIN_SCALE = 0.6;
+const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
-const SCALE_STEP = 0.2;
+const SCALE_STEP = 0.05;
 const DEFAULT_SCALE = 1;
 
 function PdfPage({
@@ -45,11 +45,19 @@ function PdfPage({
   scale,
   registerPageEl,
   onTextLayerReady,
+  onRenderStateChange,
 }: {
   page: PDFPageProxy;
   scale: number;
   registerPageEl: (pageNumber: number, el: HTMLDivElement | null) => void;
   onTextLayerReady: (pageNumber: number, el: HTMLDivElement) => void;
+  // Reports null the instant a (re-)render starts (a scale change mid-flight
+  // leaves the canvas showing stale content from the previous scale until
+  // this resolves — sometimes for several seconds across many pages at
+  // once, see capturePdfRegion below) and the actual scale once the canvas
+  // pixels themselves are confirmed painted for it — not gated on the text
+  // layer, which crop-to-ask doesn't need.
+  onRenderStateChange: (pageNumber: number, renderedScale: number | null) => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -85,34 +93,62 @@ function PdfPage({
     const textLayerEl = textLayerRef.current;
     if (!canvas || !textLayerEl) return;
     let cancelled = false;
+    let renderTask: ReturnType<typeof page.render> | null = null;
 
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+    onRenderStateChange(page.pageNumber, null);
 
-    const renderTask = page.render({ canvas, viewport });
-    renderTask.promise
-      .then(() => page.getTextContent())
-      .then((textContent) => {
-        if (cancelled) return;
-        textLayerEl.replaceChildren();
-        const textLayer = new TextLayer({
-          textContentSource: textContent,
-          container: textLayerEl,
-          viewport,
-        });
-        return textLayer.render();
-      })
-      .then(() => {
-        if (!cancelled && textLayerEl) onTextLayerReady(page.pageNumber, textLayerEl);
-      })
-      .catch(() => {
-        // Render cancellation (e.g. scale changed mid-render) throws by
-        // design — nothing to surface, the effect re-runs with the new scale.
-      });
+    // A previous render on this exact <canvas> (from the scale this effect
+    // is replacing) might still be in the process of releasing it — calling
+    // .cancel() in that run's cleanup below doesn't guarantee that's already
+    // finished by the time this one starts, and pdf.js throws synchronously
+    // — "Cannot use the same canvas during multiple render() operations" —
+    // if page.render() is called again before it has. Several scale changes
+    // firing in quick succession (e.g. clicking zoom-in repeatedly) used to
+    // hit this often enough to matter: not just failing that one attempt
+    // (their bounding box already matched the new scale even though their
+    // pixels didn't, which is what made crop-to-ask capture the wrong
+    // content), but on an earlier version of this fix, permanently — a
+    // failed attempt was chained into a persistent per-page promise every
+    // later attempt awaited, so one uncaught failure blocked every
+    // subsequent render for that page for the rest of the session, and nothing
+    // in this effect stays around across renders to un-stick it. A bounded
+    // retry loop scoped entirely to this one effect run has no such
+    // failure mode — nothing here outlives this run, so there's nothing left
+    // to get stuck.
+    (async () => {
+      for (let attempt = 0; attempt < 5 && !cancelled; attempt++) {
+        try {
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          renderTask = page.render({ canvas, viewport });
+          await renderTask.promise;
+          if (cancelled) return;
+          onRenderStateChange(page.pageNumber, scale);
+          const textContent = await page.getTextContent();
+          if (cancelled) return;
+          textLayerEl.replaceChildren();
+          const textLayer = new TextLayer({
+            textContentSource: textContent,
+            container: textLayerEl,
+            viewport,
+          });
+          await textLayer.render();
+          if (!cancelled) onTextLayerReady(page.pageNumber, textLayerEl);
+          return;
+        } catch (err) {
+          if (cancelled) return;
+          const canvasBusy = err instanceof Error && err.message.includes("same canvas");
+          // Anything else (cancellation, a genuine render error) isn't
+          // worth retrying — give up silently, same as before.
+          if (!canvasBusy || attempt === 4) return;
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
-      renderTask.cancel();
+      renderTask?.cancel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inView, scale]);
@@ -155,6 +191,16 @@ export default function PdfViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const pageElsRef = useRef<Map<number, HTMLDivElement>>(new Map());
   const highlightedRef = useRef(false);
+  // Which scale each page's canvas is actually painted at right now — null
+  // while a render is in flight for it. See capturePdfRegion, which waits on
+  // this before reading pixels; see PdfPage's onRenderStateChange for why a
+  // scale change alone doesn't mean the canvas is ready yet (rendering 30+
+  // pages at once after a zoom change can visibly take several seconds).
+  const pageRenderedScaleRef = useRef<Map<number, number | null>>(new Map());
+
+  function handlePageRenderStateChange(pageNumber: number, renderedScale: number | null) {
+    pageRenderedScaleRef.current.set(pageNumber, renderedScale);
+  }
 
   // Screenshot-crop-to-ask: drag a rectangle over a rendered page and ask AI
   // about just that region — for diagrams/equations/charts that a plain
@@ -168,11 +214,28 @@ export default function PdfViewer({
       .elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
       ?.closest("[data-page-number]");
     const canvas = pageEl?.querySelector("canvas");
-    if (!canvas) return null;
+    if (!canvas || !pageEl) return null;
+
+    // Wait for THIS page's canvas to be confirmed painted at the CURRENT
+    // scale before reading a single pixel from it. Without this, cropping
+    // shortly after a zoom change (while pages are still mid-redraw) could
+    // read a stale buffer still showing a previous scale's content — its
+    // bounding box already reflects the new size/position (that's set
+    // synchronously, before the repaint), so the crop rect would look
+    // correctly placed while actually slicing into unrelated leftover
+    // pixels. A few seconds' grace, then give up rather than risk another
+    // wrong-content capture.
+    const pageNumber = Number(pageEl.getAttribute("data-page-number"));
+    const deadline = Date.now() + 4000;
+    while (pageRenderedScaleRef.current.get(pageNumber) !== scale) {
+      if (Date.now() > deadline) return null;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
 
     // Clamp to the page it landed on — a drag that strays onto a
     // neighboring page (or the page's own margin) just gets cropped to
-    // what's actually available.
+    // what's actually available. Re-read live rather than reusing anything
+    // measured before the wait above, in case scrolling shifted it.
     const canvasRect = canvas.getBoundingClientRect();
     const left = Math.max(rect.left, canvasRect.left);
     const top = Math.max(rect.top, canvasRect.top);
@@ -215,8 +278,10 @@ export default function PdfViewer({
     setQuestion: setCropQuestion,
     confirmAsk: confirmCropAsk,
     cancelPending: cancelCropPending,
+    image: cropImage,
+    turns: cropTurns,
+    askFollowUp: askCropFollowUp,
     loading: cropLoading,
-    answer: cropAnswer,
     error: cropError,
     dismiss: dismissCrop,
   } = useCropToAsk(askEndpoint, capturePdfRegion);
@@ -283,6 +348,53 @@ export default function PdfViewer({
     scrollToHighlight(textLayerEl, highlight);
   }
 
+  // Zooming resizes every page by the same factor, but the container's
+  // scrollTop/scrollLeft don't — left alone, the same pixel offset now
+  // points at completely different content (zoom in and everything above
+  // got taller, so you're suddenly looking at an earlier page). Anchoring
+  // on whatever's at the center of the viewport (as a fraction of total
+  // scrollHeight/scrollWidth, not absolute pixels) and re-deriving the
+  // scroll position from that same fraction after the resize keeps it
+  // centered on the same spot instead. Captured just before the scale
+  // change and consumed by the layout effect below, once — not on every
+  // scroll — this only ever fires right after an actual scale change (the
+  // `next === s` bail-out skips capturing one that got clamped to a no-op).
+  const pendingZoomAnchorRef = useRef<{ x: number; y: number } | null>(null);
+
+  function captureZoomAnchor() {
+    const el = containerRef.current;
+    if (!el || el.scrollHeight === 0 || el.scrollWidth === 0) return null;
+    return {
+      y: (el.scrollTop + el.clientHeight / 2) / el.scrollHeight,
+      x: (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth,
+    };
+  }
+
+  function zoomBy(direction: 1 | -1) {
+    setScale((s) => {
+      const next =
+        direction > 0
+          ? Math.min(MAX_SCALE, +(s + SCALE_STEP).toFixed(2))
+          : Math.max(MIN_SCALE, +(s - SCALE_STEP).toFixed(2));
+      if (next === s) return s;
+      pendingZoomAnchorRef.current = captureZoomAnchor();
+      return next;
+    });
+  }
+
+  // Runs synchronously after the resized page wrappers commit to the DOM
+  // (their width/height are set straight from viewport.width/height in
+  // PdfPage's render, not gated on the canvas itself finishing) but before
+  // the browser paints, so the scroll jump this causes is never visible.
+  useLayoutEffect(() => {
+    const anchor = pendingZoomAnchorRef.current;
+    const el = containerRef.current;
+    if (!anchor || !el) return;
+    pendingZoomAnchorRef.current = null;
+    el.scrollTop = anchor.y * el.scrollHeight - el.clientHeight / 2;
+    el.scrollLeft = anchor.x * el.scrollWidth - el.clientWidth / 2;
+  }, [scale]);
+
 
   return (
     <div className="flex h-full flex-col">
@@ -292,7 +404,7 @@ export default function PdfViewer({
             type="button"
             variant="ghost"
             size="icon-sm"
-            onClick={() => setScale((s) => Math.max(MIN_SCALE, +(s - SCALE_STEP).toFixed(2)))}
+            onClick={() => zoomBy(-1)}
             aria-label="Zoom out"
           >
             <ZoomOut className="size-3.5" />
@@ -304,7 +416,7 @@ export default function PdfViewer({
             type="button"
             variant="ghost"
             size="icon-sm"
-            onClick={() => setScale((s) => Math.min(MAX_SCALE, +(s + SCALE_STEP).toFixed(2)))}
+            onClick={() => zoomBy(1)}
             aria-label="Zoom in"
           >
             <ZoomIn className="size-3.5" />
@@ -346,6 +458,7 @@ export default function PdfViewer({
             scale={scale}
             registerPageEl={registerPageEl}
             onTextLayerReady={handleTextLayerReady}
+            onRenderStateChange={handlePageRenderStateChange}
           />
         ))}
       </div>
@@ -362,12 +475,16 @@ export default function PdfViewer({
           />
         </div>
       )}
-      {(cropLoading || cropAnswer || cropError) && (
+      {cropImage && (
         <div className="shrink-0 border-t p-2">
-          <AskAiAnswer
+          <CropAskThread
+            image={cropImage}
+            turns={cropTurns}
             loading={cropLoading}
-            answer={cropAnswer}
             error={cropError}
+            question={cropQuestion}
+            onQuestionChange={setCropQuestion}
+            onAskFollowUp={askCropFollowUp}
             onDismiss={dismissCrop}
           />
         </div>

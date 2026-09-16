@@ -66,6 +66,9 @@ function migrate(database: Database.Database) {
       "UPDATE app_settings SET ai_provider = ai_backend WHERE ai_provider IS NULL"
     );
   }
+  if (!hasColumn("app_settings", "image_ai_provider")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN image_ai_provider TEXT");
+  }
   for (const col of [
     "anthropic_api_key",
     "openai_api_key",

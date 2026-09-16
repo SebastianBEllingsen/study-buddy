@@ -1,4 +1,4 @@
-import { getAiBackend, isAiEnabled } from "./models";
+import { getAiBackend, getImageAiBackend, isAiEnabled } from "./models";
 import type { AiBackend } from "./models";
 import * as anthropicApi from "./aiBackends/anthropicApi";
 import * as claudeCode from "./aiBackends/claudeCode";
@@ -8,12 +8,8 @@ import * as gemini from "./aiBackends/gemini";
 import * as free from "./aiBackends/free";
 import type { GenerateStructuredParams, GenerateTextParams } from "./aiBackends/types";
 
-// Dispatches to whichever AI backend is currently selected (app_settings.ai_provider,
-// set from the UI — see components/SettingsDialog.tsx). All backends
-// implement the same generateStructured/generateText/describeError shape, so
-// callers (lib/generate.ts, lib/grading.ts) never need to know which is active.
-async function backend() {
-  switch (await getAiBackend()) {
+function backendModule(id: AiBackend) {
+  switch (id) {
     case "claude_code":
       return claudeCode;
     case "codex_cli":
@@ -28,6 +24,22 @@ async function backend() {
     default:
       return anthropicApi;
   }
+}
+
+// Which backend id a call should actually use — app_settings.ai_provider,
+// set from the UI (see components/SettingsDialog.tsx), except an
+// image-bearing call defers to app_settings.image_ai_provider first when
+// that override is set (see AppSettings.imageAiBackend's doc comment;
+// claude_code/codex_cli can't take image input at all). All backends
+// implement the same generateStructured/generateText/describeError shape, so
+// callers (lib/generate.ts, lib/grading.ts) never need to know which is
+// active.
+async function resolveBackendId(hasImages: boolean): Promise<AiBackend> {
+  if (hasImages) {
+    const override = await getImageAiBackend();
+    if (override) return override;
+  }
+  return getAiBackend();
 }
 
 // Thrown by both calls below when app_settings.ai_enabled is off — the one
@@ -48,16 +60,24 @@ export async function generateStructured<T>(
   params: GenerateStructuredParams
 ): Promise<T> {
   if (!(await isAiEnabled())) throw new AiDisabledError();
-  return (await backend()).generateStructured<T>(params);
+  const id = await resolveBackendId(false);
+  return backendModule(id).generateStructured<T>(params);
 }
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
   if (!(await isAiEnabled())) throw new AiDisabledError();
-  return (await backend()).generateText(params);
+  const id = await resolveBackendId(!!params.images?.length);
+  return backendModule(id).generateText(params);
 }
 
-export async function describeAiError(err: unknown): Promise<string> {
-  return await (await backend()).describeError(err);
+// hasImages must match whatever the failing generateText call itself passed
+// (its images?.length), so a failure from an image-backend-override call
+// gets described by that same backend, not whichever one is main — a
+// mismatch here could ask the wrong backend's describeError to interpret an
+// error shape (e.g. instanceof checks) it doesn't recognize.
+export async function describeAiError(err: unknown, hasImages = false): Promise<string> {
+  const id = await resolveBackendId(hasImages);
+  return backendModule(id).describeError(err);
 }
 
 export interface ModelInfo {
