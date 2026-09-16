@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { HomeWidgetConfig, HomeWidgetId } from "./models";
+import type { HomeWidgetConfig, HomeWidgetId, HomeWidgetZone } from "./models";
 
 // Android-style home-screen widget grid: a fixed number of columns, widgets
 // occupy a rectangle of cells and can be placed/resized freely (see
@@ -35,6 +35,38 @@ export function pointToCell(gridEl: HTMLElement, clientX: number, clientY: numbe
   const col = Math.floor((clientX - rect.left) / colStep);
   const row = Math.floor((clientY - rect.top) / rowStep);
   return { col, row };
+}
+
+export function pointInRect(
+  x: number,
+  y: number,
+  rect: Pick<DOMRect, "left" | "right" | "top" | "bottom">
+): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+// Picks whichever zone's rect contains the point, falling back to
+// `fallback` when neither does (e.g. the gap between the two customize-
+// dialog grids, or a drag that hasn't entered either grid yet). Takes
+// plain rects, not live DOM elements — the caller (DashboardCustomizeDialog's
+// startMove) is expected to have measured them once, at drag start, rather
+// than re-measuring on every pointer move. Re-measuring live would create a
+// feedback loop with the drag's own preview tile: a zone's rendered height
+// grows as soon as its preview tile lands on a not-yet-visible row (CSS
+// grid-auto-rows expands to fit it), so a rect re-queried after that
+// growth would just keep extending to include the pointer's new position —
+// dragging down out of one zone toward the other would never actually
+// register as having crossed the boundary, since the first zone keeps
+// growing to stay under the pointer.
+export function resolveZoneAtPoint(
+  x: number,
+  y: number,
+  rects: Record<HomeWidgetZone, Pick<DOMRect, "left" | "right" | "top" | "bottom"> | null>,
+  fallback: HomeWidgetZone
+): HomeWidgetZone {
+  if (rects.top && pointInRect(x, y, rects.top)) return "top";
+  if (rects.bottom && pointInRect(x, y, rects.bottom)) return "bottom";
+  return fallback;
 }
 
 export function clampLayout(w: Pick<HomeWidgetConfig, "col" | "row" | "colSpan" | "rowSpan">) {

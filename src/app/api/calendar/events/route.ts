@@ -15,7 +15,16 @@ const FEED_LOOKAHEAD_MS = 365 * 24 * 60 * 60 * 1000;
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const maxResultsParam = url.searchParams.get("maxResults");
-  const maxResults = maxResultsParam ? Number(maxResultsParam) : undefined;
+  // A non-numeric maxResultsParam (e.g. "?maxResults=abc") used to produce
+  // NaN here, which `maxResults ?? 20` below doesn't catch (?? only guards
+  // null/undefined, not NaN) — Array.prototype.slice(0, NaN) then silently
+  // returns an empty array instead of erroring or falling back to the
+  // default, so the calendar just looked empty with no indication why.
+  const maxResultsNumber = maxResultsParam ? Number(maxResultsParam) : undefined;
+  const maxResults =
+    maxResultsNumber !== undefined && Number.isFinite(maxResultsNumber) && maxResultsNumber >= 0
+      ? maxResultsNumber
+      : undefined;
   // The Upcoming widget/dashboard "My calendar" view pass this so a feed
   // toggled off "On calendar" in Settings is excluded BEFORE the
   // maxResults cap below, not after — filtering client-side after an
@@ -55,7 +64,12 @@ export async function GET(request: Request) {
   // Only surface the Google error when there's nothing else to show —
   // otherwise a viewer with working feeds but no Google connection would
   // see a scary error banner over an otherwise-successful events list.
-  if (googleResult.error && feeds.length === 0) {
+  // Checked against allowedFeeds (active, and — for excludeHiddenFeeds
+  // callers — not hidden from the calendar), not the raw feeds list: a
+  // disabled or hidden feed still counts toward `feeds.length` but
+  // contributes nothing to feedEvents, so checking the raw list could mask
+  // a real Google failure behind a request that has no usable feeds either.
+  if (googleResult.error && allowedFeeds.length === 0) {
     return Response.json({ error: googleResult.error }, { status: 502 });
   }
   return Response.json({ events });

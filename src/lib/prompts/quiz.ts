@@ -1,23 +1,36 @@
 import type { QuizGenerationSettings } from "../types";
 
-const TOTAL_QUESTIONS = 12;
+// Exported so chunked generation (generate.ts) can distribute this same
+// total across chunks instead of asking each chunk for a full 12 — without
+// that, a large course split into N chunks would come back with N*12
+// questions instead of 12.
+export const TOTAL_QUESTIONS = 12;
 
 // Even split across whichever types are enabled, remainder going to the
-// earliest ones (e.g. 12 across 3 types → 4/4/4; across 2 → 6/6).
-function distributeCount(total: number, parts: number): number[] {
+// earliest ones (e.g. 12 across 3 types → 4/4/4; across 2 → 6/6). Exported
+// only for its own unit test (see quiz.test.ts) — every real call site is
+// still within this file.
+export function distributeCount(total: number, parts: number): number[] {
   const base = Math.floor(total / parts);
   let remainder = total % parts;
   return Array.from({ length: parts }, () => base + (remainder-- > 0 ? 1 : 0));
 }
 
-function quizComposition(settings?: QuizGenerationSettings): { instructions: string; shapeExamples: string[] } {
+function quizComposition(
+  settings?: QuizGenerationSettings,
+  total: number = TOTAL_QUESTIONS
+): { instructions: string; shapeExamples: string[] } {
   // No settings (only the supplement/"add new material" flow calls this way
   // today) — the exact original behavior, unchanged: a fixed 8 mcq / 4
-  // short-answer mix, no multi-select.
+  // short-answer mix (scaled to `total`), no multi-select.
   if (!settings) {
+    // 2:1 mcq:short-answer ratio, same as the original fixed 8/4 split at
+    // the default total of 12 — scaled proportionally for chunked
+    // generation's smaller per-chunk totals, with at least 1 of each.
+    const mcqCount = Math.max(1, Math.round((total * 2) / 3));
+    const shortCount = Math.max(1, total - mcqCount);
     return {
-      instructions:
-        "Generate a mix of 8 multiple-choice questions and 4 short-answer questions (12 total), covering the material broadly rather than clustering on one topic.\n- Multiple-choice questions must have exactly 4 options with exactly one correct answer.",
+      instructions: `Generate a mix of ${mcqCount} multiple-choice questions and ${shortCount} short-answer questions (${total} total), covering the material broadly rather than clustering on one topic.\n- Multiple-choice questions must have exactly 4 options with exactly one correct answer.`,
       shapeExamples: [
         '{ "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "..." }',
         '{ "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "..." }',
@@ -26,7 +39,7 @@ function quizComposition(settings?: QuizGenerationSettings): { instructions: str
   }
 
   const enabled = (["singleChoice", "multipleChoice", "shortAnswer"] as const).filter((k) => settings[k]);
-  const counts = distributeCount(TOTAL_QUESTIONS, enabled.length || 1);
+  const counts = distributeCount(total, enabled.length || 1);
   const lines: string[] = [];
   const shapeExamples: string[] = [];
 
@@ -52,15 +65,21 @@ function quizComposition(settings?: QuizGenerationSettings): { instructions: str
   });
 
   return {
-    instructions: `Generate exactly ${TOTAL_QUESTIONS} questions total, covering the material broadly rather than clustering on one topic:\n${lines
+    instructions: `Generate exactly ${total} questions total, covering the material broadly rather than clustering on one topic:\n${lines
       .map((l) => `  - ${l}`)
       .join("\n")}`,
     shapeExamples,
   };
 }
 
-export function quizSystemPrompt(courseName: string, settings?: QuizGenerationSettings): string {
-  const { instructions, shapeExamples } = quizComposition(settings);
+export function quizSystemPrompt(
+  courseName: string,
+  settings?: QuizGenerationSettings,
+  // Overridable so chunked generation can ask each chunk for a fraction of
+  // the total instead of a full TOTAL_QUESTIONS per chunk (see generate.ts).
+  total: number = TOTAL_QUESTIONS
+): string {
+  const { instructions, shapeExamples } = quizComposition(settings, total);
   return `You are a study assistant generating a practice quiz strictly from the course material provided by the user. This is for the course "${courseName}".
 
 Rules:

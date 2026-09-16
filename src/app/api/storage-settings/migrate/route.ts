@@ -113,18 +113,47 @@ export async function POST(request: Request) {
 
 async function runMigration(pgDb: PostgresDb): Promise<Response> {
   try {
-    // Parents before children, respecting foreign keys.
-    const [courseRows, folderRows, documentRows, itemRows, attemptRows, reviewRows, scheduleRows, settingsRows] =
-      await Promise.all([
-        sqliteDb.select().from(sqliteSchema.courses),
-        sqliteDb.select().from(sqliteSchema.folders),
-        sqliteDb.select().from(sqliteSchema.documents),
-        sqliteDb.select().from(sqliteSchema.generated_items),
-        sqliteDb.select().from(sqliteSchema.quiz_attempts),
-        sqliteDb.select().from(sqliteSchema.flashcard_reviews),
-        sqliteDb.select().from(sqliteSchema.flashcard_schedule),
-        sqliteDb.select().from(sqliteSchema.app_settings),
-      ]);
+    // Parents before children, respecting foreign keys. Every table in
+    // schema.sqlite.ts/schema.pg.ts is listed here — a table missing from
+    // this list means it silently never leaves the local SQLite file, which
+    // is exactly the bug this list exists to prevent (see git history).
+    const [
+      courseRows,
+      folderRows,
+      documentRows,
+      itemRows,
+      attemptRows,
+      reviewRows,
+      scheduleRows,
+      notificationRows,
+      noteRows,
+      feedRows,
+      completedAssignmentRows,
+      recentViewRows,
+      uploadedImageRows,
+      conversationRows,
+      messageRows,
+      presetRows,
+      settingsRows,
+    ] = await Promise.all([
+      sqliteDb.select().from(sqliteSchema.courses),
+      sqliteDb.select().from(sqliteSchema.folders),
+      sqliteDb.select().from(sqliteSchema.documents),
+      sqliteDb.select().from(sqliteSchema.generated_items),
+      sqliteDb.select().from(sqliteSchema.quiz_attempts),
+      sqliteDb.select().from(sqliteSchema.flashcard_reviews),
+      sqliteDb.select().from(sqliteSchema.flashcard_schedule),
+      sqliteDb.select().from(sqliteSchema.generation_notifications),
+      sqliteDb.select().from(sqliteSchema.notes),
+      sqliteDb.select().from(sqliteSchema.calendar_feeds),
+      sqliteDb.select().from(sqliteSchema.completed_assignments),
+      sqliteDb.select().from(sqliteSchema.recent_views),
+      sqliteDb.select().from(sqliteSchema.uploaded_images),
+      sqliteDb.select().from(sqliteSchema.chat_conversations),
+      sqliteDb.select().from(sqliteSchema.chat_messages),
+      sqliteDb.select().from(sqliteSchema.quiz_generation_presets),
+      sqliteDb.select().from(sqliteSchema.app_settings),
+    ]);
 
     const documentRowsWithFiles = await backfillFileBase64(documentRows);
 
@@ -134,7 +163,18 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
         .values(stripNulBytes(courseRows))
         .onConflictDoUpdate({
           target: pgSchema.courses.id,
-          set: upsertSet(["name", "position", "created_at"]),
+          set: upsertSet([
+            "name",
+            "position",
+            "icon",
+            "color",
+            "cover_image",
+            "icon_image",
+            "show_cover_on_card",
+            "show_icon_frame",
+            "page_background_image",
+            "created_at",
+          ]),
         });
     }
     if (folderRows.length > 0) {
@@ -149,6 +189,8 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
             "is_master",
             "position",
             "parent_folder_id",
+            "icon",
+            "color",
             "created_at",
           ]),
         });
@@ -162,6 +204,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
           set: upsertSet([
               "course_id",
               "folder_id",
+              "position",
               "filename",
               "file_path",
               "file_base64",
@@ -183,11 +226,15 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
           set: upsertSet([
               "course_id",
               "folder_id",
+              "position",
               "mode",
               "title",
               "content_json",
               "source_document_ids",
               "source_folder_id",
+              "source_handpicked",
+              "model_provider",
+              "model_name",
               "created_at",
               "updated_at",
             ]),
@@ -220,6 +267,96 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
           set: upsertSet(["ease_factor", "interval_days", "repetitions", "due_at", "last_reviewed_at"]),
         });
     }
+    if (notificationRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.generation_notifications)
+        .values(stripNulBytes(notificationRows))
+        .onConflictDoUpdate({
+          target: pgSchema.generation_notifications.generated_item_id,
+          set: upsertSet(["created_at"]),
+        });
+    }
+    if (noteRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.notes)
+        .values(stripNulBytes(noteRows))
+        .onConflictDoUpdate({
+          target: pgSchema.notes.id,
+          set: upsertSet([
+            "course_id",
+            "folder_id",
+            "position",
+            "title",
+            "markdown",
+            "icon",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (feedRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.calendar_feeds)
+        .values(stripNulBytes(feedRows))
+        .onConflictDoUpdate({
+          target: pgSchema.calendar_feeds.id,
+          set: upsertSet(["label", "url", "show_on_calendar", "show_in_widget", "enabled", "created_at"]),
+        });
+    }
+    if (completedAssignmentRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.completed_assignments)
+        .values(stripNulBytes(completedAssignmentRows))
+        .onConflictDoUpdate({
+          target: pgSchema.completed_assignments.event_id,
+          set: upsertSet(["completed_at"]),
+        });
+    }
+    if (recentViewRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.recent_views)
+        .values(stripNulBytes(recentViewRows))
+        .onConflictDoUpdate({
+          target: [pgSchema.recent_views.item_type, pgSchema.recent_views.item_id],
+          set: upsertSet(["viewed_at"]),
+        });
+    }
+    if (uploadedImageRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.uploaded_images)
+        .values(stripNulBytes(uploadedImageRows))
+        .onConflictDoUpdate({
+          target: pgSchema.uploaded_images.id,
+          set: upsertSet(["kind", "data_url", "created_at"]),
+        });
+    }
+    if (conversationRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.chat_conversations)
+        .values(stripNulBytes(conversationRows))
+        .onConflictDoUpdate({
+          target: pgSchema.chat_conversations.id,
+          set: upsertSet(["title", "created_at", "updated_at"]),
+        });
+    }
+    if (messageRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.chat_messages)
+        .values(stripNulBytes(messageRows))
+        .onConflictDoUpdate({
+          target: pgSchema.chat_messages.id,
+          set: upsertSet(["conversation_id", "role", "content", "created_at"]),
+        });
+    }
+    if (presetRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.quiz_generation_presets)
+        .values(stripNulBytes(presetRows))
+        .onConflictDoUpdate({
+          target: pgSchema.quiz_generation_presets.id,
+          set: upsertSet(["name", "single_choice", "multiple_choice", "short_answer", "created_at"]),
+        });
+    }
     if (settingsRows.length > 0) {
       await pgDb
         .insert(pgSchema.app_settings)
@@ -228,10 +365,32 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
           target: pgSchema.app_settings.id,
           set: upsertSet([
               "ai_provider",
+              "image_ai_provider",
               "anthropic_api_key",
               "openai_api_key",
               "gemini_api_key",
               "openrouter_api_key",
+              "show_model_badge",
+              "google_client_id",
+              "google_client_secret",
+              "google_access_token",
+              "google_refresh_token",
+              "google_token_expiry",
+              "home_widgets",
+              "auto_open_generated_items",
+              "app_name",
+              "app_icon",
+              "app_icon_image",
+              "app_font",
+              "dashboard_background_image",
+              "dashboard_banner_style",
+              "ai_grading_enabled",
+              "dashboard_transparent_widgets",
+              "document_badges_enabled",
+              "document_badge_detail",
+              "ai_efficiency_mode",
+              "model_badge_detail",
+              "ai_enabled",
               "updated_at",
             ]),
         });
@@ -244,6 +403,12 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
       ["generated_items", itemRows],
       ["quiz_attempts", attemptRows],
       ["flashcard_reviews", reviewRows],
+      ["notes", noteRows],
+      ["calendar_feeds", feedRows],
+      ["uploaded_images", uploadedImageRows],
+      ["chat_conversations", conversationRows],
+      ["chat_messages", messageRows],
+      ["quiz_generation_presets", presetRows],
     ];
     for (const [table, rows] of withSerialId) {
       if (rows.length > 0) {
@@ -261,6 +426,15 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
         quizAttempts: attemptRows.length,
         flashcardReviews: reviewRows.length,
         flashcardSchedule: scheduleRows.length,
+        generationNotifications: notificationRows.length,
+        notes: noteRows.length,
+        calendarFeeds: feedRows.length,
+        completedAssignments: completedAssignmentRows.length,
+        recentViews: recentViewRows.length,
+        uploadedImages: uploadedImageRows.length,
+        chatConversations: conversationRows.length,
+        chatMessages: messageRows.length,
+        quizGenerationPresets: presetRows.length,
       },
     });
   } catch (err) {

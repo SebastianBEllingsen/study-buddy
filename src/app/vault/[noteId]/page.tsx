@@ -87,6 +87,16 @@ export default function NotePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.note.id]);
 
+  // Without this, typing then immediately navigating away or deleting the
+  // note leaves scheduleSave's setTimeout pending — it still fires after
+  // unmount, issuing a PATCH against a note the user has already left
+  // (possibly deleted), and calling setSaveState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
+
   function scheduleSave(fields: { title?: string; markdown?: string }) {
     setSaveState("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);

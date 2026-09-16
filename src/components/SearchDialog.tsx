@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +75,10 @@ export default function SearchDialog() {
         .then((body: { results: SearchResult[] }) => {
           if (requestId !== requestIdRef.current) return;
           setResults(body.results);
+        })
+        .catch(() => {
+          if (requestId !== requestIdRef.current) return;
+          toast.error("Search failed");
         })
         .finally(() => {
           if (requestId === requestIdRef.current) setLoading(false);

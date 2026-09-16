@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import {
   deleteCourse,
   getCourse,
@@ -11,6 +12,9 @@ import {
 import { isValidCoverImage, isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
 import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
 import { parseId } from "@/lib/routeParams";
+import { courseUploadsDirPath } from "@/lib/uploads";
+import { isValidIcon, isValidColor } from "@/lib/fieldValidation";
+import { parseJsonObjectBody } from "@/lib/requestBody";
 
 type Params = { params: Promise<{ courseId: string }> };
 
@@ -35,14 +39,14 @@ export async function PATCH(request: Request, { params }: Params) {
   const { courseId } = await params;
   const id = parseId(courseId);
   if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
-  const body = await request.json().catch(() => ({}));
+  const body = await parseJsonObjectBody(request);
   // Captured before the update so a replaced/cleared image's old blob can
   // be cleaned up afterward (see the cleanupReplacedImage calls below) —
   // undefined if the course doesn't exist, in which case there's nothing to
   // clean up either.
   const existing = await getCourse(id);
 
-  if (typeof body?.name === "string") {
+  if (typeof body.name === "string") {
     const name = body.name.trim();
     if (!name) {
       return Response.json({ error: "Course name is required" }, { status: 400 });
@@ -62,34 +66,34 @@ export async function PATCH(request: Request, { params }: Params) {
   if ("icon" in body) {
     // A handful of grapheme clusters at most — plenty for an emoji, even a
     // multi-codepoint one (skin tone modifiers, ZWJ sequences).
-    if (body.icon !== null && (typeof body.icon !== "string" || body.icon.length > 16)) {
+    if (body.icon !== null && !isValidIcon(body.icon)) {
       return Response.json({ error: "Invalid icon" }, { status: 400 });
     }
-    customization.icon = body.icon;
+    customization.icon = body.icon as string | null;
   }
   if ("color" in body) {
-    if (body.color !== null && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
+    if (body.color !== null && !isValidColor(body.color)) {
       return Response.json({ error: "Invalid color" }, { status: 400 });
     }
-    customization.color = body.color;
+    customization.color = body.color as string | null;
   }
   if ("cover_image" in body) {
     if (body.cover_image !== null && !isValidCoverImage(body.cover_image)) {
       return Response.json({ error: "Invalid cover image" }, { status: 400 });
     }
-    customization.cover_image = body.cover_image;
+    customization.cover_image = body.cover_image as string | null;
   }
   if ("icon_image" in body) {
     if (body.icon_image !== null && !isValidIconImage(body.icon_image)) {
       return Response.json({ error: "Invalid icon image" }, { status: 400 });
     }
-    customization.icon_image = body.icon_image;
+    customization.icon_image = body.icon_image as string | null;
   }
   if ("page_background_image" in body) {
     if (body.page_background_image !== null && !isValidPageBackgroundImage(body.page_background_image)) {
       return Response.json({ error: "Invalid page background image" }, { status: 400 });
     }
-    customization.page_background_image = body.page_background_image;
+    customization.page_background_image = body.page_background_image as string | null;
   }
   if ("show_cover_on_card" in body) {
     if (typeof body.show_cover_on_card !== "boolean") {
@@ -140,5 +144,14 @@ export async function DELETE(_request: Request, { params }: Params) {
       cleanupReplacedImage(existing.page_background_image),
     ]);
   }
+  // The DB rows (documents, their file_path/preview cache) are gone once
+  // deleteCourse's cascade runs, so this is the last point anything can
+  // still find them — remove the whole per-course upload directory in one
+  // shot rather than trying to individually fs.rm each document's file
+  // (mirrors the single-document DELETE route's cleanup, but for the
+  // directory as a whole since there's no longer a document row to read a
+  // path from). Best-effort: a failure here just leaves orphaned files,
+  // same as today, not a reason to fail the course deletion itself.
+  await fs.rm(courseUploadsDirPath(id), { recursive: true, force: true }).catch(() => {});
   return new Response(null, { status: 204 });
 }

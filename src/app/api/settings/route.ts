@@ -21,6 +21,8 @@ import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } fro
 import { FONT_CHOICES } from "@/lib/fontChoices";
 import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
 import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
+import { isValidIcon } from "@/lib/fieldValidation";
+import { parseJsonObjectBody } from "@/lib/requestBody";
 
 const VALID_BACKENDS: AiBackend[] = [
   "api",
@@ -45,7 +47,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
+  const body = await parseJsonObjectBody(request);
 
   if (body?.aiEnabled !== undefined) {
     if (typeof body.aiEnabled !== "boolean") {
@@ -55,26 +57,26 @@ export async function POST(request: Request) {
   }
 
   if (body?.aiBackend !== undefined) {
-    if (!VALID_BACKENDS.includes(body.aiBackend)) {
+    if (!VALID_BACKENDS.includes(body.aiBackend as AiBackend)) {
       return Response.json(
         { error: `aiBackend must be one of: ${VALID_BACKENDS.join(", ")}` },
         { status: 400 }
       );
     }
-    await setAiBackend(body.aiBackend);
+    await setAiBackend(body.aiBackend as AiBackend);
   }
 
   if (body?.imageAiBackend !== undefined) {
     // null clears the override back to "use aiBackend" — the only other
     // valid values are the backends that actually support image input (see
     // IMAGE_CAPABLE_BACKENDS's doc comment).
-    if (body.imageAiBackend !== null && !IMAGE_CAPABLE_BACKENDS.includes(body.imageAiBackend)) {
+    if (body.imageAiBackend !== null && !IMAGE_CAPABLE_BACKENDS.includes(body.imageAiBackend as AiBackend)) {
       return Response.json(
         { error: `imageAiBackend must be one of: ${IMAGE_CAPABLE_BACKENDS.join(", ")}, or null` },
         { status: 400 }
       );
     }
-    await setImageAiBackend(body.imageAiBackend);
+    await setImageAiBackend(body.imageAiBackend as AiBackend | null);
   }
 
   for (const [field, providerName] of Object.entries(KEY_FIELDS)) {
@@ -192,7 +194,7 @@ export async function POST(request: Request) {
   if ("appIcon" in body) {
     // A handful of grapheme clusters at most — plenty for an emoji, even a
     // multi-codepoint one — same bound as a course's own icon field.
-    if (body.appIcon !== null && (typeof body.appIcon !== "string" || body.appIcon.length > 16)) {
+    if (body.appIcon !== null && !isValidIcon(body.appIcon)) {
       return Response.json({ error: "appIcon must be a short string, or null" }, { status: 400 });
     }
     branding.appIcon = body.appIcon;
@@ -205,13 +207,13 @@ export async function POST(request: Request) {
   }
   if ("appFont" in body) {
     const validKeys = FONT_CHOICES.map((f) => f.key) as string[];
-    if (body.appFont !== null && !validKeys.includes(body.appFont)) {
+    if (body.appFont !== null && !validKeys.includes(body.appFont as string)) {
       return Response.json(
         { error: `appFont must be one of: ${validKeys.join(", ")}, or null` },
         { status: 400 }
       );
     }
-    branding.appFont = body.appFont;
+    branding.appFont = body.appFont as string | null;
   }
   if ("dashboardBackgroundImage" in body) {
     if (

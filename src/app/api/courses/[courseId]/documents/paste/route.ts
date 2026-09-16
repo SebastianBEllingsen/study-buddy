@@ -1,4 +1,4 @@
-import { createDocument, getOrCreateDefaultFolder, markDocumentExtracted } from "@/lib/models";
+import { createDocument, getOrCreateDefaultFolder, markDocumentExtracted, InvalidDestinationFolderError } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
@@ -52,6 +52,9 @@ export async function POST(request: Request, { params }: Params) {
 
     return Response.json({ documentId: doc.id }, { status: 201 });
   } catch (err) {
+    if (err instanceof InvalidDestinationFolderError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Paste-text document creation failed:", err);
     return Response.json({ error: "Couldn't add this text" }, { status: 500 });
   }

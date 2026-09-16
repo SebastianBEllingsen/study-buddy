@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export class LibreOfficeUnavailableError extends Error {
   constructor() {
@@ -29,8 +30,15 @@ export async function convertToPdf(buffer: Buffer, sourceExt: string): Promise<B
     // contend on) the default user profile, which makes LibreOffice hang
     // or fail under any real concurrency.
     const profileDir = path.join(workDir, "profile");
+    // pathToFileURL percent-encodes spaces/non-ASCII characters correctly —
+    // os.tmpdir() can contain either (a macOS username with a space, a
+    // Windows/Linux username with non-ASCII characters), and a plain
+    // `file://${profileDir}` template string left those unencoded,
+    // producing a malformed file URL that made LibreOffice silently fall
+    // back to the shared default profile — reintroducing the exact lock
+    // contention under concurrent conversions this flag exists to avoid.
     await runSoffice([
-      `-env:UserInstallation=file://${profileDir}`,
+      `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
       "--headless",
       "--norestore",
       "--convert-to",

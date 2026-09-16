@@ -14,6 +14,7 @@ import {
   moveWidgetTo,
   pointToCell,
   resizeWidgetTo,
+  resolveZoneAtPoint,
   setWidgetEnabled,
   tileGridStyle,
 } from "@/lib/dashboardGrid";
@@ -35,10 +36,6 @@ interface DragGhost {
   clientY: number;
   width: number;
   height: number;
-}
-
-function pointInRect(x: number, y: number, rect: DOMRect): boolean {
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
 // A pencil button that swaps for an inline text field in place — e.g. the
@@ -292,19 +289,6 @@ export function DashboardCustomizeDialog({
     return zone === "top" ? topGridRef : bottomGridRef;
   }
 
-  // Which of the two grids the pointer is currently over, if either — used
-  // both to know which grid's cell math applies and to let a tile visually
-  // move between zones mid-drag. Falls back to the widget's own zone when
-  // the pointer is over neither (e.g. in the gap between the two grids, or
-  // starting a drag from a Hidden chip, which isn't inside any grid).
-  function zoneUnderPoint(x: number, y: number, fallback: HomeWidgetZone): HomeWidgetZone {
-    const topRect = topGridRef.current?.getBoundingClientRect();
-    if (topRect && pointInRect(x, y, topRect)) return "top";
-    const bottomRect = bottomGridRef.current?.getBoundingClientRect();
-    if (bottomRect && pointInRect(x, y, bottomRect)) return "bottom";
-    return fallback;
-  }
-
   function startMove(e: React.PointerEvent, widget: HomeWidgetConfig, tileRect: DOMRect | null) {
     e.preventDefault();
     const handle = e.currentTarget as HTMLElement;
@@ -312,6 +296,27 @@ export function DashboardCustomizeDialog({
     const { colStep, rowStep } = getGridMetrics(gridRefFor(widget.zone).current ?? topGridRef.current!);
     const width = tileRect?.width ?? colStep * widget.colSpan;
     const height = tileRect?.height ?? rowStep * widget.rowSpan;
+
+    // Which of the two grids the pointer is over is judged against each
+    // zone's bounds as measured right now, before this drag's own preview
+    // tile has rendered anywhere — not re-measured live on every
+    // pointermove. A zone's box grows taller as soon as its preview tile
+    // lands on a not-yet-visible row (CSS grid-auto-rows expands to fit
+    // it), and re-querying getBoundingClientRect() on every move would let
+    // that growth chase the pointer down the page: dragging a tile out of
+    // the top zone toward the bottom one would just keep re-measuring an
+    // ever-taller top zone that still contains the pointer, so it could
+    // never register as having actually crossed into the bottom zone —
+    // exactly the "drops just expand the zone above instead of moving
+    // into the one below" bug this fixes. Falls back to the widget's own
+    // zone when the pointer is over neither zone's original bounds (e.g.
+    // in the gap between the two grids, or starting a drag from a Hidden
+    // chip, which isn't inside any grid).
+    const zoneRects: Record<HomeWidgetZone, DOMRect | null> = {
+      top: topGridRef.current?.getBoundingClientRect() ?? null,
+      bottom: bottomGridRef.current?.getBoundingClientRect() ?? null,
+    };
+    const zoneAtPoint = (x: number, y: number) => resolveZoneAtPoint(x, y, zoneRects, widget.zone);
 
     setActiveId(widget.id);
     setGhost({
@@ -327,7 +332,7 @@ export function DashboardCustomizeDialog({
 
     function handleMove(ev: PointerEvent) {
       setGhost((prev) => (prev ? { ...prev, clientX: ev.clientX, clientY: ev.clientY } : prev));
-      const zone = zoneUnderPoint(ev.clientX, ev.clientY, widget.zone);
+      const zone = zoneAtPoint(ev.clientX, ev.clientY);
       const gridEl = gridRefFor(zone).current;
       if (!gridEl) return;
       const { col, row } = pointToCell(gridEl, ev.clientX, ev.clientY);
@@ -337,7 +342,7 @@ export function DashboardCustomizeDialog({
       handle.releasePointerCapture(e.pointerId);
       handle.removeEventListener("pointermove", handleMove);
       handle.removeEventListener("pointerup", handleUp);
-      const zone = zoneUnderPoint(ev.clientX, ev.clientY, widget.zone);
+      const zone = zoneAtPoint(ev.clientX, ev.clientY);
       const gridEl = gridRefFor(zone).current;
       if (gridEl) {
         const { col, row } = pointToCell(gridEl, ev.clientX, ev.clientY);

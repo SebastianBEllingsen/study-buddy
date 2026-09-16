@@ -1,4 +1,4 @@
-import { createNote } from "@/lib/models";
+import { createNote, InvalidDestinationFolderError } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
@@ -18,6 +18,9 @@ export async function POST(request: Request, { params }: Params) {
     const note = await createNote(title, id, folderId, markdown);
     return Response.json({ note }, { status: 201 });
   } catch (err) {
+    if (err instanceof InvalidDestinationFolderError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     return Response.json({ error: err instanceof Error ? err.message : "Couldn't create note" }, { status: 409 });
   }
 }

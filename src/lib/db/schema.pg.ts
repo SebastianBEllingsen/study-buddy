@@ -6,6 +6,7 @@ import {
   real,
   boolean,
   primaryKey,
+  index,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type {
@@ -133,92 +134,126 @@ export const app_settings = pgTable("app_settings", {
   updated_at: text("updated_at").notNull(),
 });
 
-export const folders = pgTable("folders", {
-  id: serial("id").primaryKey(),
-  course_id: integer("course_id")
-    .notNull()
-    .references(() => courses.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  is_master: boolean("is_master").notNull().default(false),
-  position: integer("position").notNull().default(0),
-  // See schema.sqlite.ts — same one-level-nesting rule and cascade backstop.
-  parent_folder_id: integer("parent_folder_id").references((): AnyPgColumn => folders.id, {
-    onDelete: "cascade",
-  }),
-  icon: text("icon"),
-  color: text("color"),
-  created_at: text("created_at").notNull(),
-});
+export const folders = pgTable(
+  "folders",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    is_master: boolean("is_master").notNull().default(false),
+    position: integer("position").notNull().default(0),
+    // See schema.sqlite.ts — same one-level-nesting rule and cascade backstop.
+    parent_folder_id: integer("parent_folder_id").references((): AnyPgColumn => folders.id, {
+      onDelete: "cascade",
+    }),
+    icon: text("icon"),
+    color: text("color"),
+    created_at: text("created_at").notNull(),
+  },
+  // Mirrors schema.sql's idx_folders_course_id — SQLite's equivalent of
+  // every index below. Postgres, unlike SQLite here, has table creation
+  // owned by Drizzle Kit, so these just need to be declared once.
+  (table) => [index("idx_folders_course_id").on(table.course_id)]
+);
 
-export const documents = pgTable("documents", {
-  id: serial("id").primaryKey(),
-  course_id: integer("course_id")
-    .notNull()
-    .references(() => courses.id, { onDelete: "cascade" }),
-  folder_id: integer("folder_id").references(() => folders.id, { onDelete: "set null" }),
-  // Manual drag-reorder within a folder — see reorderDocuments in models.ts.
-  // Scoped per folder like folders.position is scoped per course, not
-  // globally unique.
-  position: integer("position").notNull().default(0),
-  filename: text("filename").notNull(),
-  file_path: text("file_path").notNull(),
-  // See schema.sqlite.ts — base64-encoded original PDF bytes, synced
-  // alongside the row so the file travels with it, not just its metadata.
-  file_base64: text("file_base64"),
-  extracted_text: text("extracted_text"),
-  page_count: integer("page_count"),
-  char_count: integer("char_count"),
-  status: text("status").notNull().default("pending").$type<DocumentStatus>(),
-  error_message: text("error_message"),
-  created_at: text("created_at").notNull(),
-});
+export const documents = pgTable(
+  "documents",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    folder_id: integer("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    // Manual drag-reorder within a folder — see reorderDocuments in models.ts.
+    // Scoped per folder like folders.position is scoped per course, not
+    // globally unique.
+    position: integer("position").notNull().default(0),
+    filename: text("filename").notNull(),
+    file_path: text("file_path").notNull(),
+    // See schema.sqlite.ts — base64-encoded original PDF bytes, synced
+    // alongside the row so the file travels with it, not just its metadata.
+    file_base64: text("file_base64"),
+    extracted_text: text("extracted_text"),
+    page_count: integer("page_count"),
+    char_count: integer("char_count"),
+    status: text("status").notNull().default("pending").$type<DocumentStatus>(),
+    error_message: text("error_message"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_documents_course_id").on(table.course_id),
+    index("idx_documents_folder_id").on(table.folder_id),
+  ]
+);
 
-export const generated_items = pgTable("generated_items", {
-  id: serial("id").primaryKey(),
-  course_id: integer("course_id")
-    .notNull()
-    .references(() => courses.id, { onDelete: "cascade" }),
-  folder_id: integer("folder_id").references(() => folders.id, { onDelete: "set null" }),
-  // Manual drag-reorder within a folder — see reorderGeneratedItems in models.ts.
-  position: integer("position").notNull().default(0),
-  mode: text("mode").notNull().$type<GenerationMode>(),
-  title: text("title").notNull(),
-  content_json: text("content_json").notNull(),
-  source_document_ids: text("source_document_ids").notNull(),
-  source_folder_id: integer("source_folder_id").references(() => folders.id, {
-    onDelete: "set null",
-  }),
-  // True for a hand-picked "choose documents" selection — also leaves
-  // source_folder_id null (not scoped to one folder) but is distinct from a
-  // pooled "all course material" generation. See schema.sql and
-  // getNewDocumentsForItem in models.ts.
-  source_handpicked: boolean("source_handpicked").notNull().default(false),
-  model_provider: text("model_provider").$type<AiBackend>(),
-  model_name: text("model_name"),
-  created_at: text("created_at").notNull(),
-  updated_at: text("updated_at").notNull(),
-});
+export const generated_items = pgTable(
+  "generated_items",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    folder_id: integer("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    // Manual drag-reorder within a folder — see reorderGeneratedItems in models.ts.
+    position: integer("position").notNull().default(0),
+    mode: text("mode").notNull().$type<GenerationMode>(),
+    title: text("title").notNull(),
+    content_json: text("content_json").notNull(),
+    source_document_ids: text("source_document_ids").notNull(),
+    source_folder_id: integer("source_folder_id").references(() => folders.id, {
+      onDelete: "set null",
+    }),
+    // True for a hand-picked "choose documents" selection — also leaves
+    // source_folder_id null (not scoped to one folder) but is distinct from a
+    // pooled "all course material" generation. See schema.sql and
+    // getNewDocumentsForItem in models.ts.
+    source_handpicked: boolean("source_handpicked").notNull().default(false),
+    model_provider: text("model_provider").$type<AiBackend>(),
+    model_name: text("model_name"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_generated_items_course_id").on(table.course_id),
+    // Neither of these is indexed on the SQLite side either — added on both
+    // backends together, since it's the same class of gap as
+    // idx_documents_folder_id above and these columns are hit by the same
+    // per-folder listing/backfill queries in models.ts.
+    index("idx_generated_items_folder_id").on(table.folder_id),
+    index("idx_generated_items_source_folder_id").on(table.source_folder_id),
+  ]
+);
 
-export const quiz_attempts = pgTable("quiz_attempts", {
-  id: serial("id").primaryKey(),
-  generated_item_id: integer("generated_item_id")
-    .notNull()
-    .references(() => generated_items.id, { onDelete: "cascade" }),
-  started_at: text("started_at").notNull(),
-  completed_at: text("completed_at"),
-  score: real("score"),
-  answers_json: text("answers_json"),
-});
+export const quiz_attempts = pgTable(
+  "quiz_attempts",
+  {
+    id: serial("id").primaryKey(),
+    generated_item_id: integer("generated_item_id")
+      .notNull()
+      .references(() => generated_items.id, { onDelete: "cascade" }),
+    started_at: text("started_at").notNull(),
+    completed_at: text("completed_at"),
+    score: real("score"),
+    answers_json: text("answers_json"),
+  },
+  (table) => [index("idx_quiz_attempts_item_id").on(table.generated_item_id)]
+);
 
-export const flashcard_reviews = pgTable("flashcard_reviews", {
-  id: serial("id").primaryKey(),
-  generated_item_id: integer("generated_item_id")
-    .notNull()
-    .references(() => generated_items.id, { onDelete: "cascade" }),
-  card_index: integer("card_index").notNull(),
-  last_result: text("last_result").notNull().$type<FlashcardResult>(),
-  reviewed_at: text("reviewed_at").notNull(),
-});
+export const flashcard_reviews = pgTable(
+  "flashcard_reviews",
+  {
+    id: serial("id").primaryKey(),
+    generated_item_id: integer("generated_item_id")
+      .notNull()
+      .references(() => generated_items.id, { onDelete: "cascade" }),
+    card_index: integer("card_index").notNull(),
+    last_result: text("last_result").notNull().$type<FlashcardResult>(),
+    reviewed_at: text("reviewed_at").notNull(),
+  },
+  (table) => [index("idx_flashcard_reviews_item_id").on(table.generated_item_id)]
+);
 
 export const flashcard_schedule = pgTable(
   "flashcard_schedule",
@@ -265,20 +300,27 @@ export const calendar_feeds = pgTable("calendar_feeds", {
 // The Vault: personal Obsidian-style notes — see the matching comment in
 // schema.sql. Title uniqueness is enforced case-insensitively in
 // models.ts, not here (see schema.sql's comment on the same table).
-export const notes = pgTable("notes", {
-  id: serial("id").primaryKey(),
-  // Nullable — see the matching comment in schema.sql for why (ALTER'd
-  // onto this table after it shipped; application code always populates
-  // both).
-  course_id: integer("course_id").references(() => courses.id, { onDelete: "cascade" }),
-  folder_id: integer("folder_id").references(() => folders.id, { onDelete: "set null" }),
-  position: integer("position").notNull().default(0),
-  title: text("title").notNull(),
-  markdown: text("markdown").notNull().default(""),
-  icon: text("icon"),
-  created_at: text("created_at").notNull(),
-  updated_at: text("updated_at").notNull(),
-});
+export const notes = pgTable(
+  "notes",
+  {
+    id: serial("id").primaryKey(),
+    // Nullable — see the matching comment in schema.sql for why (ALTER'd
+    // onto this table after it shipped; application code always populates
+    // both).
+    course_id: integer("course_id").references(() => courses.id, { onDelete: "cascade" }),
+    folder_id: integer("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    position: integer("position").notNull().default(0),
+    title: text("title").notNull(),
+    markdown: text("markdown").notNull().default(""),
+    icon: text("icon"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_notes_course_id").on(table.course_id),
+    index("idx_notes_folder_id").on(table.folder_id),
+  ]
+);
 
 // Checked-off state for the Assignments widget's checklist — see the
 // matching comment in schema.sql for why this keys by the feed event's own
@@ -302,12 +344,16 @@ export const recent_views = pgTable(
 
 // Reusable icon/cover image library — see the matching comment in
 // schema.sql.
-export const uploaded_images = pgTable("uploaded_images", {
-  id: serial("id").primaryKey(),
-  kind: text("kind").notNull(),
-  data_url: text("data_url").notNull(),
-  created_at: text("created_at").notNull(),
-});
+export const uploaded_images = pgTable(
+  "uploaded_images",
+  {
+    id: serial("id").primaryKey(),
+    kind: text("kind").notNull(),
+    data_url: text("data_url").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_uploaded_images_kind").on(table.kind)]
+);
 
 // General-purpose AI chat assistant — see the matching comment in schema.sql.
 export const chat_conversations = pgTable("chat_conversations", {
@@ -317,15 +363,19 @@ export const chat_conversations = pgTable("chat_conversations", {
   updated_at: text("updated_at").notNull(),
 });
 
-export const chat_messages = pgTable("chat_messages", {
-  id: serial("id").primaryKey(),
-  conversation_id: integer("conversation_id")
-    .notNull()
-    .references(() => chat_conversations.id, { onDelete: "cascade" }),
-  role: text("role").notNull().$type<ChatRole>(),
-  content: text("content").notNull(),
-  created_at: text("created_at").notNull(),
-});
+export const chat_messages = pgTable(
+  "chat_messages",
+  {
+    id: serial("id").primaryKey(),
+    conversation_id: integer("conversation_id")
+      .notNull()
+      .references(() => chat_conversations.id, { onDelete: "cascade" }),
+    role: text("role").notNull().$type<ChatRole>(),
+    content: text("content").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_chat_messages_conversation_id").on(table.conversation_id)]
+);
 
 // Saved quiz-generation configurations — see the matching comment in schema.sql.
 export const quiz_generation_presets = pgTable("quiz_generation_presets", {

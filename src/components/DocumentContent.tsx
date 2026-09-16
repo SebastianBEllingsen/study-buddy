@@ -39,12 +39,14 @@ export interface ViewedDocument {
   courseId: number;
   filename: string;
   extracted_text: string | null;
-  // "" for pasted text (see documents/paste/route.ts) — distinguishes it
+  // False for pasted text (see documents/paste/route.ts) — distinguishes it
   // from a real PDF whose file just isn't available on this device, which
   // also falls back to this same extracted-text view but shouldn't offer
   // "Make pretty" (that would drift the text from the actual PDF it
-  // represents).
-  filePath: string;
+  // represents). The API deliberately doesn't return the real file_path
+  // (an absolute server filesystem path) since nothing on the client needs
+  // more than this boolean.
+  hasFile: boolean;
 }
 
 // The actual PDF-or-extracted-text rendering, Crop & Ask, and highlight-to-
@@ -102,7 +104,7 @@ export default function DocumentContent({
   // this ref (captureElementRegion, scrollToHighlight, AskAiPanel) already
   // takes a generic HTMLElement.
   const textRef = useRef<HTMLElement>(null);
-  const isPasted = document.filePath === "";
+  const isPasted = !document.hasFile;
   const ext = extensionOf(document.filename);
   const isDocx = ext === "docx";
   const isImage = isImageExtension(ext);

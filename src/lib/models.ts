@@ -819,6 +819,22 @@ export async function isImageUrlReferenced(url: string): Promise<boolean> {
   return settings.appIconImage === url || settings.dashboardBackgroundImage === url;
 }
 
+// True if any note embeds this uploaded_images row via a
+// studybuddy-image:<id> reference (see NOTE_IMAGE_SCHEME in NoteEditor.tsx)
+// — checked before letting the library picker (DELETE /api/uploaded-images/
+// [id]) delete a row, since isImageUrlReferenced above only looks at course/
+// branding fields and other uploaded_images rows, never note content. Keyed
+// by the row's id (what notes actually embed), not its data_url (what
+// isImageUrlReferenced checks) — same scan-every-note's-markdown approach as
+// getNoteBacklinks, since there's no denormalized index of note image
+// embeds either. The negative lookahead keeps id=1 from matching inside
+// id=12's reference.
+export async function isUploadedImageReferencedInNotes(id: number): Promise<boolean> {
+  const rows = await db.select({ markdown: notes.markdown }).from(notes);
+  const pattern = new RegExp(`studybuddy-image:${id}(?!\\d)`);
+  return rows.some((row) => pattern.test(row.markdown));
+}
+
 // Migration-only (see /api/storage-settings/migrate-images): every
 // uploaded_images row across every kind, unlike listUploadedImages which is
 // always scoped to one kind for the library picker.
@@ -884,8 +900,8 @@ async function assertTitleAvailable(title: string, excludeId?: number): Promise<
 
 // Same pattern as nextDocumentPosition — a newly created (or moved) note
 // lands at the end of its destination folder.
-async function nextNotePosition(folderId: number): Promise<number> {
-  const [{ next }] = await db
+async function nextNotePosition(folderId: number, tx: typeof db = db): Promise<number> {
+  const [{ next }] = await tx
     .select({ next: sql<number>`COALESCE(MAX(${notes.position}), -1) + 1` })
     .from(notes)
     .where(eq(notes.folder_id, folderId));
@@ -899,20 +915,34 @@ export async function createNote(
   markdown = ""
 ): Promise<Note> {
   await assertTitleAvailable(title);
+  // moveNote validates this same invariant on the move path (see its own
+  // comment) — createNote let an explicit folderId through unchecked, so a
+  // crafted request could create a note whose course_id disagrees with its
+  // own folder's course_id.
+  if (folderId != null) {
+    const folder = await getFolder(folderId);
+    if (!folder || folder.course_id !== courseId) {
+      throw new InvalidDestinationFolderError();
+    }
+  }
   const resolvedFolderId = folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
   const now = nowUtc();
-  const [note] = await db
-    .insert(notes)
-    .values({
-      title,
-      markdown,
-      course_id: courseId,
-      folder_id: resolvedFolderId,
-      position: await nextNotePosition(resolvedFolderId),
-      created_at: now,
-      updated_at: now,
-    })
-    .returning();
+  // Same atomicity concern as createDocument — see its comment.
+  const note = await runTransaction(async (tx) => {
+    const [row] = await tx
+      .insert(notes)
+      .values({
+        title,
+        markdown,
+        course_id: courseId,
+        folder_id: resolvedFolderId,
+        position: await nextNotePosition(resolvedFolderId, tx),
+        created_at: now,
+        updated_at: now,
+      })
+      .returning();
+    return row;
+  });
   return note as Note;
 }
 
@@ -931,10 +961,19 @@ export async function updateNoteIcon(id: number, icon: string | null): Promise<v
 
 // Lands at the end of the destination folder — same as moveDocument.
 export async function moveNote(id: number, folderId: number): Promise<void> {
-  await db
-    .update(notes)
-    .set({ folder_id: folderId, position: await nextNotePosition(folderId) })
-    .where(eq(notes.id, id));
+  const note = await getNote(id);
+  if (!note) return;
+  const destination = await getFolder(folderId);
+  if (!destination || destination.course_id !== note.course_id) {
+    throw new InvalidDestinationFolderError();
+  }
+  // Same atomicity concern as moveDocument — see its comment.
+  await runTransaction(async (tx) => {
+    await tx
+      .update(notes)
+      .set({ folder_id: folderId, position: await nextNotePosition(folderId, tx) })
+      .where(eq(notes.id, id));
+  });
 }
 
 // Same pattern as reorderDocuments — scoped to one folder at a time.
@@ -1294,7 +1333,17 @@ export async function createFolder(
 ): Promise<Folder> {
   if (parentFolderId != null) {
     const parent = await getFolder(parentFolderId);
-    if (parent?.parent_folder_id != null) {
+    if (!parent || parent.course_id !== courseId) {
+      // Same invariant moveDocument/moveNote/moveGeneratedItem already
+      // enforce on the move path — without this, a crafted parentFolderId
+      // from a different course creates a folder that's filed under this
+      // course (course_id === courseId) but nested under a parent from
+      // another course entirely. It then renders nowhere (the course page
+      // only groups subfolders by parent within that same course), leaving
+      // a permanently invisible orphan.
+      throw new InvalidDestinationFolderError();
+    }
+    if (parent.parent_folder_id != null) {
       throw new CannotNestSubfolderError();
     }
   }
@@ -1318,6 +1367,20 @@ export async function createFolder(
 export async function getFolder(id: number): Promise<Folder | undefined> {
   const rows = await db.select().from(folders).where(eq(folders.id, id)).limit(1);
   return rows[0];
+}
+
+// Thrown by moveDocument/moveNote/moveGeneratedItem when the requested
+// destination folder doesn't exist or belongs to a different course than
+// the item being moved — generateForCourse (generate.ts) already guards its
+// own destinationFolderId this way; this is the same check for the plain
+// drag-and-drop move endpoints, which previously only validated that
+// folderId was an integer, letting a document/note/item end up with a
+// course_id that disagreed with its own folder's course_id.
+export class InvalidDestinationFolderError extends Error {
+  constructor() {
+    super("That destination folder no longer exists.");
+    this.name = "InvalidDestinationFolderError";
+  }
 }
 
 // The one "if you don't say where, it goes here" folder per course — never
@@ -1389,7 +1452,13 @@ export async function nestFolder(id: number, parentFolderId: number | null): Pro
   }
   if (id === parentFolderId) return;
   const parent = await getFolder(parentFolderId);
-  if (!parent) return;
+  // A parent from a different course is treated the same as "not found" —
+  // consistent with this function's existing style of silently no-opping on
+  // an invalid target rather than throwing (see the !parent check above).
+  // Without this, nesting could produce a folder whose course_id disagrees
+  // with its own parent's course_id, same invisible-orphan risk createFolder
+  // guards against on the create path.
+  if (!parent || parent.course_id !== folder.course_id) return;
   if (parent.parent_folder_id != null) {
     throw new CannotNestSubfolderError();
   }
@@ -1487,8 +1556,8 @@ export async function deleteFolder(id: number): Promise<void> {
 // Documents display oldest-first within a folder (see listDocumentsForCourse),
 // so a newly uploaded/pasted/moved-in document appends to the end — same
 // convention as folders' own position (see createFolder).
-async function nextDocumentPosition(folderId: number): Promise<number> {
-  const [{ next }] = await db
+async function nextDocumentPosition(folderId: number, tx: typeof db = db): Promise<number> {
+  const [{ next }] = await tx
     .select({ next: sql<number>`COALESCE(MAX(${documents.position}), -1) + 1` })
     .from(documents)
     .where(eq(documents.folder_id, folderId));
@@ -1504,19 +1573,35 @@ export async function createDocument(params: {
   // POST .../documents/paste/route.ts.
   fileBase64: string | null;
 }): Promise<DocumentRow> {
-  const [doc] = await db
-    .insert(documents)
-    .values({
-      course_id: params.courseId,
-      folder_id: params.folderId,
-      position: await nextDocumentPosition(params.folderId),
-      filename: params.filename,
-      file_path: params.filePath,
-      file_base64: params.fileBase64,
-      status: "pending",
-      created_at: nowUtc(),
-    })
-    .returning();
+  // Same invariant moveDocument enforces on the move path — an explicit
+  // folderId here (from either the file-upload or paste-text route) was
+  // otherwise never checked against courseId, letting a crafted request
+  // create a document whose course_id disagrees with its own folder's
+  // course_id.
+  const folder = await getFolder(params.folderId);
+  if (!folder || folder.course_id !== params.courseId) {
+    throw new InvalidDestinationFolderError();
+  }
+  // Reading the next position and inserting at it must be atomic — two
+  // concurrent uploads into the same folder (e.g. a multi-file
+  // drag-and-drop) could otherwise both read the same MAX(position) before
+  // either insert, landing both documents at the same position.
+  const doc = await runTransaction(async (tx) => {
+    const [row] = await tx
+      .insert(documents)
+      .values({
+        course_id: params.courseId,
+        folder_id: params.folderId,
+        position: await nextDocumentPosition(params.folderId, tx),
+        filename: params.filename,
+        file_path: params.filePath,
+        file_base64: params.fileBase64,
+        status: "pending",
+        created_at: nowUtc(),
+      })
+      .returning();
+    return row;
+  });
   return doc as DocumentRow;
 }
 
@@ -1622,13 +1707,23 @@ export async function deleteDocument(id: number): Promise<void> {
 }
 
 export async function moveDocument(id: number, folderId: number): Promise<void> {
+  const doc = await getDocument(id);
+  if (!doc) return;
+  const destination = await getFolder(folderId);
+  if (!destination || destination.course_id !== doc.course_id) {
+    throw new InvalidDestinationFolderError();
+  }
   // Lands at the end of the destination folder — same place a newly
   // uploaded document would, rather than keeping whatever position number
-  // it happened to have in its old folder (meaningless there).
-  await db
-    .update(documents)
-    .set({ folder_id: folderId, position: await nextDocumentPosition(folderId) })
-    .where(eq(documents.id, id));
+  // it happened to have in its old folder (meaningless there). Wrapped in a
+  // transaction for the same reason as createDocument — two concurrent
+  // moves into the same folder must not read the same next position.
+  await runTransaction(async (tx) => {
+    await tx
+      .update(documents)
+      .set({ folder_id: folderId, position: await nextDocumentPosition(folderId, tx) })
+      .where(eq(documents.id, id));
+  });
 }
 
 export async function renameDocument(id: number, filename: string): Promise<void> {
@@ -1655,8 +1750,8 @@ export async function reorderDocuments(folderId: number, orderedIds: number[]): 
 // listGeneratedItemsForCourse), so a newly generated/moved-in item prepends
 // to the front — mirrors courses' own "prepend" position convention (see
 // createCourse) rather than documents' "append" one.
-async function nextGeneratedItemPosition(folderId: number): Promise<number> {
-  const [{ next }] = await db
+async function nextGeneratedItemPosition(folderId: number, tx: typeof db = db): Promise<number> {
+  const [{ next }] = await tx
     .select({ next: sql<number>`COALESCE(MIN(${generated_items.position}), 1) - 1` })
     .from(generated_items)
     .where(eq(generated_items.folder_id, folderId));
@@ -1675,24 +1770,28 @@ export async function createGeneratedItem(params: {
   model?: { provider: AiBackend; model: string };
 }): Promise<GeneratedItem> {
   const now = nowUtc();
-  const [item] = await db
-    .insert(generated_items)
-    .values({
-      course_id: params.courseId,
-      folder_id: params.folderId,
-      position: await nextGeneratedItemPosition(params.folderId),
-      source_folder_id: params.sourceFolderId,
-      source_handpicked: params.sourceHandpicked,
-      mode: params.mode,
-      title: params.title,
-      content_json: JSON.stringify(params.contentJson),
-      source_document_ids: JSON.stringify(params.sourceDocumentIds),
-      model_provider: params.model?.provider ?? null,
-      model_name: params.model?.model ?? null,
-      created_at: now,
-      updated_at: now,
-    })
-    .returning();
+  // Same atomicity concern as createDocument — see its comment.
+  const item = await runTransaction(async (tx) => {
+    const [row] = await tx
+      .insert(generated_items)
+      .values({
+        course_id: params.courseId,
+        folder_id: params.folderId,
+        position: await nextGeneratedItemPosition(params.folderId, tx),
+        source_folder_id: params.sourceFolderId,
+        source_handpicked: params.sourceHandpicked,
+        mode: params.mode,
+        title: params.title,
+        content_json: JSON.stringify(params.contentJson),
+        source_document_ids: JSON.stringify(params.sourceDocumentIds),
+        model_provider: params.model?.provider ?? null,
+        model_name: params.model?.model ?? null,
+        created_at: now,
+        updated_at: now,
+      })
+      .returning();
+    return row;
+  });
   return item as GeneratedItem;
 }
 
@@ -1769,12 +1868,21 @@ export async function updateGeneratedItemContent(params: {
 }
 
 export async function moveGeneratedItem(id: number, folderId: number): Promise<void> {
+  const item = await getGeneratedItem(id);
+  if (!item) return;
+  const destination = await getFolder(folderId);
+  if (!destination || destination.course_id !== item.course_id) {
+    throw new InvalidDestinationFolderError();
+  }
   // Lands at the front of the destination folder — same place a freshly
-  // generated item would.
-  await db
-    .update(generated_items)
-    .set({ folder_id: folderId, position: await nextGeneratedItemPosition(folderId) })
-    .where(eq(generated_items.id, id));
+  // generated item would. Wrapped in a transaction for the same reason as
+  // moveDocument — see its comment.
+  await runTransaction(async (tx) => {
+    await tx
+      .update(generated_items)
+      .set({ folder_id: folderId, position: await nextGeneratedItemPosition(folderId, tx) })
+      .where(eq(generated_items.id, id));
+  });
 }
 
 // Applies a new drag-and-drop order in one transaction, same pattern as
@@ -1867,6 +1975,15 @@ export async function completeQuizAttempt(params: {
       answers_json: JSON.stringify(params.answersJson),
     })
     .where(eq(quiz_attempts.id, params.id));
+}
+
+// Used to roll back an attempt row when grading fails after it's created —
+// see the attempt route's own comment. Without this, a rate-limited or
+// otherwise-failed grading call left a permanent attempt with no score/
+// completed_at in "Previous attempts", since neither listQuizAttemptsForItem
+// nor listRecentQuizAttemptsForItem filters on completed_at.
+export async function deleteQuizAttempt(id: number): Promise<void> {
+  await db.delete(quiz_attempts).where(eq(quiz_attempts.id, id));
 }
 
 export async function listQuizAttemptsForItem(generatedItemId: number): Promise<QuizAttempt[]> {
@@ -2037,6 +2154,48 @@ export async function reconcileFlashcardScheduleAfterRemoval(
   });
 }
 
+// Same card_index-shift problem as reconcileFlashcardScheduleAfterRemoval
+// above, but for the append-only flashcard_reviews log instead of the
+// per-card schedule state — nothing currently reads this log by index (see
+// items/[itemId]/route.ts's GET, which drops it entirely), but leaving it
+// unreconciled would mean any future feature that does (a per-card review
+// history view, say) silently reads a stale card's history under a
+// different card's current index. Unlike flashcard_schedule, there's no
+// (generated_item_id, card_index) uniqueness here — multiple review rows
+// legitimately share a card_index over time — so this shifts each
+// surviving row's index in place instead of delete-and-reinsert.
+export async function reconcileFlashcardReviewsAfterRemoval(
+  generatedItemId: number,
+  removedIndices: number[]
+): Promise<void> {
+  if (removedIndices.length === 0) return;
+  const removed = [...new Set(removedIndices)].sort((a, b) => a - b);
+
+  const rows = await db
+    .select()
+    .from(flashcard_reviews)
+    .where(eq(flashcard_reviews.generated_item_id, generatedItemId));
+  if (rows.length === 0) return;
+
+  await runTransaction(async (tx) => {
+    for (const row of rows) {
+      if (removed.includes(row.card_index)) {
+        // This card itself was removed — its review history no longer
+        // corresponds to any real card.
+        await tx.delete(flashcard_reviews).where(eq(flashcard_reviews.id, row.id));
+        continue;
+      }
+      const shift = removed.filter((i) => i < row.card_index).length;
+      if (shift > 0) {
+        await tx
+          .update(flashcard_reviews)
+          .set({ card_index: row.card_index - shift })
+          .where(eq(flashcard_reviews.id, row.id));
+      }
+    }
+  });
+}
+
 // --- Search ---
 // Fuzzy, typo-tolerant search across both generated items (notes/quiz/
 // flashcards) and uploaded documents' extracted text, via Fuse.js scoring
@@ -2094,7 +2253,16 @@ function itemCandidates(
   contentJson: string,
   key: string
 ): SearchCandidate[] {
-  const content = JSON.parse(contentJson);
+  // A single corrupted/truncated content_json row must not take out search
+  // entirely — /api/search has no try/catch around loadSearchCorpus, so an
+  // uncaught throw here previously 500'd every search, not just this item.
+  let content: unknown;
+  try {
+    content = JSON.parse(contentJson);
+  } catch (err) {
+    console.error(`Skipping item ${key} with unparseable content_json in search:`, err);
+    return [];
+  }
   switch (mode) {
     case "quiz":
       return (content as QuizContent).questions.map((q) => ({ key, text: q.question }));
@@ -2359,7 +2527,17 @@ export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
   const due: DueFlashcardItem[] = [];
   for (const row of rows) {
     const item = row.generated_items;
-    const cardCount = (JSON.parse(item.content_json) as FlashcardsContent).cards.length;
+    // A single corrupted/truncated content_json row must not take out the
+    // whole dashboard — this is on /api/stats's hot path (every home page
+    // load). Skipped rather than thrown: the rest of the deck is still
+    // meaningful without this one item's due count.
+    let cardCount: number;
+    try {
+      cardCount = (JSON.parse(item.content_json) as FlashcardsContent).cards.length;
+    } catch (err) {
+      console.error(`Skipping flashcard item ${item.id} with unparseable content_json:`, err);
+      continue;
+    }
     const dueCount = computeDueCardIndices(scheduleByItem.get(item.id) ?? [], cardCount).length;
     if (dueCount > 0) {
       due.push({
@@ -2525,6 +2703,16 @@ export async function addChatMessage(
   await db.update(chat_conversations).set(updates).where(eq(chat_conversations.id, conversationId));
 
   return toChatMessage(message);
+}
+
+// Used to roll back the user's just-persisted message when the model call
+// that was supposed to follow it fails — see chat.ts's sendChatMessage.
+// Without this, a failed send left the user's message permanently in the
+// conversation with no reply after it, even though the client had already
+// rolled back its own optimistic copy — reloading the conversation would
+// bring it back, duplicated, the next time the same text was sent.
+export async function deleteChatMessage(id: number): Promise<void> {
+  await db.delete(chat_messages).where(eq(chat_messages.id, id));
 }
 
 // --- Quiz generation presets ---

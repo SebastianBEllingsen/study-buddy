@@ -4,6 +4,7 @@ import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
 import type { QuizGenerationSettings } from "@/lib/types";
 import { parseId } from "@/lib/routeParams";
+import { parseJsonObjectBody } from "@/lib/requestBody";
 
 type Params = { params: Promise<{ courseId: string; mode: string }> };
 
@@ -31,7 +32,7 @@ export async function POST(request: Request, { params }: Params) {
   const id = parseId(courseId);
   if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
 
-  const body = await request.json().catch(() => ({}));
+  const body = await parseJsonObjectBody(request);
   const folderId =
     typeof body?.folderId === "number" && Number.isInteger(body.folderId)
       ? body.folderId

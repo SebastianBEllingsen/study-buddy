@@ -1,4 +1,5 @@
 import { addCalendarFeed, listCalendarFeeds } from "@/lib/models";
+import { isSafeExternalUrl } from "@/lib/urlSafety";
 
 export async function GET() {
   const feeds = await listCalendarFeeds();
@@ -13,6 +14,12 @@ export async function POST(request: Request) {
   if (!label) return Response.json({ error: "Label is required" }, { status: 400 });
   if (!/^https?:\/\//i.test(url)) {
     return Response.json({ error: "Enter a valid feed URL" }, { status: 400 });
+  }
+  // Rejects loopback/private/link-local targets (see urlSafety.ts) — this
+  // server fetches every configured feed's URL on every calendar load, so
+  // an unrestricted URL here would let it be pointed at internal services.
+  if (!(await isSafeExternalUrl(url))) {
+    return Response.json({ error: "That URL isn't reachable as an external feed" }, { status: 400 });
   }
 
   const feed = await addCalendarFeed(label, url);

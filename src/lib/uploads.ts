@@ -1,8 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
+// Just the path, no side effect — used by deleteCourse's cleanup (see the
+// course DELETE route), which must never conjure the directory back into
+// existence right after removing it.
+export function courseUploadsDirPath(courseId: number): string {
+  return path.join(process.cwd(), "data", "uploads", String(courseId));
+}
+
 export function uploadsDir(courseId: number): string {
-  const dir = path.join(process.cwd(), "data", "uploads", String(courseId));
+  const dir = courseUploadsDirPath(courseId);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }

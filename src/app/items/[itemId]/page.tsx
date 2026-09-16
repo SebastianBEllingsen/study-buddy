@@ -148,6 +148,17 @@ export default function ItemPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.item.id]);
 
+  // Without this, typing in the notes editor then immediately navigating
+  // away or deleting the item leaves handleNotesChange's setTimeout
+  // pending — it still fires after unmount, issuing a PATCH against an
+  // item the user has already left (possibly deleted), and calling
+  // setNoteSaveState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    };
+  }, []);
+
   async function saveContent(newContent: unknown, removedCardIndices?: number[]): Promise<boolean> {
     const res = await fetch(`/api/items/${params.itemId}`, {
       method: "PATCH",

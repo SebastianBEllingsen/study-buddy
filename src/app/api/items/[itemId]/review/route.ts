@@ -2,8 +2,10 @@ import {
   logFlashcardReview,
   getFlashcardSchedule,
   upsertFlashcardSchedule,
+  getGeneratedItem,
 } from "@/lib/models";
 import type { FlashcardResult } from "@/lib/models";
+import type { FlashcardsContent } from "@/lib/types";
 import { computeNextSchedule, dueAtFromInterval, DEFAULT_SCHEDULE } from "@/lib/spacedRepetition";
 import { parseId } from "@/lib/routeParams";
 
@@ -16,11 +18,28 @@ export async function POST(request: Request, { params }: Params) {
   const generatedItemId = parseId(itemId);
   if (generatedItemId === null) return Response.json({ error: "Item not found" }, { status: 404 });
   try {
+    // The item was never loaded before this — cardIndex was only checked
+    // for being an integer, not >= 0 or within this deck's actual card
+    // count, so an arbitrary cardIndex (or an itemId for a quiz/notes item,
+    // not flashcards at all) could create flashcard_schedule/
+    // flashcard_reviews rows for a card that doesn't exist, inflating due
+    // counts (computeDueCardIndices) for nothing a student can actually review.
+    const item = await getGeneratedItem(generatedItemId);
+    if (!item || item.mode !== "flashcards") {
+      return Response.json({ error: "Item not found" }, { status: 404 });
+    }
+    const cardCount = (JSON.parse(item.content_json) as FlashcardsContent).cards.length;
+
     const body = await request.json();
     const cardIndex = Number(body?.cardIndex);
     const result = body?.result as FlashcardResult;
 
-    if (!Number.isInteger(cardIndex) || !VALID_RESULTS.includes(result)) {
+    if (
+      !Number.isInteger(cardIndex) ||
+      cardIndex < 0 ||
+      cardIndex >= cardCount ||
+      !VALID_RESULTS.includes(result)
+    ) {
       return Response.json({ error: "Invalid review payload" }, { status: 400 });
     }
 

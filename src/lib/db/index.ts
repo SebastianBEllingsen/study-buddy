@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { sqliteDb } from "./sqlite";
 import { createPostgresDb } from "./postgres";
 import { resolveStorageConfig, type StorageConfig } from "./config";
+import { enqueue } from "./operationQueue";
 import * as sqliteSchema from "./schema.sqlite";
 import * as pgSchema from "./schema.pg";
 
@@ -101,40 +102,33 @@ export let quiz_generation_presets = initial.schema.quiz_generation_presets;
 // POST /api/storage-settings right after saving, so switching backends
 // takes effect immediately.
 export async function reconnect(): Promise<{ ok: boolean; error: string | null }> {
-  if (currentPgClient) {
-    await currentPgClient.end();
-    currentPgClient = null;
-  }
-  const next = await resolve(resolveStorageConfig());
-  db = next.db;
-  courses = next.schema.courses;
-  app_settings = next.schema.app_settings;
-  folders = next.schema.folders;
-  documents = next.schema.documents;
-  generated_items = next.schema.generated_items;
-  quiz_attempts = next.schema.quiz_attempts;
-  flashcard_reviews = next.schema.flashcard_reviews;
-  flashcard_schedule = next.schema.flashcard_schedule;
-  calendar_feeds = next.schema.calendar_feeds;
-  notes = next.schema.notes;
-  completed_assignments = next.schema.completed_assignments;
-  recent_views = next.schema.recent_views;
-  uploaded_images = next.schema.uploaded_images;
-  generation_notifications = next.schema.generation_notifications;
-  chat_conversations = next.schema.chat_conversations;
-  chat_messages = next.schema.chat_messages;
-  quiz_generation_presets = next.schema.quiz_generation_presets;
-  return { ok: lastConnectionError === null, error: lastConnectionError };
+  return enqueue(async () => {
+    if (currentPgClient) {
+      await currentPgClient.end();
+      currentPgClient = null;
+    }
+    const next = await resolve(resolveStorageConfig());
+    db = next.db;
+    courses = next.schema.courses;
+    app_settings = next.schema.app_settings;
+    folders = next.schema.folders;
+    documents = next.schema.documents;
+    generated_items = next.schema.generated_items;
+    quiz_attempts = next.schema.quiz_attempts;
+    flashcard_reviews = next.schema.flashcard_reviews;
+    flashcard_schedule = next.schema.flashcard_schedule;
+    calendar_feeds = next.schema.calendar_feeds;
+    notes = next.schema.notes;
+    completed_assignments = next.schema.completed_assignments;
+    recent_views = next.schema.recent_views;
+    uploaded_images = next.schema.uploaded_images;
+    generation_notifications = next.schema.generation_notifications;
+    chat_conversations = next.schema.chat_conversations;
+    chat_messages = next.schema.chat_messages;
+    quiz_generation_presets = next.schema.quiz_generation_presets;
+    return { ok: lastConnectionError === null, error: lastConnectionError };
+  });
 }
-
-// SQLite's manual BEGIN/COMMIT/ROLLBACK below (see runTransaction) runs
-// against the single shared `db` handle, not a scoped transaction object —
-// two concurrent callers could otherwise interleave their BEGINs into what
-// was meant to be one atomic block. Chained onto this, each call waits for
-// the previous one's commit/rollback before issuing its own BEGIN, so "one
-// SQLite transaction at a time" — already this app's assumed usage model,
-// per the comment below — actually holds instead of merely being assumed.
-let sqliteTransactionQueue: Promise<void> = Promise.resolve();
 
 // A second dialect seam, alongside the type cast above: postgres-js's
 // driver needs a real async callback for `db.transaction()` (each query is
@@ -148,37 +142,46 @@ let sqliteTransactionQueue: Promise<void> = Promise.resolve();
 // BEGIN/COMMIT/ROLLBACK against the plain `db` handle on SQLite. The
 // latter gives up SQLite-level nesting/savepoints, which this app never
 // uses, and matches its existing one-device-at-a-time usage model.
+//
+// Known limitation: this queue only serializes runTransaction/reconnect
+// calls against each other — an ordinary (non-transaction) query elsewhere
+// in models.ts is not queued, and runs directly against the same shared
+// SQLite connection. In principle a plain write issued while a transaction
+// here is between its BEGIN and COMMIT/ROLLBACK could interleave onto that
+// connection and get swept into this transaction's outcome (including a
+// ROLLBACK it had nothing to do with). Fixing this properly would mean
+// routing every one of models.ts's ~50 query call sites through this same
+// queue, which is out of scope for a single pass without dedicated
+// regression coverage per call site — accepted for now given this app's
+// single-device, effectively-single-writer usage model, where two truly
+// concurrent writes are rare. Revisit if models.ts ever needs to support
+// genuinely concurrent multi-client writers.
 export async function runTransaction<T>(fn: (tx: typeof db) => Promise<T>): Promise<T> {
-  if (usingPostgres) {
-    // db.transaction()'s real (Postgres) signature takes a PgTransaction,
-    // not `typeof db` — its static type is pinned to the SQLite shape by
-    // the cast in resolve() above, same seam, same reason. Cast the
-    // argument, not the method itself — drizzle's transaction() reads
-    // `this.session` internally, so extracting it as a standalone function
-    // reference (as this used to do) calls it with `this` unbound and
-    // throws "Cannot read properties of undefined (reading 'session')".
-    // Stay a plain method call; only the type needs help.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return db.transaction(fn as any);
-  }
+  return enqueue(async () => {
+    // Read once this call's turn has actually arrived (not at call time) —
+    // see enqueue's comment on why reconnect() shares this same queue.
+    const activeDb = db;
+    if (usingPostgres) {
+      // db.transaction()'s real (Postgres) signature takes a PgTransaction,
+      // not `typeof db` — its static type is pinned to the SQLite shape by
+      // the cast in resolve() above, same seam, same reason. Cast the
+      // argument, not the method itself — drizzle's transaction() reads
+      // `this.session` internally, so extracting it as a standalone function
+      // reference (as this used to do) calls it with `this` unbound and
+      // throws "Cannot read properties of undefined (reading 'session')".
+      // Stay a plain method call; only the type needs help.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return activeDb.transaction(fn as any);
+    }
 
-  const previous = sqliteTransactionQueue;
-  let release: () => void;
-  sqliteTransactionQueue = new Promise((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    await db.run(sql`begin`);
+    await activeDb.run(sql`begin`);
     try {
-      const result = await fn(db);
-      await db.run(sql`commit`);
+      const result = await fn(activeDb);
+      await activeDb.run(sql`commit`);
       return result;
     } catch (err) {
-      await db.run(sql`rollback`);
+      await activeDb.run(sql`rollback`);
       throw err;
     }
-  } finally {
-    release!();
-  }
+  });
 }

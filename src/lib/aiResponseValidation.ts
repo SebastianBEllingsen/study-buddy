@@ -25,11 +25,34 @@ export function assertQuizContentShape(content: unknown): void {
     if (!isRecord(q) || typeof q.question !== "string" || typeof q.explanation !== "string") {
       throw new InvalidAiResponseError("a quiz question is missing required fields");
     }
-    if ((q.type === "mcq" || q.type === "multi_select") && !Array.isArray(q.options)) {
-      throw new InvalidAiResponseError("a multiple-choice question is missing its options");
+    if (q.type === "mcq" || q.type === "multi_select") {
+      if (!Array.isArray(q.options)) {
+        throw new InvalidAiResponseError("a multiple-choice question is missing its options");
+      }
+      // Captured into a local rather than relying on q.options staying
+      // narrowed to `unknown[]` inside the .every() closure below — TS
+      // doesn't preserve property-access narrowing across a nested function
+      // boundary, since it can't guarantee the property wasn't reassigned.
+      const options: unknown[] = q.options;
+      // Previously unchecked: an out-of-range/missing correctIndex or
+      // correctIndices entry reached the client as-is (e.g. attempt/route.ts's
+      // `q.options[q.correctIndex]`), producing `correctAnswer: undefined`
+      // that got stored in answers_json and shown to the student as "the
+      // correct answer" — silently wrong rather than a caught, regenerable error.
+      if (q.type === "mcq" && !(Number.isInteger(q.correctIndex) && (q.correctIndex as number) in options)) {
+        throw new InvalidAiResponseError("a multiple-choice question's correct answer is out of range");
+      }
+      if (q.type === "multi_select") {
+        if (!Array.isArray(q.correctIndices)) {
+          throw new InvalidAiResponseError("a multi-select question is missing its correct answers");
+        }
+        if (!q.correctIndices.every((i: unknown) => Number.isInteger(i) && (i as number) in options)) {
+          throw new InvalidAiResponseError("a multi-select question's correct answers are out of range");
+        }
+      }
     }
-    if (q.type === "multi_select" && !Array.isArray(q.correctIndices)) {
-      throw new InvalidAiResponseError("a multi-select question is missing its correct answers");
+    if (q.type === "short_answer" && typeof q.modelAnswer !== "string") {
+      throw new InvalidAiResponseError("a short-answer question is missing its model answer");
     }
   }
 }

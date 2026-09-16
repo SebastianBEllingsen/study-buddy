@@ -1,3 +1,27 @@
+// Aspect-ratio-preserving downscale, capped at 1x — never upscales a
+// smaller-than-target source. Pulled out as its own pure function (see
+// resizeImage.test.ts) since the two exports below are otherwise only
+// testable against a real canvas/createImageBitmap, which jsdom doesn't
+// implement and this app doesn't otherwise depend on a native canvas
+// package for.
+export function computeScaledDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxWidth: number,
+  maxHeight: number
+): { width: number; height: number } {
+  const scale = Math.min(1, maxWidth / sourceWidth, maxHeight / sourceHeight);
+  return { width: Math.round(sourceWidth * scale), height: Math.round(sourceHeight * scale) };
+}
+
+// PNG only for formats that can actually carry alpha (png/gif/webp) — a
+// source JPEG is already opaque, so re-encoding it as JPEG rather than a
+// much larger lossless PNG loses nothing. See resizeImageForNote's own
+// comment for why this matters there specifically.
+export function preservesAlpha(mimeType: string): boolean {
+  return ["image/png", "image/gif", "image/webp"].includes(mimeType);
+}
+
 // Client-only: downscales/compresses an uploaded image before it's sent to
 // the server as a data URL — course cover images are stored inline in the
 // courses table (see schema.pg.ts's cover_image column) rather than on
@@ -9,9 +33,7 @@ export async function resizeImageToDataUrl(
   quality = 0.82
 ): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
-  const width = Math.round(bitmap.width * scale);
-  const height = Math.round(bitmap.height * scale);
+  const { width, height } = computeScaledDimensions(bitmap.width, bitmap.height, maxWidth, maxHeight);
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -37,9 +59,7 @@ export async function resizeImageForNote(
   quality = 0.85
 ): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
-  const width = Math.round(bitmap.width * scale);
-  const height = Math.round(bitmap.height * scale);
+  const { width, height } = computeScaledDimensions(bitmap.width, bitmap.height, maxWidth, maxHeight);
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -48,7 +68,7 @@ export async function resizeImageForNote(
   if (!ctx) throw new Error("Canvas not supported");
   ctx.drawImage(bitmap, 0, 0, width, height);
 
-  const preserveAlpha = ["image/png", "image/gif", "image/webp"].includes(file.type);
+  const preserveAlpha = preservesAlpha(file.type);
   const blob = await new Promise<Blob | null>((resolve) =>
     preserveAlpha ? canvas.toBlob(resolve, "image/png") : canvas.toBlob(resolve, "image/jpeg", quality)
   );

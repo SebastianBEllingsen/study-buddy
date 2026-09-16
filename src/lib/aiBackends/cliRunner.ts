@@ -134,6 +134,23 @@ export function runCli(params: RunCliParams): Promise<RunCliResult> {
       });
     });
 
+    // child.stdin is its own stream, separate from the child process object
+    // — the child.on("error"/"close") handlers above don't cover a failure
+    // writing to it (e.g. the spawn itself failing with ENOENT, or the
+    // child exiting before consuming a large prompt, either of which can
+    // leave this pipe destroyed/closed). Without a listener here, that
+    // becomes an unhandled 'error' event on the stream, which crashes the
+    // process rather than surfacing as the CliNotFoundError/rejection those
+    // other handlers already produce.
+    // child.stdin is its own stream, separate from the child process object
+    // — the child.on("error"/"close") handlers above don't cover a failure
+    // writing to it (e.g. the spawn itself failing with ENOENT, or the
+    // child exiting before consuming a large prompt, either of which can
+    // leave this pipe destroyed/closed). Without a listener here, that
+    // becomes an unhandled 'error' event on the stream, which crashes the
+    // process rather than surfacing as the CliNotFoundError/rejection those
+    // other handlers already produce.
+    child.stdin.on("error", () => {});
     child.stdin.write(params.stdin, "utf-8");
     child.stdin.end();
   });

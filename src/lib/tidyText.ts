@@ -1,5 +1,18 @@
 import { generateText } from "./aiClient";
 import { stripEmbeddedImages, restoreEmbeddedImages } from "./embeddedImages";
+import { estimateTokens } from "./chunking";
+
+// Same ~4-chars-per-token estimate used everywhere else in this app
+// (chunking.ts) — an earlier version of this file used chars/2 instead,
+// over-asking for roughly 2x the tokens actually needed, with no ceiling at
+// all. Capped at MAX_TIDY_TOKENS below (matching generate.ts's own
+// MAX_TOKENS) since every backend has some real output-token ceiling — a
+// large paste (200k+ characters) previously computed a maxTokens value that
+// exceeded every supported model's actual output cap, so the very first
+// "Make pretty" request on it was rejected outright by the provider rather
+// than degrading gracefully.
+const MIN_TIDY_TOKENS = 2000;
+const MAX_TIDY_TOKENS = 8000;
 
 const TIDY_SYSTEM_PROMPT = `You clean up messy pasted text for a student's study material — often a raw Ctrl+A dump of an entire webpage (an LMS/portal assignment page, a course site, an article), but also a lecture transcript or set of notes copied out of a PDF or slide deck.
 
@@ -55,7 +68,7 @@ export async function tidyPastedText(text: string): Promise<string> {
     const cleaned = await generateText({
       system: TIDY_SYSTEM_PROMPT,
       user: stripped,
-      maxTokens: Math.max(2000, Math.ceil(stripped.length / 2)),
+      maxTokens: Math.min(MAX_TIDY_TOKENS, Math.max(MIN_TIDY_TOKENS, estimateTokens(stripped))),
       effort: "low",
     });
     const trimmed = cleaned.trim();

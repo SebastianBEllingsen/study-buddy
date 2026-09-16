@@ -59,6 +59,18 @@ export default function ChatContent({
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Monotonic, not Date.now()-based — two sends within the same
+  // millisecond (trivially reachable by pressing Enter twice fast, or a
+  // slow network turning "type, send, retype, send" into near-simultaneous
+  // requests) previously produced the same negative id, so the rollback
+  // filter on a failed send (`m.id !== optimisticId`) would remove both
+  // optimistic messages instead of just the one that actually failed.
+  const nextOptimisticId = useRef(0);
+  // Guards against a slower selectConversation(A) response landing after a
+  // faster selectConversation(B) and overwriting B's messages with A's
+  // stale ones — reachable just by clicking two conversations in quick
+  // succession. Same pattern SearchDialog uses for the same reason.
+  const selectRequestId = useRef(0);
 
   // Loads the conversation list once, on mount — render-phase sync (see
   // DocumentPickerDialog's own seeded flag elsewhere in this app) rather
@@ -75,25 +87,40 @@ export default function ChatContent({
   }, [messages, sending]);
 
   async function loadConversations() {
-    const list: ChatConversation[] = await fetch("/api/chat/conversations").then((r) => r.json());
-    setConversations(list);
-    if (initialConversationId && list.some((c) => c.id === initialConversationId)) {
-      selectConversation(initialConversationId);
-    } else if (list.length > 0) {
-      selectConversation(list[0].id);
-    } else {
-      startNewChat();
+    try {
+      const list: ChatConversation[] = await fetch("/api/chat/conversations").then((r) => r.json());
+      setConversations(list);
+      if (initialConversationId && list.some((c) => c.id === initialConversationId)) {
+        selectConversation(initialConversationId);
+      } else if (list.length > 0) {
+        selectConversation(list[0].id);
+      } else {
+        startNewChat();
+      }
+    } catch {
+      // Left as an empty list rather than stuck in a permanent loading
+      // state — the "New chat" affordance below still works even with no
+      // history loaded.
+      toast.error("Couldn't load chat history");
     }
   }
 
   async function selectConversation(id: number) {
+    const requestId = ++selectRequestId.current;
     setActiveId(id);
     setLoadingConversation(true);
-    const detail: { messages: ChatMessage[] } = await fetch(`/api/chat/conversations/${id}`).then((r) =>
-      r.json()
-    );
-    setMessages(detail.messages);
-    setLoadingConversation(false);
+    try {
+      const detail: { messages: ChatMessage[] } = await fetch(`/api/chat/conversations/${id}`).then((r) =>
+        r.json()
+      );
+      if (requestId !== selectRequestId.current) return; // a newer selectConversation call has since started
+      setMessages(detail.messages);
+    } catch {
+      if (requestId !== selectRequestId.current) return;
+      toast.error("Couldn't load this conversation");
+    } finally {
+      if (requestId === selectRequestId.current) setLoadingConversation(false);
+    }
   }
 
   function startNewChat() {
@@ -127,6 +154,13 @@ export default function ChatContent({
     setDraft("");
     setSending(true);
 
+    // A failed send below removes exactly this optimistic message (by id)
+    // and restores `content` to the input — without this, a network error
+    // or non-ok response left a "sent" message stuck in the transcript
+    // forever with no reply and no way to recover the original text (the
+    // draft was already cleared above). Negative and decrementing (never 0
+    // or positive) so it can never collide with a real, server-assigned id.
+    const optimisticId = --nextOptimisticId.current;
     let conversationId = activeId;
     try {
       if (conversationId === null) {
@@ -140,7 +174,7 @@ export default function ChatContent({
 
       setMessages((prev) => [
         ...prev,
-        { id: -Date.now(), conversationId: conversationId!, role: "user", content, createdAt: "" },
+        { id: optimisticId, conversationId: conversationId!, role: "user", content, createdAt: "" },
       ]);
 
       const res = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
@@ -151,6 +185,8 @@ export default function ChatContent({
       const body = await res.json();
       if (!res.ok) {
         toast.error(body.error ?? "Couldn't get a reply");
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        setDraft(content);
         return;
       }
       setMessages((prev) => [...prev, body as ChatMessage]);
@@ -159,6 +195,8 @@ export default function ChatContent({
       setConversations(list);
     } catch {
       toast.error("Couldn't get a reply");
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      setDraft(content);
     } finally {
       setSending(false);
     }

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import {
   createDocument,
+  getFolder,
   getOrCreateDefaultFolder,
   markDocumentExtracted,
   markDocumentFailed,
@@ -35,6 +36,17 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid folder" }, { status: 400 });
     }
     const folderId = explicitFolderId ?? (await getOrCreateDefaultFolder(id)).id;
+    // Validated up front, before anything is written to disk — createDocument
+    // enforces this same check (see its own comment), but checking here too
+    // means a crafted explicitFolderId from another course 400s cleanly
+    // instead of leaving an orphaned file on disk after createDocument
+    // rejects it.
+    if (explicitFolderId !== null) {
+      const folder = await getFolder(explicitFolderId);
+      if (!folder || folder.course_id !== id) {
+        return Response.json({ error: "Invalid folder" }, { status: 400 });
+      }
+    }
     const ext = extensionOf(file.name);
     if (!isSupportedExtension(ext)) {
       return Response.json(
@@ -52,8 +64,17 @@ export async function POST(request: Request, { params }: Params) {
     // while both document rows still believe they own that path (both for
     // viewing via the GET route's disk-read fast path, and for deletion,
     // where removing one would delete the file the other still needs).
-    // `filename` (shown to the user) stays exactly what they uploaded.
-    const filePath = path.join(dir, `${crypto.randomUUID()}-${file.name}`);
+    // `filename` (shown to the user) stays exactly what they uploaded, but
+    // the on-disk path uses only its basename — `file.name` is
+    // client-controlled, and without this a name like "../../../etc/foo"
+    // would resolve outside `dir` once joined (path.join normalizes ".."
+    // segments). The startsWith check below is a second, independent
+    // guard against the same class of escape.
+    const safeName = path.basename(file.name);
+    const filePath = path.join(dir, `${crypto.randomUUID()}-${safeName}`);
+    if (!filePath.startsWith(dir + path.sep)) {
+      return Response.json({ error: "Invalid filename" }, { status: 400 });
+    }
     await fs.writeFile(filePath, buffer);
 
     const doc = await createDocument({

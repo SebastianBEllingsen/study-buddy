@@ -1,9 +1,15 @@
-export function flashcardsSystemPrompt(courseName: string): string {
+// Exported so chunked generation (generate.ts) can distribute this same
+// total across chunks instead of asking each chunk for a full 20 — without
+// that, a large course split into N chunks would come back with N*20 cards
+// instead of 20.
+export const TOTAL_CARDS = 20;
+
+export function flashcardsSystemPrompt(courseName: string, total: number = TOTAL_CARDS): string {
   return `You are a study assistant generating Anki-style flashcards strictly from the course material provided by the user. This is for the course "${courseName}".
 
 Rules:
 - Use ONLY the provided material. Do not invent facts or rely on outside knowledge beyond trivial clarification.
-- Generate around 20 cards. Favor atomic, single-fact cards over broad ones (standard spaced-repetition authoring practice) — each card should test one discrete fact, definition, or relationship.
+- Generate around ${total} cards. Favor atomic, single-fact cards over broad ones (standard spaced-repetition authoring practice) — each card should test one discrete fact, definition, or relationship.
 - Avoid duplicating the same fact across multiple cards.
 - The "front" is a question or prompt; the "back" is the concise answer.
 - Write any math notation as standard LaTeX between \`$...$\` for inline math or \`$$...$$\` for display math — never bare \`\\displaystyle\`, parenthesized notation, or other ad-hoc formatting. Remember this is going inside a JSON string, so escape backslashes correctly (e.g. \`\\\\frac\` not \`\\frac\`).

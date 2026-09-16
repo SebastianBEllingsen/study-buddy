@@ -1,5 +1,12 @@
 import fs from "node:fs/promises";
-import { deleteDocument, getDocument, getDocumentFile, moveDocument, renameDocument } from "@/lib/models";
+import {
+  deleteDocument,
+  getDocument,
+  getDocumentFile,
+  InvalidDestinationFolderError,
+  moveDocument,
+  renameDocument,
+} from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 import { previewPdfPath } from "@/lib/uploads";
 import { CONTENT_TYPES, extensionOf, isSupportedExtension, needsLibreOfficeConversion } from "@/lib/documentFormats";
@@ -99,7 +106,10 @@ export async function PATCH(request: Request, { params }: Params) {
   const { documentId } = await params;
   const id = parseId(documentId);
   if (id === null) return Response.json({ error: "Document not found" }, { status: 404 });
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
+  if (body === null || typeof body !== "object") {
+    return Response.json({ error: "Invalid request body" }, { status: 400 });
+  }
   const hasFolderId = body?.folderId !== undefined;
   const hasFilename = body?.filename !== undefined;
 
@@ -107,38 +117,46 @@ export async function PATCH(request: Request, { params }: Params) {
     return Response.json({ error: "folderId or filename is required" }, { status: 400 });
   }
 
-  if (hasFolderId) {
-    if (!Number.isInteger(body.folderId)) {
-      return Response.json({ error: "Invalid folder" }, { status: 400 });
-    }
-    await moveDocument(id, body.folderId);
-  }
-
-  if (hasFilename) {
-    const requested = typeof body.filename === "string" ? body.filename.trim() : "";
-    if (!requested) {
-      return Response.json({ error: "Name can't be empty" }, { status: 400 });
-    }
-    const doc = await getDocument(id);
-    if (!doc) return Response.json({ error: "Document not found" }, { status: 404 });
-
-    // A pasted-text "document" (file_path === "") has no real underlying
-    // file, so its filename is just a title — rename it freely. A real
-    // upload's filename extension drives which viewer/content-type is used
-    // (see documentFormats.ts) and must keep matching the actual stored
-    // bytes, so it's preserved here regardless of what the client sent —
-    // silently correcting a dropped/changed extension rather than erroring,
-    // since that's almost always just the user editing the visible name in
-    // a rename box that also shows the extension.
-    let filename = requested;
-    if (doc.file_path !== "") {
-      const currentExt = extensionOf(doc.filename);
-      if (currentExt && extensionOf(requested) !== currentExt) {
-        const base = requested.includes(".") ? requested.slice(0, requested.lastIndexOf(".")) : requested;
-        filename = `${base}.${currentExt}`;
+  try {
+    if (hasFolderId) {
+      if (!Number.isInteger(body.folderId)) {
+        return Response.json({ error: "Invalid folder" }, { status: 400 });
       }
+      await moveDocument(id, body.folderId);
     }
-    await renameDocument(id, filename);
+
+    if (hasFilename) {
+      const requested = typeof body.filename === "string" ? body.filename.trim() : "";
+      if (!requested) {
+        return Response.json({ error: "Name can't be empty" }, { status: 400 });
+      }
+      const doc = await getDocument(id);
+      if (!doc) return Response.json({ error: "Document not found" }, { status: 404 });
+
+      // A pasted-text "document" (file_path === "") has no real underlying
+      // file, so its filename is just a title — rename it freely. A real
+      // upload's filename extension drives which viewer/content-type is used
+      // (see documentFormats.ts) and must keep matching the actual stored
+      // bytes, so it's preserved here regardless of what the client sent —
+      // silently correcting a dropped/changed extension rather than erroring,
+      // since that's almost always just the user editing the visible name in
+      // a rename box that also shows the extension.
+      let filename = requested;
+      if (doc.file_path !== "") {
+        const currentExt = extensionOf(doc.filename);
+        if (currentExt && extensionOf(requested) !== currentExt) {
+          const base = requested.includes(".") ? requested.slice(0, requested.lastIndexOf(".")) : requested;
+          filename = `${base}.${currentExt}`;
+        }
+      }
+      await renameDocument(id, filename);
+    }
+  } catch (err) {
+    if (err instanceof InvalidDestinationFolderError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
+    console.error("Document update failed:", err);
+    return Response.json({ error: "Couldn't update this document" }, { status: 500 });
   }
 
   return Response.json({ ok: true });

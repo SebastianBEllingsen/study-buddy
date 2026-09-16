@@ -26,7 +26,11 @@ export async function GET(request: Request) {
     // A real URL (local /api/blobs/... or a Supabase Storage public URL,
     // see src/lib/blobStorage) rather than an inline data URL — hand the
     // browser straight to it instead of proxying the bytes ourselves.
-    return Response.redirect(settings.appIconImage, 307);
+    // Response.redirect() requires an absolute URL and throws on the
+    // relative /api/blobs/... form local storage returns — resolve it
+    // against this request's own URL first (a no-op for the already-
+    // absolute Supabase case).
+    return Response.redirect(new URL(settings.appIconImage, request.url), 307);
   }
 
   if (settings.appIcon) {

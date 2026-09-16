@@ -2107,6 +2107,11 @@ function InsertLinkDialog({
   const [selectedItem, setSelectedItem] = useState<LinkTargets["items"][number] | null>(null);
   const [lines, setLines] = useState<string[] | null>(null);
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
+  // Tags each document-lines fetch so a slower, stale response (from
+  // quickly picking another document before this one's request resolves)
+  // can't land after a newer selection and overwrite its lines — same
+  // pattern as SearchDialog's own requestIdRef.
+  const docRequestIdRef = useRef(0);
 
   // Reset when the dialog closes — done during render (comparing against
   // the previous `open`) rather than in a useEffect, matching this app's
@@ -2128,10 +2133,14 @@ function InsertLinkDialog({
     setSelectedDoc(doc);
     setLines(null);
     setSelectedLine(null);
+    const requestId = ++docRequestIdRef.current;
     if (doc) {
       fetch(`/api/link-targets/document-lines/${doc.id}`)
         .then((r) => r.json())
-        .then((body: { lines: string[] }) => setLines(body.lines));
+        .then((body: { lines: string[] }) => {
+          if (requestId !== docRequestIdRef.current) return;
+          setLines(body.lines);
+        });
     }
   }
 

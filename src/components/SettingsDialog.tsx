@@ -101,8 +101,9 @@ const MODEL_BADGE_DETAIL_LABELS: Record<AppSettings["modelBadgeDetail"], string>
 };
 
 function AiSection() {
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
   const [backend, setBackendState] = useState<AiBackend>("api");
+  const [seededFor, setSeededFor] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [gradingSaving, setGradingSaving] = useState(false);
@@ -110,14 +111,13 @@ function AiSection() {
   const [aiEnabledSaving, setAiEnabledSaving] = useState(false);
   const [imageBackendSaving, setImageBackendSaving] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((body: AppSettings) => {
-        setSettings(body);
-        setBackendState(body.aiBackend);
-      });
-  }, []);
+  // Render-phase sync, not an effect — same pattern as BrandingSection's
+  // seededFor. `backend` needs its own local copy (the <Select> below edits
+  // it before Save is pressed) seeded once from the shared settings cache.
+  if (settings && seededFor !== "settings") {
+    setBackendState(settings.aiBackend);
+    setSeededFor("settings");
+  }
 
   function handleBackendChange(value: AiBackend) {
     setBackendState(value);
@@ -143,7 +143,7 @@ function AiSection() {
         return;
       }
       const updated: AppSettings = await res.json();
-      setSettings(updated);
+      mutate(updated, { revalidate: false });
       setKeyInput("");
       toast.success(`Now generating with ${AI_LABELS[updated.aiBackend]}`);
     } catch {
@@ -157,7 +157,7 @@ function AiSection() {
     if (!settings) return;
     const imageAiBackend = value === "same" ? null : (value as AiBackend);
     const previous = settings.imageAiBackend;
-    setSettings({ ...settings, imageAiBackend });
+    mutate({ ...settings, imageAiBackend }, { revalidate: false });
     setImageBackendSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -167,11 +167,11 @@ function AiSection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save image AI model");
-        setSettings((prev) => (prev ? { ...prev, imageAiBackend: previous } : prev));
+        mutate((prev) => (prev ? { ...prev, imageAiBackend: previous } : prev), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save image AI model");
-      setSettings((prev) => (prev ? { ...prev, imageAiBackend: previous } : prev));
+      mutate((prev) => (prev ? { ...prev, imageAiBackend: previous } : prev), { revalidate: false });
     } finally {
       setImageBackendSaving(false);
     }
@@ -179,7 +179,7 @@ function AiSection() {
 
   async function handleGradingToggle(next: boolean) {
     if (!settings) return;
-    setSettings({ ...settings, aiGradingEnabled: next });
+    mutate({ ...settings, aiGradingEnabled: next }, { revalidate: false });
     setGradingSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -189,11 +189,11 @@ function AiSection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save AI settings");
-        setSettings((prev) => (prev ? { ...prev, aiGradingEnabled: !next } : prev));
+        mutate((prev) => (prev ? { ...prev, aiGradingEnabled: !next } : prev), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save AI settings");
-      setSettings((prev) => (prev ? { ...prev, aiGradingEnabled: !next } : prev));
+      mutate((prev) => (prev ? { ...prev, aiGradingEnabled: !next } : prev), { revalidate: false });
     } finally {
       setGradingSaving(false);
     }
@@ -201,7 +201,7 @@ function AiSection() {
 
   async function handleEfficiencyToggle(next: boolean) {
     if (!settings) return;
-    setSettings({ ...settings, aiEfficiencyMode: next });
+    mutate({ ...settings, aiEfficiencyMode: next }, { revalidate: false });
     setEfficiencySaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -211,11 +211,11 @@ function AiSection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save AI settings");
-        setSettings((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev));
+        mutate((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save AI settings");
-      setSettings((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev));
+      mutate((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev), { revalidate: false });
     } finally {
       setEfficiencySaving(false);
     }
@@ -223,7 +223,7 @@ function AiSection() {
 
   async function handleAiEnabledToggle(next: boolean) {
     if (!settings) return;
-    setSettings({ ...settings, aiEnabled: next });
+    mutate({ ...settings, aiEnabled: next }, { revalidate: false });
     setAiEnabledSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -233,11 +233,11 @@ function AiSection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save AI settings");
-        setSettings((prev) => (prev ? { ...prev, aiEnabled: !next } : prev));
+        mutate((prev) => (prev ? { ...prev, aiEnabled: !next } : prev), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save AI settings");
-      setSettings((prev) => (prev ? { ...prev, aiEnabled: !next } : prev));
+      mutate((prev) => (prev ? { ...prev, aiEnabled: !next } : prev), { revalidate: false });
     } finally {
       setAiEnabledSaving(false);
     }
@@ -387,17 +387,11 @@ function AiSection() {
 }
 
 function CalendarSection() {
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((body: AppSettings) => setSettings(body));
-  }, []);
 
   async function handleSaveCredentials() {
     setSaving(true);
@@ -415,7 +409,7 @@ function CalendarSection() {
         return;
       }
       const updated: AppSettings = await res.json();
-      setSettings(updated);
+      mutate(updated, { revalidate: false });
       setClientId("");
       setClientSecret("");
       toast.success("Saved — you can connect below now");
@@ -434,7 +428,7 @@ function CalendarSection() {
         toast.error("Couldn't disconnect");
         return;
       }
-      setSettings((prev) => (prev ? { ...prev, googleCalendarConnected: false } : prev));
+      mutate((prev) => (prev ? { ...prev, googleCalendarConnected: false } : prev), { revalidate: false });
       toast.success("Disconnected Google Calendar");
     } catch {
       toast.error("Couldn't disconnect");
@@ -1341,21 +1335,15 @@ function BrandingSection() {
 }
 
 function DisplaySection() {
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((body: AppSettings) => setSettings(body));
-  }, []);
 
   async function handleToggle(
     field: "showModelBadge" | "autoOpenGeneratedItems" | "documentBadgesEnabled",
     next: boolean
   ) {
     if (!settings) return;
-    setSettings({ ...settings, [field]: next });
+    mutate({ ...settings, [field]: next }, { revalidate: false });
     setSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -1365,11 +1353,11 @@ function DisplaySection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save display settings");
-        setSettings((prev) => (prev ? { ...prev, [field]: !next } : prev));
+        mutate((prev) => (prev ? { ...prev, [field]: !next } : prev), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save display settings");
-      setSettings((prev) => (prev ? { ...prev, [field]: !next } : prev));
+      mutate((prev) => (prev ? { ...prev, [field]: !next } : prev), { revalidate: false });
     } finally {
       setSaving(false);
     }
@@ -1378,7 +1366,7 @@ function DisplaySection() {
   async function saveDocumentBadgeDetail(detail: AppSettings["documentBadgeDetail"]) {
     if (!settings) return;
     const prev = settings.documentBadgeDetail;
-    setSettings({ ...settings, documentBadgeDetail: detail });
+    mutate({ ...settings, documentBadgeDetail: detail }, { revalidate: false });
     setSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -1388,11 +1376,11 @@ function DisplaySection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save display settings");
-        setSettings((s) => (s ? { ...s, documentBadgeDetail: prev } : s));
+        mutate((s) => (s ? { ...s, documentBadgeDetail: prev } : s), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save display settings");
-      setSettings((s) => (s ? { ...s, documentBadgeDetail: prev } : s));
+      mutate((s) => (s ? { ...s, documentBadgeDetail: prev } : s), { revalidate: false });
     } finally {
       setSaving(false);
     }
@@ -1401,7 +1389,7 @@ function DisplaySection() {
   async function saveModelBadgeDetail(detail: AppSettings["modelBadgeDetail"]) {
     if (!settings) return;
     const prev = settings.modelBadgeDetail;
-    setSettings({ ...settings, modelBadgeDetail: detail });
+    mutate({ ...settings, modelBadgeDetail: detail }, { revalidate: false });
     setSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -1411,11 +1399,11 @@ function DisplaySection() {
       });
       if (!res.ok) {
         toast.error("Couldn't save display settings");
-        setSettings((s) => (s ? { ...s, modelBadgeDetail: prev } : s));
+        mutate((s) => (s ? { ...s, modelBadgeDetail: prev } : s), { revalidate: false });
       }
     } catch {
       toast.error("Couldn't save display settings");
-      setSettings((s) => (s ? { ...s, modelBadgeDetail: prev } : s));
+      mutate((s) => (s ? { ...s, modelBadgeDetail: prev } : s), { revalidate: false });
     } finally {
       setSaving(false);
     }

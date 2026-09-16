@@ -1,3 +1,5 @@
+import { blobKeyFromUrl } from "./blobStorage";
+
 // Shared by every route that accepts a client-cropped/uploaded image as a
 // data URL (paste-text image extraction, screenshot-crop-to-ask) — parses
 // and size-caps it before it's handed to an AI vision call.
@@ -35,17 +37,20 @@ export const MAX_NOTE_IMAGE_LENGTH = 4_000_000;
 // rows, or the /api/blobs fallback when no blob store is configured — see
 // src/app/api/blobs/route.ts) or a real URL a blob store handed back
 // (/api/blobs/... locally, or the Storage bucket's own public URL on
-// Supabase). Real size/mimetype enforcement for uploads now happens against
-// the actual file in /api/blobs's POST handler — this length cap is just a
-// backstop against a URL-shaped request built some other way.
+// Supabase). Real size/mimetype enforcement for uploads happens against the
+// actual file in /api/blobs's POST handler — but that enforcement only
+// means anything if these fields are restricted to URLs that handler (or
+// its Supabase-mode equivalent) actually produced. blobKeyFromUrl is the
+// same recognizer blobStorage's own cleanup uses to tell "one of this app's
+// blobs" from anything else, so an arbitrary external http(s):// URL
+// (which would bypass that enforcement entirely, and — for the note/course
+// image fields not this file's problem to solve, but worth noting — embeds
+// a third-party URL that gets fetched by every viewer's browser) is
+// rejected here rather than accepted as a legitimate stored image.
 const MAX_IMAGE_URL_LENGTH = 2000;
 
 function isImageUrl(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length <= MAX_IMAGE_URL_LENGTH &&
-    (value.startsWith("/api/blobs/") || value.startsWith("http://") || value.startsWith("https://"))
-  );
+  return typeof value === "string" && value.length <= MAX_IMAGE_URL_LENGTH && blobKeyFromUrl(value) !== null;
 }
 
 function isDataUrlImage(value: unknown, maxLength: number): value is string {

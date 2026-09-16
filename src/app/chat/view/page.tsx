@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import ChatContent from "@/components/ChatContent";
 
@@ -11,7 +11,11 @@ import ChatContent from "@/components/ChatContent";
 // route like every other page (there's only the one layout) — fixed
 // inset-0 covers it entirely rather than splitting the app into route
 // groups for one route.
-export default function DetachedChatPage() {
+//
+// useSearchParams (for the ?conversation= deep link below) needs a Suspense
+// boundary somewhere above it for static generation — see the default
+// export at the bottom of this file, same pattern as HomePage/CalendarPage.
+function DetachedChatPageContent() {
   const searchParams = useSearchParams();
   const conversationParam = searchParams.get("conversation");
   const parsed = conversationParam ? Number(conversationParam) : NaN;
@@ -33,5 +37,13 @@ export default function DetachedChatPage() {
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <ChatContent initialConversationId={initialConversationId} />
     </div>
+  );
+}
+
+export default function DetachedChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <DetachedChatPageContent />
+    </Suspense>
   );
 }

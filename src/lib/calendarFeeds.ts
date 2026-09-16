@@ -1,6 +1,7 @@
 import * as ical from "node-ical";
 import type { CalendarEvent } from "./googleCalendar";
 import type { CalendarFeed } from "./models";
+import { safeFetch } from "./urlSafety";
 
 // Fetches, parses, and normalizes read-only external ICS calendar feeds
 // (a university student portal's timetable, an LMS's assignment-due-dates
@@ -18,12 +19,22 @@ const cache = new Map<string, { fetchedAt: number; parsed: ical.CalendarResponse
 
 async function getParsedFeed(url: string): Promise<ical.CalendarResponse> {
   const cached = cache.get(url);
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.parsed;
+  if (cached) {
+    if (Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.parsed;
+    cache.delete(url);
+  }
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`Feed responded with ${res.status}`);
-  const text = await res.text();
-  const parsed = ical.sync.parseICS(text);
+  // safeFetch re-validates the URL immediately before fetching (not just at
+  // save time in the calendar-feeds POST route — a hostname that resolved
+  // to a public address when the feed was added could resolve somewhere
+  // private by the time it's actually fetched, e.g. DNS rebinding) and,
+  // critically, re-validates every redirect hop too: a plain fetch() with
+  // the default redirect:"follow" would validate only the URL the user
+  // gave, then blindly follow a 30x wherever it points, including straight
+  // past this whole guard to a loopback/link-local address.
+  const result = await safeFetch(url);
+  if (!result.ok) throw new Error(result.error);
+  const parsed = ical.sync.parseICS(result.text);
   cache.set(url, { fetchedAt: Date.now(), parsed });
   return parsed;
 }

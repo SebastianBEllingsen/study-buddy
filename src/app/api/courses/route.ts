@@ -6,7 +6,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name) {
     return Response.json({ error: "Course name is required" }, { status: 400 });

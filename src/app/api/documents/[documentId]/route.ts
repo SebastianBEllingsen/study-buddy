@@ -22,7 +22,11 @@ export async function GET(_request: Request, { params }: Params) {
       courseId: doc.course_id,
       filename: doc.filename,
       extracted_text: doc.extracted_text,
-      filePath: doc.file_path,
+      // Not the real file_path — that's a server-side absolute filesystem
+      // path (including the host username) with no legitimate use on the
+      // client. The only consumer (DocumentContent.tsx) just checks this
+      // for emptiness to decide "pasted text" vs. "real upload".
+      hasFile: doc.file_path !== "",
     },
   });
 }

@@ -11,16 +11,20 @@ import {
 } from "./models";
 import type { GenerationMode, GeneratedItem } from "./models";
 import { estimateTokens, CHUNK_THRESHOLD_TOKENS, chunkText } from "./chunking";
+import { mapWithConcurrency } from "./concurrency";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizQuestion, QuizGenerationSettings } from "./types";
 import {
   quizSystemPrompt,
   quizUserPrompt,
   retryQuizSystemPrompt,
   retryQuizUserPrompt,
+  distributeCount,
+  TOTAL_QUESTIONS,
 } from "./prompts/quiz";
 import {
   flashcardsSystemPrompt,
   flashcardsUserPrompt,
+  TOTAL_CARDS,
 } from "./prompts/flashcards";
 import { notesSystemPrompt, notesUserPrompt, notesMergeSystemPrompt } from "./prompts/notes";
 import {
@@ -44,15 +48,24 @@ export class NoDocumentsError extends Error {
 const MAX_TOKENS = 8000;
 const EFFICIENT_MAX_TOKENS = 4000;
 
+// How many chunks' generation calls run at once — see mapWithConcurrency's
+// own comment for why this can't be a plain Promise.all. Low enough to stay
+// well clear of typical provider rate limits and to keep concurrent CLI
+// subprocess spawns (claudeCode.ts/codexCli.ts, each with its own 5-minute
+// timeout) to a sane number, high enough that chunking still finishes in
+// roughly (chunk count / this) round trips rather than one at a time.
+const CHUNK_CONCURRENCY = 3;
+
 async function generateQuiz(
   courseName: string,
   text: string,
   alreadyCovered?: string,
   settings?: QuizGenerationSettings,
-  efficient?: boolean
+  efficient?: boolean,
+  totalQuestions?: number
 ): Promise<QuizContent> {
   const content = await generateStructured<QuizContent>({
-    system: quizSystemPrompt(courseName, settings),
+    system: quizSystemPrompt(courseName, settings, totalQuestions),
     user: quizUserPrompt(text, alreadyCovered),
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? "low" : "medium",
@@ -61,6 +74,13 @@ async function generateQuiz(
   return sanitizeQuizContent(content);
 }
 
+// Distributes the same TOTAL_QUESTIONS a single-call generation would ask
+// for across all chunks, rather than asking every chunk for a full
+// TOTAL_QUESTIONS each — without this, a course large enough to need N
+// chunks came back with N*TOTAL_QUESTIONS questions (a few hundred on a
+// large course, from as many billed model calls). Chunks distributeCount
+// assigns zero to (once there are more chunks than TOTAL_QUESTIONS) are
+// skipped rather than queried for "0 questions".
 async function generateQuizChunked(
   courseName: string,
   chunks: string[],
@@ -68,8 +88,10 @@ async function generateQuizChunked(
   settings?: QuizGenerationSettings,
   efficient?: boolean
 ): Promise<QuizContent> {
-  const perChunk = await Promise.all(
-    chunks.map((chunk) => generateQuiz(courseName, chunk, alreadyCovered, settings, efficient))
+  const counts = distributeCount(TOTAL_QUESTIONS, chunks.length);
+  const targeted = chunks.map((chunk, i) => ({ chunk, count: counts[i] })).filter((t) => t.count > 0);
+  const perChunk = await mapWithConcurrency(targeted, CHUNK_CONCURRENCY, ({ chunk, count }) =>
+    generateQuiz(courseName, chunk, alreadyCovered, settings, efficient, count)
   );
   return { questions: perChunk.flatMap((c) => c.questions) };
 }
@@ -78,10 +100,11 @@ async function generateFlashcards(
   courseName: string,
   text: string,
   alreadyCovered?: string,
-  efficient?: boolean
+  efficient?: boolean,
+  totalCards?: number
 ): Promise<FlashcardsContent> {
   const content = await generateStructured<FlashcardsContent>({
-    system: flashcardsSystemPrompt(courseName),
+    system: flashcardsSystemPrompt(courseName, totalCards),
     user: flashcardsUserPrompt(text, alreadyCovered),
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? "low" : "medium",
@@ -90,14 +113,18 @@ async function generateFlashcards(
   return sanitizeFlashcardsContent(content);
 }
 
+// Same reasoning as generateQuizChunked: distributes TOTAL_CARDS across
+// chunks instead of asking every chunk for a full TOTAL_CARDS each.
 async function generateFlashcardsChunked(
   courseName: string,
   chunks: string[],
   alreadyCovered?: string,
   efficient?: boolean
 ): Promise<FlashcardsContent> {
-  const perChunk = await Promise.all(
-    chunks.map((chunk) => generateFlashcards(courseName, chunk, alreadyCovered, efficient))
+  const counts = distributeCount(TOTAL_CARDS, chunks.length);
+  const targeted = chunks.map((chunk, i) => ({ chunk, count: counts[i] })).filter((t) => t.count > 0);
+  const perChunk = await mapWithConcurrency(targeted, CHUNK_CONCURRENCY, ({ chunk, count }) =>
+    generateFlashcards(courseName, chunk, alreadyCovered, efficient, count)
   );
   return { cards: perChunk.flatMap((c) => c.cards) };
 }
@@ -124,8 +151,8 @@ async function generateNotesChunked(
   efficient?: boolean
 ): Promise<NotesContent> {
   // Map: summarize each chunk independently.
-  const chunkSummaries = await Promise.all(
-    chunks.map((chunk) => generateNotes(courseName, chunk, undefined, efficient))
+  const chunkSummaries = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, (chunk) =>
+    generateNotes(courseName, chunk, undefined, efficient)
   );
   // Reduce: merge the chunk-level notes into one coherent document.
   const merged = await generateText({

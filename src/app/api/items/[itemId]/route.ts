@@ -8,6 +8,8 @@ import {
   getFlashcardScheduleForItem,
   updateGeneratedItemContent,
   reconcileFlashcardScheduleAfterRemoval,
+  reconcileFlashcardReviewsAfterRemoval,
+  InvalidDestinationFolderError,
   type GenerationMode,
 } from "@/lib/models";
 import { computeDueCardIndices } from "@/lib/spacedRepetition";
@@ -115,12 +117,16 @@ export async function PATCH(request: Request, { params }: Params) {
           (i: unknown): i is number => Number.isInteger(i)
         );
         await reconcileFlashcardScheduleAfterRemoval(id, removedIndices);
+        await reconcileFlashcardReviewsAfterRemoval(id, removedIndices);
       }
       return Response.json({ item: updated });
     }
 
     return Response.json({ error: "Nothing to update" }, { status: 400 });
   } catch (err) {
+    if (err instanceof InvalidDestinationFolderError) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Updating item failed:", err);
     return Response.json({ error: "Couldn't update this item" }, { status: 500 });
   }
