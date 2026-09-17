@@ -81,6 +81,10 @@ export const app_settings = sqliteTable("app_settings", {
   dashboard_transparent_widgets: integer("dashboard_transparent_widgets", { mode: "boolean" })
     .notNull()
     .default(false),
+  // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
+  dashboard_lock_background_crop: integer("dashboard_lock_background_crop", { mode: "boolean" })
+    .notNull()
+    .default(false),
   // See AppSettings.documentBadgesEnabled's doc comment in models.ts.
   document_badges_enabled: integer("document_badges_enabled", { mode: "boolean" })
     .notNull()

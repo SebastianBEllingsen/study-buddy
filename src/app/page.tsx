@@ -33,6 +33,7 @@ import type {
 } from "@/lib/models";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { tileGridStyle } from "@/lib/dashboardGrid";
+import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
 import StudyHeatmap from "@/components/StudyHeatmap";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
@@ -1112,6 +1113,7 @@ function HomePageContent() {
 
   const hasBanner = !!settings?.dashboardBackgroundImage;
   const bannerStyle = settings?.dashboardBannerStyle ?? "overlap";
+  const lockCrop = !!settings?.dashboardLockBackgroundCrop;
 
   const dashboardSection = settings && (
     <div className="space-y-2">
@@ -1154,23 +1156,41 @@ function HomePageContent() {
 
   return (
     <>
-      {hasBanner && bannerStyle === "overlap" && (
+      {hasBanner && (bannerStyle === "overlap" || lockCrop) && (
         // Same full-bleed, Steam-library-style treatment as a course page's
         // page_background_image — see courses/[courseId]/page.tsx. The
         // dashboard section right below gets pulled up into this image's
         // bottom edge (see the negative margin below) rather than just
-        // sitting underneath it — see Settings' "Banner style".
+        // sitting underneath it — see Settings' "Banner style". When
+        // dashboardLockBackgroundCrop is on, "backdrop" renders here too
+        // (just with its own gradient direction) instead of the dynamic
+        // full-section treatment below — a locked exact-aspect crop can't
+        // also stretch to an arbitrary content height, so locking forces
+        // both banner styles into this same fixed-ratio strip.
         <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
           <div
-            className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
-            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}
+            className={
+              lockCrop
+                ? "relative overflow-hidden bg-center"
+                : "relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
+            }
+            style={{
+              backgroundImage: `url(${settings.dashboardBackgroundImage})`,
+              ...(lockCrop ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" } : {}),
+            }}
           >
-            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10" />
+            <div
+              className={
+                bannerStyle === "backdrop"
+                  ? "absolute inset-0 bg-gradient-to-b from-black/10 via-background/70 to-background"
+                  : "absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10"
+              }
+            />
           </div>
         </div>
       )}
     <div className="space-y-6">
-      {hasBanner && bannerStyle === "backdrop" ? (
+      {hasBanner && bannerStyle === "backdrop" && !lockCrop ? (
         // The banner spans the whole dashboard section — heading through
         // every widget row, not just its top edge — so it has to size
         // itself to however tall that content ends up being (one widget row

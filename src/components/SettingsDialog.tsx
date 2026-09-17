@@ -1150,6 +1150,7 @@ function BrandingSection() {
     dashboardBackgroundImage?: string | null;
     dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
     dashboardTransparentWidgets?: boolean;
+    dashboardLockBackgroundCrop?: boolean;
   }) {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -1265,8 +1266,17 @@ function BrandingSection() {
         />
         {settings.dashboardBackgroundImage ? (
           <div
-            className="relative h-24 rounded-lg border bg-cover bg-center"
-            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}
+            className={
+              settings.dashboardLockBackgroundCrop
+                ? "relative w-full rounded-lg border bg-center"
+                : "relative h-24 rounded-lg border bg-cover bg-center"
+            }
+            style={{
+              backgroundImage: `url(${settings.dashboardBackgroundImage})`,
+              ...(settings.dashboardLockBackgroundCrop
+                ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" }
+                : {}),
+            }}
           >
             <Button
               variant="secondary"
@@ -1337,6 +1347,23 @@ function BrandingSection() {
             onChange={(e) => saveBranding({ dashboardTransparentWidgets: e.target.checked })}
           />
         </label>
+        {settings.dashboardBackgroundImage && (
+          <label className="flex items-center justify-between gap-3 pt-1 text-xs">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              Lock exact crop
+              <HelpTooltip>
+                Keeps the backdrop exactly as you cropped it, instead of reframing as the window
+                resizes or zooms. Turns &quot;Backdrop&quot; style into a fixed-height banner too.
+              </HelpTooltip>
+            </span>
+            <input
+              type="checkbox"
+              className="size-4 shrink-0 accent-primary"
+              checked={settings.dashboardLockBackgroundCrop}
+              onChange={(e) => saveBranding({ dashboardLockBackgroundCrop: e.target.checked })}
+            />
+          </label>
+        )}
       </div>
       <ImageCropDialog
         open={cropOpen}

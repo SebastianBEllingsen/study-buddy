@@ -117,6 +117,8 @@ export const app_settings = pgTable("app_settings", {
   ai_grading_enabled: boolean("ai_grading_enabled").notNull().default(false),
   // See AppSettings.dashboardTransparentWidgets's doc comment in models.ts.
   dashboard_transparent_widgets: boolean("dashboard_transparent_widgets").notNull().default(false),
+  // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
+  dashboard_lock_background_crop: boolean("dashboard_lock_background_crop").notNull().default(false),
   // See AppSettings.documentBadgesEnabled's doc comment in models.ts.
   document_badges_enabled: boolean("document_badges_enabled").notNull().default(true),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

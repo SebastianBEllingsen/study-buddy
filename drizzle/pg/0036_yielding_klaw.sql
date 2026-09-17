@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "dashboard_lock_background_crop" boolean DEFAULT false NOT NULL;

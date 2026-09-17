@@ -162,6 +162,7 @@ interface SettingsRow {
   dashboard_banner_style: string | null;
   ai_grading_enabled: boolean;
   dashboard_transparent_widgets: boolean;
+  dashboard_lock_background_crop: boolean;
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
   ai_efficiency_mode: boolean;
@@ -195,6 +196,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       dashboard_banner_style: app_settings.dashboard_banner_style,
       ai_grading_enabled: app_settings.ai_grading_enabled,
       dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
+      dashboard_lock_background_crop: app_settings.dashboard_lock_background_crop,
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
@@ -338,6 +340,17 @@ export interface AppSettings {
   // every widget row), with all of it rendered on top throughout, not just
   // the top edge. Meaningless with no dashboardBackgroundImage set.
   dashboardBannerStyle: "overlap" | "backdrop";
+  // Off (the default): the backdrop banner sizes itself from the viewport
+  // (full-bleed width, fixed or content-driven height) and crops with
+  // ordinary CSS `background-size: cover` — which can visibly reframe on
+  // browser zoom/window resize, since the container's aspect ratio isn't
+  // perfectly stable. On: the banner is forced to the exact aspect ratio
+  // the backdrop was cropped to at upload (see BACKGROUND_ASPECT in
+  // lib/imageCropPresets.ts) and drawn unstretched, so the same crop always
+  // shows regardless of zoom/resize. Applies to both dashboardBannerStyle
+  // values — "backdrop" becomes a fixed-height banner like "overlap" while
+  // this is on, rather than spanning the whole dynamic-height section.
+  dashboardLockBackgroundCrop: boolean;
   // Off (the default): a short-answer quiz question is graded locally —
   // word-overlap against the model answer, no API call — instead of asking
   // the AI to judge it. Saves a grading call per quiz on every attempt;
@@ -416,6 +429,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardBannerStyle: row?.dashboard_banner_style === "backdrop" ? "backdrop" : "overlap",
     aiGradingEnabled: row?.ai_grading_enabled ?? false,
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
+    dashboardLockBackgroundCrop: row?.dashboard_lock_background_crop ?? false,
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
@@ -498,6 +512,7 @@ export async function setAppBranding(fields: {
   dashboardBackgroundImage?: string | null;
   dashboardBannerStyle?: "overlap" | "backdrop" | null;
   dashboardTransparentWidgets?: boolean;
+  dashboardLockBackgroundCrop?: boolean;
 }): Promise<void> {
   const values: Record<string, string | boolean | null> = {};
   if ("appName" in fields) values.app_name = fields.appName ?? null;
@@ -507,6 +522,7 @@ export async function setAppBranding(fields: {
   if ("dashboardBackgroundImage" in fields) values.dashboard_background_image = fields.dashboardBackgroundImage ?? null;
   if ("dashboardBannerStyle" in fields) values.dashboard_banner_style = fields.dashboardBannerStyle ?? null;
   if ("dashboardTransparentWidgets" in fields) values.dashboard_transparent_widgets = fields.dashboardTransparentWidgets ?? false;
+  if ("dashboardLockBackgroundCrop" in fields) values.dashboard_lock_background_crop = fields.dashboardLockBackgroundCrop ?? false;
   await db
     .update(app_settings)
     .set({ ...values, updated_at: nowUtc() })
