@@ -131,6 +131,10 @@ export const app_settings = pgTable("app_settings", {
   model_badge_detail: text("model_badge_detail"),
   // See AppSettings.aiEnabled's doc comment in models.ts.
   ai_enabled: boolean("ai_enabled").notNull().default(true),
+  // See AppSettings.cliTrustedModeEnabled's doc comment in models.ts — relaxes
+  // the claude_code/codex_cli backends' sandboxing (Bash/file/network tools,
+  // confined to a dedicated workspace dir) when true.
+  cli_trusted_mode_enabled: boolean("cli_trusted_mode_enabled").notNull().default(false),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -359,6 +363,9 @@ export const uploaded_images = pgTable(
 export const chat_conversations = pgTable("chat_conversations", {
   id: serial("id").primaryKey(),
   title: text("title"),
+  // Optional course this conversation is scoped to — see
+  // ChatConversation.courseId's doc comment in models.ts. NULL = standalone.
+  course_id: integer("course_id").references(() => courses.id, { onDelete: "set null" }),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
@@ -372,6 +379,9 @@ export const chat_messages = pgTable(
       .references(() => chat_conversations.id, { onDelete: "cascade" }),
     role: text("role").notNull().$type<ChatRole>(),
     content: text("content").notNull(),
+    // JSON-encoded ChatAttachment[] (see models.ts) — NULL when the message
+    // has no attachments.
+    attachments: text("attachments"),
     created_at: text("created_at").notNull(),
   },
   (table) => [index("idx_chat_messages_conversation_id").on(table.conversation_id)]

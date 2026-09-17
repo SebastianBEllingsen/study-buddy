@@ -1,3 +1,12 @@
+// A generation call's course-document scope, used only by claudeCode.ts/
+// codexCli.ts (see aiBackends/cliWorkspace.ts) when AppSettings.cliTrustedModeEnabled
+// is on, to materialize the relevant documents into the CLI's workspace
+// directory alongside a manifest.json lookup table. Every other backend
+// ignores this field entirely, same convention as `efficient` above.
+export interface GenerateWorkspaceScope {
+  documentIds: number[];
+}
+
 export interface GenerateStructuredParams {
   system: string;
   user: string;
@@ -11,6 +20,7 @@ export interface GenerateStructuredParams {
   // (openai/gemini/free/codexCli), same as `effort` already is by
   // openaiCompatible.
   efficient?: boolean;
+  workspaceScope?: GenerateWorkspaceScope;
 }
 
 export interface GenerateTextImage {
@@ -25,11 +35,14 @@ export interface GenerateTextParams {
   effort?: "low" | "medium" | "high";
   // See GenerateStructuredParams.efficient's doc comment above.
   efficient?: boolean;
-  // Vision input — only anthropicApi, openai/free (openaiCompatible), and
-  // gemini support this; claudeCode/codexCli throw if it's passed (see their
-  // generateText for why: they're CLI shims with no confirmed image-input
-  // path).
+  // Vision input — anthropicApi, openai/free (openaiCompatible), and gemini
+  // pass this straight through to the provider's own vision input. claudeCode/
+  // codexCli instead write each image into a materialized workspace directory
+  // and point the CLI at it via Read (see aiBackends/cliWorkspace.ts), but
+  // only when AppSettings.cliTrustedModeEnabled is on — otherwise they still
+  // throw, same as always.
   images?: GenerateTextImage[];
+  workspaceScope?: GenerateWorkspaceScope;
 }
 
 export interface AiBackendImpl {

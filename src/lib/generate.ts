@@ -62,7 +62,8 @@ async function generateQuiz(
   alreadyCovered?: string,
   settings?: QuizGenerationSettings,
   efficient?: boolean,
-  totalQuestions?: number
+  totalQuestions?: number,
+  documentIds?: number[]
 ): Promise<QuizContent> {
   const content = await generateStructured<QuizContent>({
     system: quizSystemPrompt(courseName, settings, totalQuestions),
@@ -70,6 +71,7 @@ async function generateQuiz(
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? "low" : "medium",
     efficient,
+    workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
   return sanitizeQuizContent(content);
 }
@@ -86,12 +88,13 @@ async function generateQuizChunked(
   chunks: string[],
   alreadyCovered?: string,
   settings?: QuizGenerationSettings,
-  efficient?: boolean
+  efficient?: boolean,
+  documentIds?: number[]
 ): Promise<QuizContent> {
   const counts = distributeCount(TOTAL_QUESTIONS, chunks.length);
   const targeted = chunks.map((chunk, i) => ({ chunk, count: counts[i] })).filter((t) => t.count > 0);
   const perChunk = await mapWithConcurrency(targeted, CHUNK_CONCURRENCY, ({ chunk, count }) =>
-    generateQuiz(courseName, chunk, alreadyCovered, settings, efficient, count)
+    generateQuiz(courseName, chunk, alreadyCovered, settings, efficient, count, documentIds)
   );
   return { questions: perChunk.flatMap((c) => c.questions) };
 }
@@ -101,7 +104,8 @@ async function generateFlashcards(
   text: string,
   alreadyCovered?: string,
   efficient?: boolean,
-  totalCards?: number
+  totalCards?: number,
+  documentIds?: number[]
 ): Promise<FlashcardsContent> {
   const content = await generateStructured<FlashcardsContent>({
     system: flashcardsSystemPrompt(courseName, totalCards),
@@ -109,6 +113,7 @@ async function generateFlashcards(
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? "low" : "medium",
     efficient,
+    workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
   return sanitizeFlashcardsContent(content);
 }
@@ -119,12 +124,13 @@ async function generateFlashcardsChunked(
   courseName: string,
   chunks: string[],
   alreadyCovered?: string,
-  efficient?: boolean
+  efficient?: boolean,
+  documentIds?: number[]
 ): Promise<FlashcardsContent> {
   const counts = distributeCount(TOTAL_CARDS, chunks.length);
   const targeted = chunks.map((chunk, i) => ({ chunk, count: counts[i] })).filter((t) => t.count > 0);
   const perChunk = await mapWithConcurrency(targeted, CHUNK_CONCURRENCY, ({ chunk, count }) =>
-    generateFlashcards(courseName, chunk, alreadyCovered, efficient, count)
+    generateFlashcards(courseName, chunk, alreadyCovered, efficient, count, documentIds)
   );
   return { cards: perChunk.flatMap((c) => c.cards) };
 }
@@ -133,7 +139,8 @@ async function generateNotes(
   courseName: string,
   text: string,
   alreadyCovered?: string,
-  efficient?: boolean
+  efficient?: boolean,
+  documentIds?: number[]
 ): Promise<NotesContent> {
   const markdown = await generateText({
     system: notesSystemPrompt(courseName),
@@ -141,6 +148,7 @@ async function generateNotes(
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? "low" : "medium",
     efficient,
+    workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
   return sanitizeNotesContent({ markdown });
 }
@@ -148,11 +156,12 @@ async function generateNotes(
 async function generateNotesChunked(
   courseName: string,
   chunks: string[],
-  efficient?: boolean
+  efficient?: boolean,
+  documentIds?: number[]
 ): Promise<NotesContent> {
   // Map: summarize each chunk independently.
   const chunkSummaries = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, (chunk) =>
-    generateNotes(courseName, chunk, undefined, efficient)
+    generateNotes(courseName, chunk, undefined, efficient, documentIds)
   );
   // Reduce: merge the chunk-level notes into one coherent document.
   const merged = await generateText({
@@ -163,6 +172,7 @@ async function generateNotesChunked(
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? "low" : "medium",
     efficient,
+    workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
   return sanitizeNotesContent({ markdown: merged });
 }
@@ -212,18 +222,40 @@ export async function generateForCourse(
   switch (mode) {
     case "quiz":
       content = chunks
-        ? await generateQuizChunked(context.courseName, chunks, undefined, options?.quizSettings, efficient)
-        : await generateQuiz(context.courseName, context.combinedText, undefined, options?.quizSettings, efficient);
+        ? await generateQuizChunked(
+            context.courseName,
+            chunks,
+            undefined,
+            options?.quizSettings,
+            efficient,
+            context.documentIds
+          )
+        : await generateQuiz(
+            context.courseName,
+            context.combinedText,
+            undefined,
+            options?.quizSettings,
+            efficient,
+            undefined,
+            context.documentIds
+          );
       break;
     case "flashcards":
       content = chunks
-        ? await generateFlashcardsChunked(context.courseName, chunks, undefined, efficient)
-        : await generateFlashcards(context.courseName, context.combinedText, undefined, efficient);
+        ? await generateFlashcardsChunked(context.courseName, chunks, undefined, efficient, context.documentIds)
+        : await generateFlashcards(
+            context.courseName,
+            context.combinedText,
+            undefined,
+            efficient,
+            undefined,
+            context.documentIds
+          );
       break;
     case "notes":
       content = chunks
-        ? await generateNotesChunked(context.courseName, chunks, efficient)
-        : await generateNotes(context.courseName, context.combinedText, undefined, efficient);
+        ? await generateNotesChunked(context.courseName, chunks, efficient, context.documentIds)
+        : await generateNotes(context.courseName, context.combinedText, undefined, efficient, context.documentIds);
       break;
   }
 
@@ -334,23 +366,32 @@ export async function supplementGeneratedItem(item: GeneratedItem): Promise<Gene
   const chunks =
     estimateTokens(combinedText) > CHUNK_THRESHOLD_TOKENS ? chunkText(combinedText) : null;
   const alreadyCovered = summarizeExisting(item);
+  const documentIds = newDocs.map((d) => d.id);
 
   let delta: QuizContent | FlashcardsContent | NotesContent;
   switch (item.mode) {
     case "quiz":
       delta = chunks
-        ? await generateQuizChunked(courseName, chunks, alreadyCovered, undefined, efficient)
-        : await generateQuiz(courseName, combinedText, alreadyCovered, undefined, efficient);
+        ? await generateQuizChunked(courseName, chunks, alreadyCovered, undefined, efficient, documentIds)
+        : await generateQuiz(
+            courseName,
+            combinedText,
+            alreadyCovered,
+            undefined,
+            efficient,
+            undefined,
+            documentIds
+          );
       break;
     case "flashcards":
       delta = chunks
-        ? await generateFlashcardsChunked(courseName, chunks, alreadyCovered, efficient)
-        : await generateFlashcards(courseName, combinedText, alreadyCovered, efficient);
+        ? await generateFlashcardsChunked(courseName, chunks, alreadyCovered, efficient, documentIds)
+        : await generateFlashcards(courseName, combinedText, alreadyCovered, efficient, undefined, documentIds);
       break;
     case "notes":
       delta = chunks
-        ? await generateNotesChunked(courseName, chunks, efficient)
-        : await generateNotes(courseName, combinedText, alreadyCovered, efficient);
+        ? await generateNotesChunked(courseName, chunks, efficient, documentIds)
+        : await generateNotes(courseName, combinedText, alreadyCovered, efficient, documentIds);
       break;
   }
 

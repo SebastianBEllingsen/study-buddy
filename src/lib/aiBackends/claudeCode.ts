@@ -1,6 +1,8 @@
 import os from "node:os";
 import { runCli, CliNotFoundError, CliTimeoutError } from "./cliRunner";
-import type { GenerateStructuredParams, GenerateTextParams } from "./types";
+import type { GenerateStructuredParams, GenerateTextImage, GenerateTextParams, GenerateWorkspaceScope } from "./types";
+import { getAppSettings } from "../models";
+import { materializeCliWorkspace } from "./cliWorkspace";
 
 // claude -p one-shot output shape (confirmed empirically against the
 // installed CLI — this is not officially typed by the CLI itself).
@@ -42,6 +44,15 @@ const HARDENING_ARGS = [
   "SlashCommand",
 ];
 
+// Used instead of HARDENING_ARGS when AppSettings.cliTrustedModeEnabled is
+// on — drops --restricted/--disallowedTools entirely, so Bash/Read/Write/
+// Edit/WebFetch/WebSearch/etc. all become available. --strict-mcp-config is
+// kept regardless: it only gates *additional* MCP-server tool surface,
+// unrelated to what this toggle is meant to unlock, so there's no reason to
+// also open arbitrary configured MCP servers. See cliWorkspace.ts for how
+// cwd is confined even in this mode.
+const TRUSTED_ARGS = ["--strict-mcp-config"];
+
 // Fixed instruction passed as the `-p` argument — never interpolates any
 // variable/untrusted content (see cliRunner.ts). The actual system prompt
 // and user prompt (which embeds untrusted PDF text) go via stdin instead;
@@ -49,6 +60,15 @@ const HARDENING_ARGS = [
 // prompt when stdin isn't a TTY.
 const STDIN_INSTRUCTION =
   "Follow the SYSTEM INSTRUCTIONS and respond to the USER REQUEST below, both provided via stdin.";
+
+// Used in place of STDIN_INSTRUCTION when a workspace was actually
+// materialized (see cliWorkspace.ts) — points the CLI at manifest.json
+// instead of leaving it to guess file locations. Still a fixed string, no
+// interpolation of untrusted content.
+const STDIN_INSTRUCTION_WITH_WORKSPACE =
+  `${STDIN_INSTRUCTION} A manifest.json file in your current working directory ` +
+  "lists any course documents and attached images made available for this " +
+  "request — read it first to find exact file paths.";
 
 // PDF text extraction occasionally yields stray NUL bytes (malformed content
 // streams, odd encodings) — harmless to drop, since NULs carry no meaning in
@@ -68,49 +88,74 @@ async function runClaude(params: {
   // See GenerateStructuredParams.efficient's doc comment in
   // aiBackends/types.ts — "haiku" is the CLI's own alias, same as "sonnet".
   efficient?: boolean;
+  cliTrustedModeEnabled: boolean;
+  workspaceScope?: GenerateWorkspaceScope;
+  images?: GenerateTextImage[];
 }): Promise<ClaudeResult> {
-  const args = [
-    "-p",
-    STDIN_INSTRUCTION,
-    "--output-format",
-    "json",
-    "--model",
-    params.efficient ? "haiku" : "sonnet",
-    "--effort",
-    params.effort,
-    ...HARDENING_ARGS,
-  ];
+  // Only pay for materializing a workspace when trusted mode is on AND
+  // there's actually something to put in it — otherwise cwd stays
+  // os.tmpdir(), exactly like the untrusted path, rather than creating an
+  // empty directory for nothing.
+  const hasWorkspaceContent = !!(params.workspaceScope?.documentIds?.length || params.images?.length);
+  const useWorkspace = params.cliTrustedModeEnabled && hasWorkspaceContent;
 
-  // Strip API-key auth from the child's environment: the shell inherits
-  // process.env by default, and if ANTHROPIC_API_KEY is set (e.g. for the
-  // API backend) it outranks OAuth/subscription login per the CLI's own
-  // credential resolution order — silently defeating the entire point of
-  // this backend (avoiding per-token API billing).
-  const env = { ...process.env };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
+  const workspace = useWorkspace
+    ? await materializeCliWorkspace({
+        documentIds: params.workspaceScope?.documentIds,
+        inlineFiles: params.images?.map((image, i) => ({
+          filename: `image-${i + 1}`,
+          base64: image.base64,
+          mimeType: image.mimeType,
+        })),
+      })
+    : null;
 
-  let stdout: string;
   try {
-    ({ stdout } = await runCli({
-      command: "claude",
-      args,
-      stdin: buildStdin(params.systemPrompt, params.userPrompt),
-      cwd: os.tmpdir(),
-      env,
-      timeoutMs: 5 * 60 * 1000,
-      maxBufferBytes: 20 * 1024 * 1024,
-    }));
-  } catch (err) {
-    if (err instanceof CliNotFoundError) {
-      throw new Error(
-        "The `claude` CLI isn't on PATH — install Claude Code or switch back to the API key backend."
-      );
-    }
-    throw err;
-  }
+    const args = [
+      "-p",
+      workspace ? STDIN_INSTRUCTION_WITH_WORKSPACE : STDIN_INSTRUCTION,
+      "--output-format",
+      "json",
+      "--model",
+      params.efficient ? "haiku" : "sonnet",
+      "--effort",
+      params.effort,
+      ...(params.cliTrustedModeEnabled ? TRUSTED_ARGS : HARDENING_ARGS),
+    ];
 
-  return JSON.parse(stdout) as ClaudeResult;
+    // Strip API-key auth from the child's environment: the shell inherits
+    // process.env by default, and if ANTHROPIC_API_KEY is set (e.g. for the
+    // API backend) it outranks OAuth/subscription login per the CLI's own
+    // credential resolution order — silently defeating the entire point of
+    // this backend (avoiding per-token API billing).
+    const env = { ...process.env };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_AUTH_TOKEN;
+
+    let stdout: string;
+    try {
+      ({ stdout } = await runCli({
+        command: "claude",
+        args,
+        stdin: buildStdin(params.systemPrompt, params.userPrompt),
+        cwd: workspace?.dir ?? os.tmpdir(),
+        env,
+        timeoutMs: 5 * 60 * 1000,
+        maxBufferBytes: 20 * 1024 * 1024,
+      }));
+    } catch (err) {
+      if (err instanceof CliNotFoundError) {
+        throw new Error(
+          "The `claude` CLI isn't on PATH — install Claude Code or switch back to the API key backend."
+        );
+      }
+      throw err;
+    }
+
+    return JSON.parse(stdout) as ClaudeResult;
+  } finally {
+    await workspace?.cleanup();
+  }
 }
 
 function stripCodeFences(text: string): string {
@@ -121,6 +166,7 @@ function stripCodeFences(text: string): string {
 export async function generateStructured<T>(
   params: GenerateStructuredParams
 ): Promise<T> {
+  const { cliTrustedModeEnabled } = await getAppSettings();
   const effort = params.effort === "low" || params.effort === "high" ? params.effort : "medium";
 
   const first = await runClaude({
@@ -128,6 +174,8 @@ export async function generateStructured<T>(
     systemPrompt: params.system,
     effort,
     efficient: params.efficient,
+    cliTrustedModeEnabled,
+    workspaceScope: params.workspaceScope,
   });
   if (first.is_error) {
     throw new Error(first.result || `claude -p failed (${first.subtype})`);
@@ -142,6 +190,8 @@ export async function generateStructured<T>(
       systemPrompt: params.system,
       effort,
       efficient: params.efficient,
+      cliTrustedModeEnabled,
+      workspaceScope: params.workspaceScope,
       userPrompt: `${params.user}\n\nYour previous response was not valid JSON:\n${first.result}\n\nRespond again with ONLY the corrected, valid JSON — no prose, no markdown code fences.`,
     });
     if (retry.is_error) {
@@ -152,9 +202,10 @@ export async function generateStructured<T>(
 }
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
-  if (params.images?.length) {
+  const { cliTrustedModeEnabled } = await getAppSettings();
+  if (params.images?.length && !cliTrustedModeEnabled) {
     throw new Error(
-      "Image input isn't supported with the Claude Code backend — switch to the Anthropic API, OpenAI, Gemini, or Free backend in Settings."
+      "Image input isn't supported with the Claude Code backend — switch to the Anthropic API, OpenAI, Gemini, or Free backend in Settings, or turn on full tool access for this CLI backend in Settings."
     );
   }
   const effort = params.effort === "low" || params.effort === "high" ? params.effort : "medium";
@@ -163,6 +214,9 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
     systemPrompt: params.system,
     effort,
     efficient: params.efficient,
+    cliTrustedModeEnabled,
+    workspaceScope: params.workspaceScope,
+    images: params.images,
   });
   if (result.is_error) {
     throw new Error(result.result || `claude -p failed (${result.subtype})`);

@@ -1,4 +1,4 @@
-import { sendChatMessage } from "@/lib/chat";
+import { sendChatMessage, validateAndExtractAttachments } from "@/lib/chat";
 import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { parseId } from "@/lib/routeParams";
 
@@ -10,12 +10,17 @@ export async function POST(request: Request, { params }: Params) {
   if (id === null) return Response.json({ error: "Conversation not found" }, { status: 404 });
   const body = await request.json().catch(() => ({}));
 
-  if (typeof body?.content !== "string" || !body.content.trim()) {
-    return Response.json({ error: "content is required" }, { status: 400 });
+  const content = typeof body?.content === "string" ? body.content.trim() : "";
+  const attachments = Array.isArray(body?.attachments)
+    ? await validateAndExtractAttachments(body.attachments)
+    : undefined;
+
+  if (!content && !attachments?.length) {
+    return Response.json({ error: "content or an attachment is required" }, { status: 400 });
   }
 
   try {
-    const reply = await sendChatMessage(id, body.content.trim());
+    const reply = await sendChatMessage(id, content, attachments);
     return Response.json(reply, { status: 201 });
   } catch (err) {
     if (err instanceof AiDisabledError) {

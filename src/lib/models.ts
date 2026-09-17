@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte, max, or, sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import Fuse from "fuse.js";
@@ -166,6 +167,7 @@ interface SettingsRow {
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
   ai_enabled: boolean;
+  cli_trusted_mode_enabled: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -198,6 +200,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
+      cli_trusted_mode_enabled: app_settings.cli_trusted_mode_enabled,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -372,6 +375,20 @@ export interface AppSettings {
   // label/model text, same as before this setting existed. "minimal": just
   // the logo/icon, no text. Meaningless with showModelBadge off.
   modelBadgeDetail: "detailed" | "minimal";
+  // Off (the default): the claude_code/codex_cli backends run hardened — no
+  // Bash/Read/Write/Edit/network tools, in a throwaway os.tmpdir() cwd (see
+  // HARDENING_ARGS in aiBackends/claudeCode.ts and aiBackends/codexCli.ts).
+  // On: those backends run with their normal full tool permissions, confined
+  // to a dedicated, disposable workspace directory under data/ai-workspace/
+  // (see aiBackends/cliWorkspace.ts) that's materialized with the relevant
+  // course documents/images and a manifest.json lookup table — never the
+  // app's own project source, database, or .env. Also lets those backends
+  // accept image input (crop-to-ask, chat image attachments) by writing the
+  // image into that same workspace instead of refusing it outright.
+  // Meaningless for every other backend. This is a real trust boundary, not
+  // just a convenience flag — a malicious PDF/prompt could try to abuse the
+  // unlocked tools, so it's opt-in and off by default.
+  cliTrustedModeEnabled: boolean;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -403,6 +420,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
+    cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
   };
 }
 
@@ -452,6 +470,13 @@ export async function setAiEfficiencyMode(enabled: boolean): Promise<void> {
   await db
     .update(app_settings)
     .set({ ai_efficiency_mode: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setCliTrustedModeEnabled(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ cli_trusted_mode_enabled: enabled, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1627,6 +1652,57 @@ export async function getDocumentFile(
   return rows[0];
 }
 
+// Reads a document's original bytes: the local on-disk copy if this is the
+// device it was uploaded from (fast path, works offline), else the synced
+// file_base64 copy from the database. Neither present -> null. Shared by the
+// document-viewing route and aiBackends/cliWorkspace.ts (materializing a
+// trusted-CLI workspace needs the same fallback).
+export async function getDocumentBytes(doc: {
+  file_path: string;
+  file_base64: string | null;
+}): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(doc.file_path);
+  } catch {
+    // Not on this device (ENOENT) — fall through to the synced copy.
+  }
+  if (doc.file_base64) {
+    return Buffer.from(doc.file_base64, "base64");
+  }
+  return null;
+}
+
+export interface DocumentWithBytes {
+  id: number;
+  course_id: number;
+  folder_id: number | null;
+  filename: string;
+  file_path: string;
+  file_base64: string | null;
+  status: DocumentStatus;
+}
+
+// Fetches an arbitrary set of documents by id, in whatever order the DB
+// returns them, including file_base64 (unlike DocumentRow/listDocumentsForCourse,
+// which deliberately omit it) — used by aiBackends/cliWorkspace.ts to
+// materialize exactly the documents a generation call's workspaceScope
+// names, regardless of which course/folder each one belongs to.
+export async function getDocumentsByIds(ids: number[]): Promise<DocumentWithBytes[]> {
+  if (ids.length === 0) return [];
+  return db
+    .select({
+      id: documents.id,
+      course_id: documents.course_id,
+      folder_id: documents.folder_id,
+      filename: documents.filename,
+      file_path: documents.file_path,
+      file_base64: documents.file_base64,
+      status: documents.status,
+    })
+    .from(documents)
+    .where(inArray(documents.id, ids));
+}
+
 // Explicitly excludes file_base64 — this feeds both course-page document
 // queries below, and a several-MB base64 blob per document in that response
 // would be a serious payload (and, on the Supabase backend, database
@@ -2609,9 +2685,24 @@ export async function listGenerationNotifications(): Promise<GenerationNotificat
 
 export type ChatRole = "user" | "assistant";
 
+// Chat-only attachments — NOT filed into a course's document library (a
+// separate "Save to course" action does that later, reusing the real
+// course-upload pipeline). Documents keep their full original bytes
+// (fileBase64), not just extractedText, precisely so that action has
+// something to file. Images reuse the same data-URL convention as every
+// other image field in this app (see dataUrlImage.ts).
+export type ChatAttachment =
+  | { type: "image"; filename: string; mimeType: string; dataUrl: string }
+  | { type: "document"; filename: string; mimeType: string; fileBase64: string; extractedText: string };
+
 export interface ChatConversation {
   id: number;
   title: string | null;
+  // Optional course this conversation is scoped to — see sendChatMessage in
+  // chat.ts for how this feeds course context into the model (either via a
+  // trusted-CLI workspace/manifest, or folded-in text). null = standalone,
+  // same as every conversation before this existed.
+  courseId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2621,11 +2712,28 @@ export interface ChatMessage {
   conversationId: number;
   role: ChatRole;
   content: string;
+  attachments: ChatAttachment[] | null;
   createdAt: string;
 }
 
 function toChatConversation(row: typeof chat_conversations.$inferSelect): ChatConversation {
-  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at };
+  return {
+    id: row.id,
+    title: row.title,
+    courseId: row.course_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function parseChatAttachments(raw: string | null): ChatAttachment[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ChatAttachment[]) : null;
+  } catch {
+    return null;
+  }
 }
 
 function toChatMessage(row: typeof chat_messages.$inferSelect): ChatMessage {
@@ -2634,6 +2742,7 @@ function toChatMessage(row: typeof chat_messages.$inferSelect): ChatMessage {
     conversationId: row.conversation_id,
     role: row.role,
     content: row.content,
+    attachments: parseChatAttachments(row.attachments),
     createdAt: row.created_at,
   };
 }
@@ -2671,6 +2780,15 @@ export async function deleteChatConversation(id: number): Promise<void> {
   await db.delete(chat_conversations).where(eq(chat_conversations.id, id));
 }
 
+// Scopes (or unscopes, with courseId null) a conversation to one course —
+// see ChatConversation.courseId's doc comment. Doesn't touch updated_at:
+// picking a course isn't "activity" the way sending a message is, and
+// bumping it would otherwise reorder the conversation list just from
+// opening the picker.
+export async function setChatConversationCourse(id: number, courseId: number | null): Promise<void> {
+  await db.update(chat_conversations).set({ course_id: courseId }).where(eq(chat_conversations.id, id));
+}
+
 // Appends one message and bumps the conversation's updated_at (what
 // listChatConversations sorts by) in the same call — every append is
 // "activity" on the conversation, not just user ones. The very first user
@@ -2680,12 +2798,19 @@ export async function deleteChatConversation(id: number): Promise<void> {
 export async function addChatMessage(
   conversationId: number,
   role: ChatRole,
-  content: string
+  content: string,
+  attachments?: ChatAttachment[]
 ): Promise<ChatMessage> {
   const now = nowUtc();
   const [message] = await db
     .insert(chat_messages)
-    .values({ conversation_id: conversationId, role, content, created_at: now })
+    .values({
+      conversation_id: conversationId,
+      role,
+      content,
+      attachments: attachments?.length ? JSON.stringify(attachments) : null,
+      created_at: now,
+    })
     .returning();
 
   const updates: { updated_at: string; title?: string } = { updated_at: now };

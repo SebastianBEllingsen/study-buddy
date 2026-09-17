@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import {
   deleteDocument,
   getDocument,
+  getDocumentBytes,
   getDocumentFile,
   InvalidDestinationFolderError,
   moveDocument,
@@ -53,7 +54,7 @@ export async function GET(_request: Request, { params }: Params) {
       // Not cached on this device yet — fall through to convert below.
     }
 
-    const original = await readOriginal(doc);
+    const original = await getDocumentBytes(doc);
     if (!original) return new Response(null, { status: 404 });
     try {
       const converted = await convertToPdf(original, ext);
@@ -67,24 +68,9 @@ export async function GET(_request: Request, { params }: Params) {
     }
   }
 
-  const original = await readOriginal(doc);
+  const original = await getDocumentBytes(doc);
   if (!original) return new Response(null, { status: 404 });
   return new Response(new Uint8Array(original), { headers });
-}
-
-async function readOriginal(doc: {
-  file_path: string;
-  file_base64: string | null;
-}): Promise<Buffer | null> {
-  try {
-    return await fs.readFile(doc.file_path);
-  } catch {
-    // Not on this device (ENOENT) — fall through to the synced copy.
-  }
-  if (doc.file_base64) {
-    return Buffer.from(doc.file_base64, "base64");
-  }
-  return null;
 }
 
 export async function DELETE(_request: Request, { params }: Params) {

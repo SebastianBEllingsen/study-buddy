@@ -97,6 +97,12 @@ export const app_settings = sqliteTable("app_settings", {
   model_badge_detail: text("model_badge_detail"),
   // See AppSettings.aiEnabled's doc comment in models.ts.
   ai_enabled: integer("ai_enabled", { mode: "boolean" }).notNull().default(true),
+  // See AppSettings.cliTrustedModeEnabled's doc comment in models.ts — relaxes
+  // the claude_code/codex_cli backends' sandboxing (Bash/file/network tools,
+  // confined to a dedicated workspace dir) when true.
+  cli_trusted_mode_enabled: integer("cli_trusted_mode_enabled", { mode: "boolean" })
+    .notNull()
+    .default(false),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -291,6 +297,9 @@ export const uploaded_images = sqliteTable("uploaded_images", {
 export const chat_conversations = sqliteTable("chat_conversations", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title"),
+  // Optional course this conversation is scoped to — see
+  // ChatConversation.courseId's doc comment in models.ts. NULL = standalone.
+  course_id: integer("course_id").references(() => courses.id, { onDelete: "set null" }),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
@@ -302,6 +311,9 @@ export const chat_messages = sqliteTable("chat_messages", {
     .references(() => chat_conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull().$type<ChatRole>(),
   content: text("content").notNull(),
+  // JSON-encoded ChatAttachment[] (see models.ts) — NULL when the message
+  // has no attachments.
+  attachments: text("attachments"),
   created_at: text("created_at").notNull(),
 });
 

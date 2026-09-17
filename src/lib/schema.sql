@@ -241,6 +241,9 @@ CREATE INDEX IF NOT EXISTS idx_uploaded_images_kind ON uploaded_images(kind);
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT, -- NULL until the first exchange sets it — see lib/chat.ts
+  -- Optional course this conversation is scoped to — see
+  -- ChatConversation.courseId's doc comment in models.ts. NULL = standalone.
+  course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -250,6 +253,9 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   conversation_id INTEGER NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL, -- 'user' | 'assistant'
   content TEXT NOT NULL,
+  -- JSON-encoded ChatAttachment[] (see models.ts) — NULL when the message has
+  -- no attachments.
+  attachments TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -505,6 +505,19 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "ai_enabled")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("app_settings", "cli_trusted_mode_enabled")) {
+    database.exec(
+      "ALTER TABLE app_settings ADD COLUMN cli_trusted_mode_enabled INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!hasColumn("chat_messages", "attachments")) {
+    database.exec("ALTER TABLE chat_messages ADD COLUMN attachments TEXT");
+  }
+  if (!hasColumn("chat_conversations", "course_id")) {
+    database.exec(
+      "ALTER TABLE chat_conversations ADD COLUMN course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL"
+    );
+  }
 }
 
 // Applies schema.sql then migrate() — the full bootstrap sequence any

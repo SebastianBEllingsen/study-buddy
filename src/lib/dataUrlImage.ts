@@ -32,6 +32,9 @@ export const MAX_PAGE_BACKGROUND_IMAGE_LENGTH = 4_000_000;
 // resizeImageForNote), so this needs more headroom than the always-JPEG
 // cover/icon caps for the same pixel count.
 export const MAX_NOTE_IMAGE_LENGTH = 4_000_000;
+// A chat attachment (ChatContent.tsx) — same order of magnitude as a note
+// image, for the same reason (PNG-capable, pasted/dropped by the user).
+export const MAX_CHAT_IMAGE_LENGTH = 4_000_000;
 
 // A stored image field is now either the original inline data URL (existing
 // rows, or the /api/blobs fallback when no blob store is configured — see
@@ -71,4 +74,8 @@ export function isValidPageBackgroundImage(value: unknown): value is string {
 
 export function isValidNoteImage(value: unknown): value is string {
   return isDataUrlImage(value, MAX_NOTE_IMAGE_LENGTH) || isImageUrl(value);
+}
+
+export function isValidChatImageAttachment(value: unknown): value is string {
+  return isDataUrlImage(value, MAX_CHAT_IMAGE_LENGTH) || isImageUrl(value);
 }

@@ -232,6 +232,13 @@
       "when": 1789562020006,
       "tag": "0033_careless_madame_web",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789629286763,
+      "tag": "0034_fearless_zaran",
+      "breakpoints": true
     }
   ]
 }

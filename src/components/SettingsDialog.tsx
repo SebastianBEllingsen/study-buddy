@@ -108,6 +108,7 @@ function AiSection() {
   const [saving, setSaving] = useState(false);
   const [gradingSaving, setGradingSaving] = useState(false);
   const [efficiencySaving, setEfficiencySaving] = useState(false);
+  const [cliTrustedModeSaving, setCliTrustedModeSaving] = useState(false);
   const [aiEnabledSaving, setAiEnabledSaving] = useState(false);
   const [imageBackendSaving, setImageBackendSaving] = useState(false);
 
@@ -221,6 +222,32 @@ function AiSection() {
     }
   }
 
+  async function handleCliTrustedModeToggle(next: boolean) {
+    if (!settings) return;
+    mutate({ ...settings, cliTrustedModeEnabled: next }, { revalidate: false });
+    setCliTrustedModeSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliTrustedModeEnabled: next }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save AI settings");
+        mutate((prev) => (prev ? { ...prev, cliTrustedModeEnabled: !next } : prev), {
+          revalidate: false,
+        });
+      }
+    } catch {
+      toast.error("Couldn't save AI settings");
+      mutate((prev) => (prev ? { ...prev, cliTrustedModeEnabled: !next } : prev), {
+        revalidate: false,
+      });
+    } finally {
+      setCliTrustedModeSaving(false);
+    }
+  }
+
   async function handleAiEnabledToggle(next: boolean) {
     if (!settings) return;
     mutate({ ...settings, aiEnabled: next }, { revalidate: false });
@@ -298,6 +325,31 @@ function AiSection() {
           Uses your local Codex CLI subscription login — no key needed here, just run{" "}
           <code>codex login</code> in a terminal.
         </p>
+      )}
+
+      {(backend === "claude_code" || backend === "codex_cli") && (
+        <label className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm">
+          <span>
+            Full tool access for this CLI backend
+            <span className="block text-xs text-muted-foreground">
+              Off (default): {AI_LABELS[backend]} runs hardened — no Bash, file, or network
+              tools, in a throwaway temp directory. On: it runs with its normal full
+              permissions (it can run shell commands, write files, and reach the network),
+              confined to a dedicated Study Buddy workspace folder instead of your temp
+              directory — never your app&apos;s own project files or database. This also lets
+              it see images (Crop &amp; Ask, chat image attachments) instead of refusing them.
+              Only turn this on if you trust the material you feed it — a malicious PDF could
+              otherwise try to abuse those tools.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            className="size-4 shrink-0 accent-primary"
+            checked={settings.cliTrustedModeEnabled}
+            disabled={cliTrustedModeSaving}
+            onChange={(e) => handleCliTrustedModeToggle(e.target.checked)}
+          />
+        </label>
       )}
 
       {activeKeyProvider && (

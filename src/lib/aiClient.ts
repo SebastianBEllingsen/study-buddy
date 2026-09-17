@@ -34,7 +34,11 @@ function backendModule(id: AiBackend) {
 // implement the same generateStructured/generateText/describeError shape, so
 // callers (lib/generate.ts, lib/grading.ts) never need to know which is
 // active.
-async function resolveBackendId(hasImages: boolean): Promise<AiBackend> {
+// Exported for chat.ts, which needs to know ahead of time which backend a
+// call will actually use — to decide between folding course context in as
+// text vs. materializing a trusted-CLI workspace/manifest (see
+// sendChatMessage) — without duplicating this resolution logic.
+export async function resolveBackendId(hasImages: boolean): Promise<AiBackend> {
   if (hasImages) {
     const override = await getImageAiBackend();
     if (override) return override;

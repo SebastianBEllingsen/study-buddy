@@ -118,3 +118,39 @@ export async function buildCourseContext(
 export function chunkCourseContext(context: CourseContext): string[] {
   return chunkText(context.combinedText);
 }
+
+// A broader variant of buildCourseContext, used only by the general chat
+// assistant's course-scoping (see chat.ts's sendChatMessage) when it needs
+// to fold course context into the prompt as plain text instead of via a
+// trusted-CLI workspace/manifest. Unlike buildCourseContext, this lists
+// EVERY document in the course, not just status === "extracted" ones — a
+// non-text document (an image, or one still pending/failed) still gets a
+// placeholder line naming it, so the model at least knows it exists, per
+// the "all documents" requirement this was built for. Deliberately doesn't
+// touch buildCourseContext itself — quiz/flashcard/notes generation must
+// keep their existing extracted-only behavior unchanged.
+export async function buildFullCourseContextText(
+  courseId: number
+): Promise<{ courseName: string; text: string }> {
+  const course = await getCourse(courseId);
+  if (!course) {
+    throw new Error(`Course ${courseId} not found`);
+  }
+
+  const [documents, folders] = await Promise.all([
+    listDocumentsForCourse(courseId),
+    listFoldersForCourse(courseId),
+  ]);
+  const folderName = new Map(folders.map((f) => [f.id, f.name]));
+
+  const sections = documents.map((d) => {
+    const location = d.folder_id != null ? (folderName.get(d.folder_id) ?? "Unfiled") : "Unfiled";
+    if (d.status === "extracted" && d.extracted_text) {
+      return `--- Document: ${d.filename} (${location}) ---\n${omitEmbeddedImages(d.extracted_text)}`;
+    }
+    const statusLabel = d.status === "image" ? "image, no extracted text" : d.status;
+    return `--- Document: ${d.filename} (${location}, ${statusLabel}) ---`;
+  });
+
+  return { courseName: course.name, text: sections.join("\n\n") };
+}

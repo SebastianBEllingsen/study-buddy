@@ -6,10 +6,11 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { toast } from "sonner";
-import { ArrowUp, Bot, Plus, Trash2 } from "lucide-react";
-import type { ChatConversation, ChatMessage } from "@/lib/models";
+import { ArrowUp, Bot, FileText, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
+import type { ChatAttachment, ChatConversation, ChatMessage, CourseSummary } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +21,70 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { resizeImageForNote } from "@/lib/resizeImage";
+import { extensionOf } from "@/lib/documentFormats";
+import SaveAttachmentToCourseDialog, {
+  type SaveableAttachment,
+} from "@/components/SaveAttachmentToCourseDialog";
+
+// Mirrors dataUrlImage.ts's MAX_CHAT_IMAGE_LENGTH — duplicated here rather
+// than imported since that module pulls in server-only blob-storage config
+// resolution that can't bundle for the browser (see aiBackendChoices.ts's
+// own comment for the same reasoning). This is just a client-side early
+// check to avoid a doomed round trip; the server enforces its own copy of
+// this limit regardless.
+const MAX_CHAT_IMAGE_DATA_URL_LENGTH = 4_000_000;
+// Raw byte cap for a chat document attachment before base64 encoding —
+// same order of magnitude as the server's MAX_CHAT_DOCUMENT_BASE64_LENGTH
+// (chat.ts), expressed in raw bytes rather than encoded length.
+const MAX_CHAT_DOCUMENT_BYTES = 15_000_000;
+const CHAT_DOCUMENT_EXTENSIONS = new Set(["pdf", "docx"]);
+
+type ComposerAttachment =
+  | { localId: number; type: "image"; filename: string; mimeType: string; dataUrl: string }
+  | { localId: number; type: "document"; filename: string; mimeType: string; fileBase64: string };
+
+// Plain Omit collapses a discriminated union to its common keys, losing the
+// per-variant discriminant precision addAttachmentDraft below needs —
+// distributing over the union first (T extends any ? ... : never) keeps
+// each variant's own shape intact.
+type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function composerAttachmentToRaw(a: ComposerAttachment) {
+  return a.type === "image"
+    ? { type: "image" as const, filename: a.filename, mimeType: a.mimeType, dataUrl: a.dataUrl }
+    : { type: "document" as const, filename: a.filename, mimeType: a.mimeType, fileBase64: a.fileBase64 };
+}
+
+// Placeholder extractedText — the real extraction happens server-side (see
+// chat.ts's validateAndExtractAttachments); this is only used for the
+// optimistic local echo of the user's own just-sent message, whose
+// attachment rendering never reads extractedText anyway (see the message
+// bubble below).
+function composerAttachmentToChatAttachment(a: ComposerAttachment): ChatAttachment {
+  return a.type === "image"
+    ? { type: "image", filename: a.filename, mimeType: a.mimeType, dataUrl: a.dataUrl }
+    : { type: "document", filename: a.filename, mimeType: a.mimeType, fileBase64: a.fileBase64, extractedText: "" };
+}
 
 // The actual conversation list + message thread + composer — everything
 // independent of whatever shell it's mounted in. Shared by ChatDialog's
@@ -58,6 +123,12 @@ export default function ChatContent({
   const [sending, setSending] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [attachmentDrafts, setAttachmentDrafts] = useState<ComposerAttachment[]>([]);
+  const [pasteDropActive, setPasteDropActive] = useState(false);
+  const [courses, setCourses] = useState<CourseSummary[]>([]);
+  const [savingCourseScope, setSavingCourseScope] = useState(false);
+  const [saveTarget, setSaveTarget] = useState<SaveableAttachment | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Monotonic, not Date.now()-based — two sends within the same
   // millisecond (trivially reachable by pressing Enter twice fast, or a
@@ -66,11 +137,14 @@ export default function ChatContent({
   // filter on a failed send (`m.id !== optimisticId`) would remove both
   // optimistic messages instead of just the one that actually failed.
   const nextOptimisticId = useRef(0);
+  const nextAttachmentId = useRef(0);
   // Guards against a slower selectConversation(A) response landing after a
   // faster selectConversation(B) and overwriting B's messages with A's
   // stale ones — reachable just by clicking two conversations in quick
   // succession. Same pattern SearchDialog uses for the same reason.
   const selectRequestId = useRef(0);
+
+  const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
 
   // Loads the conversation list once, on mount — render-phase sync (see
   // DocumentPickerDialog's own seeded flag elsewhere in this app) rather
@@ -80,6 +154,10 @@ export default function ChatContent({
   if (!loaded) {
     setLoaded(true);
     loadConversations();
+    fetch("/api/courses")
+      .then((r) => r.json())
+      .then(setCourses)
+      .catch(() => {});
   }
 
   useEffect(() => {
@@ -129,6 +207,7 @@ export default function ChatContent({
     // repeatedly doesn't litter the history with empty conversations.
     setActiveId(null);
     setMessages([]);
+    setAttachmentDrafts([]);
   }
 
   async function handleConfirmDeleteConversation() {
@@ -148,18 +227,100 @@ export default function ChatContent({
     }
   }
 
+  async function handleCourseScopeChange(courseId: number | null) {
+    if (activeId === null) return;
+    const previous = activeConversation?.courseId ?? null;
+    setConversations((prev) => prev.map((c) => (c.id === activeId ? { ...c, courseId } : c)));
+    setSavingCourseScope(true);
+    try {
+      const res = await fetch(`/api/chat/conversations/${activeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId }),
+      });
+      if (!res.ok) throw new Error("Couldn't update course");
+    } catch {
+      toast.error("Couldn't scope this conversation to that course");
+      setConversations((prev) => prev.map((c) => (c.id === activeId ? { ...c, courseId: previous } : c)));
+    } finally {
+      setSavingCourseScope(false);
+    }
+  }
+
+  function addAttachmentDraft(draft: DistributiveOmit<ComposerAttachment, "localId">) {
+    setAttachmentDrafts((prev) => [...prev, { ...draft, localId: --nextAttachmentId.current }]);
+  }
+
+  async function handleIncomingFiles(files: File[]) {
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        try {
+          const blob = await resizeImageForNote(file);
+          const dataUrl = await blobToDataUrl(blob);
+          if (dataUrl.length > MAX_CHAT_IMAGE_DATA_URL_LENGTH) {
+            toast.error(`${file.name} is too large`);
+            continue;
+          }
+          addAttachmentDraft({ type: "image", filename: file.name, mimeType: blob.type, dataUrl });
+        } catch {
+          toast.error(`Couldn't attach ${file.name}`);
+        }
+        continue;
+      }
+
+      const ext = extensionOf(file.name);
+      if (!CHAT_DOCUMENT_EXTENSIONS.has(ext)) {
+        toast.error(`${file.name}: only images, PDF, and DOCX files are supported`);
+        continue;
+      }
+      if (file.size > MAX_CHAT_DOCUMENT_BYTES) {
+        toast.error(`${file.name} is too large`);
+        continue;
+      }
+      try {
+        const buffer = await file.arrayBuffer();
+        addAttachmentDraft({
+          type: "document",
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          fileBase64: arrayBufferToBase64(buffer),
+        });
+      } catch {
+        toast.error(`Couldn't attach ${file.name}`);
+      }
+    }
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (files.length > 0) {
+      e.preventDefault();
+      handleIncomingFiles(files);
+    }
+  }
+
+  function removeAttachmentDraft(localId: number) {
+    setAttachmentDrafts((prev) => prev.filter((a) => a.localId !== localId));
+  }
+
   async function handleSend() {
     const content = draft.trim();
-    if (!content || sending) return;
+    const attachments = attachmentDrafts;
+    if ((!content && attachments.length === 0) || sending) return;
     setDraft("");
+    setAttachmentDrafts([]);
     setSending(true);
 
     // A failed send below removes exactly this optimistic message (by id)
-    // and restores `content` to the input — without this, a network error
-    // or non-ok response left a "sent" message stuck in the transcript
-    // forever with no reply and no way to recover the original text (the
-    // draft was already cleared above). Negative and decrementing (never 0
-    // or positive) so it can never collide with a real, server-assigned id.
+    // and restores `content`/attachments to the input — without this, a
+    // network error or non-ok response left a "sent" message stuck in the
+    // transcript forever with no reply and no way to recover the original
+    // text (the draft was already cleared above). Negative and decrementing
+    // (never 0 or positive) so it can never collide with a real,
+    // server-assigned id.
     const optimisticId = --nextOptimisticId.current;
     let conversationId = activeId;
     try {
@@ -174,19 +335,27 @@ export default function ChatContent({
 
       setMessages((prev) => [
         ...prev,
-        { id: optimisticId, conversationId: conversationId!, role: "user", content, createdAt: "" },
+        {
+          id: optimisticId,
+          conversationId: conversationId!,
+          role: "user",
+          content,
+          attachments: attachments.length > 0 ? attachments.map(composerAttachmentToChatAttachment) : null,
+          createdAt: "",
+        },
       ]);
 
       const res = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, attachments: attachments.map(composerAttachmentToRaw) }),
       });
       const body = await res.json();
       if (!res.ok) {
         toast.error(body.error ?? "Couldn't get a reply");
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         setDraft(content);
+        setAttachmentDrafts(attachments);
         return;
       }
       setMessages((prev) => [...prev, body as ChatMessage]);
@@ -197,6 +366,7 @@ export default function ChatContent({
       toast.error("Couldn't get a reply");
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setDraft(content);
+      setAttachmentDrafts(attachments);
     } finally {
       setSending(false);
     }
@@ -240,12 +410,33 @@ export default function ChatContent({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
             <span className="flex items-center gap-1.5 text-sm font-medium">
               <Bot className="size-4" />
               AI chat
             </span>
-            <div className="flex items-center gap-1">{headerActions}</div>
+            <div className="flex items-center gap-2">
+              {activeId !== null && (
+                <Select
+                  value={activeConversation?.courseId != null ? String(activeConversation.courseId) : "none"}
+                  onValueChange={(v) => handleCourseScopeChange(v === "none" ? null : Number(v))}
+                  disabled={savingCourseScope}
+                >
+                  <SelectTrigger className="h-7 w-40 text-xs">
+                    <SelectValue placeholder="No course" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No course</SelectItem>
+                    {courses.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {headerActions}
+            </div>
           </div>
 
           <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -263,6 +454,36 @@ export default function ChatContent({
                       : "bg-muted text-foreground"
                   }`}
                 >
+                  {(m.attachments ?? []).map((a, i) =>
+                    a.type === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={i}
+                        src={a.dataUrl}
+                        alt={a.filename}
+                        className="mb-1.5 max-h-48 rounded-md object-contain"
+                      />
+                    ) : (
+                      <div
+                        key={i}
+                        className="mb-1.5 flex items-center gap-1.5 rounded-md bg-black/10 px-2 py-1 text-xs"
+                      >
+                        <FileText className="size-3.5 shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">{a.filename}</span>
+                        <button
+                          type="button"
+                          aria-label="Save to course"
+                          title="Save to course"
+                          className="shrink-0 hover:opacity-70"
+                          onClick={() =>
+                            setSaveTarget({ filename: a.filename, mimeType: a.mimeType, fileBase64: a.fileBase64 })
+                          }
+                        >
+                          <Save className="size-3.5" />
+                        </button>
+                      </div>
+                    )
+                  )}
                   {m.role === "assistant" ? (
                     <div className="markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
@@ -270,7 +491,7 @@ export default function ChatContent({
                       </ReactMarkdown>
                     </div>
                   ) : (
-                    <p className="whitespace-pre-wrap">{m.content}</p>
+                    m.content && <p className="whitespace-pre-wrap">{m.content}</p>
                   )}
                 </div>
               </div>
@@ -284,28 +505,89 @@ export default function ChatContent({
             )}
           </div>
 
-          <div className="flex shrink-0 items-end gap-2 border-t p-3">
-            <Textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
+          <div className="shrink-0 border-t p-3">
+            {attachmentDrafts.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {attachmentDrafts.map((a) => (
+                  <div
+                    key={a.localId}
+                    className="flex items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 text-xs"
+                  >
+                    {a.type === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.dataUrl} alt={a.filename} className="size-5 rounded object-cover" />
+                    ) : (
+                      <FileText className="size-3.5 shrink-0" />
+                    )}
+                    <span className="max-w-32 truncate">{a.filename}</span>
+                    <button
+                      type="button"
+                      aria-label="Remove attachment"
+                      onClick={() => removeAttachmentDraft(a.localId)}
+                      className="shrink-0 hover:opacity-70"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div
+              className={`flex items-end gap-2 ${pasteDropActive ? "rounded-md ring-2 ring-primary" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setPasteDropActive(true);
               }}
-              placeholder="Message…"
-              className="max-h-40 min-h-10 flex-1 resize-none py-2"
-              rows={1}
-            />
-            <Button
-              size="icon-sm"
-              disabled={!draft.trim() || sending}
-              onClick={handleSend}
-              aria-label="Send"
+              onDragLeave={() => setPasteDropActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setPasteDropActive(false);
+                handleIncomingFiles(Array.from(e.dataTransfer.files));
+              }}
             >
-              <ArrowUp className="size-4" />
-            </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.docx"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) handleIncomingFiles(Array.from(e.target.files));
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                aria-label="Attach a file"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="size-4" />
+              </Button>
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                onPaste={handlePaste}
+                placeholder="Message…"
+                className="max-h-40 min-h-10 flex-1 resize-none py-2"
+                rows={1}
+              />
+              <Button
+                size="icon-sm"
+                disabled={(!draft.trim() && attachmentDrafts.length === 0) || sending}
+                onClick={handleSend}
+                aria-label="Send"
+              >
+                <ArrowUp className="size-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -327,6 +609,10 @@ export default function ChatContent({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <SaveAttachmentToCourseDialog
+        attachment={saveTarget}
+        onOpenChange={(open) => !open && setSaveTarget(null)}
+      />
     </>
   );
 }

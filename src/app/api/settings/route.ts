@@ -9,6 +9,7 @@ import {
   setDocumentBadgesEnabled,
   setDocumentBadgeDetail,
   setAiEfficiencyMode,
+  setCliTrustedModeEnabled,
   setModelBadgeDetail,
   setAiEnabled,
   setGoogleClientCredentials,
@@ -133,6 +134,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "aiEfficiencyMode must be a boolean" }, { status: 400 });
     }
     await setAiEfficiencyMode(body.aiEfficiencyMode);
+  }
+
+  if (body?.cliTrustedModeEnabled !== undefined) {
+    if (typeof body.cliTrustedModeEnabled !== "boolean") {
+      return Response.json({ error: "cliTrustedModeEnabled must be a boolean" }, { status: 400 });
+    }
+    await setCliTrustedModeEnabled(body.cliTrustedModeEnabled);
   }
 
   if (body?.modelBadgeDetail !== undefined) {

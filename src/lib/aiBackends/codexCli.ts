@@ -1,6 +1,8 @@
 import os from "node:os";
 import { runCli, CliNotFoundError, CliTimeoutError } from "./cliRunner";
-import type { GenerateStructuredParams, GenerateTextParams } from "./types";
+import type { GenerateStructuredParams, GenerateTextImage, GenerateTextParams, GenerateWorkspaceScope } from "./types";
+import { getAppSettings } from "../models";
+import { materializeCliWorkspace } from "./cliWorkspace";
 
 // Hardening for a subprocess whose prompt embeds untrusted content (uploaded
 // PDF text — see the same note in claudeCode.ts). -s read-only denies file
@@ -24,12 +26,32 @@ import type { GenerateStructuredParams, GenerateTextParams } from "./types";
 // fully applies regardless of cwd.
 const HARDENING_ARGS = ["-s", "read-only", "--skip-git-repo-check"];
 
+// Used instead of HARDENING_ARGS when AppSettings.cliTrustedModeEnabled is
+// on — "workspace-write" is Codex's own sandbox mode for full read/write/
+// exec access confined to the process's cwd (which cliWorkspace.ts always
+// sets to a dedicated, disposable directory in this mode — never the real
+// project root). NOT hands-on verified against a real installed `codex`
+// (none available in this environment, same caveat as the missing --model
+// flag below) — confirm this is still the right mode name against a real
+// `codex exec --help` before shipping, same discipline as this file's other
+// empirically-unverified choices.
+const TRUSTED_ARGS = ["-s", "workspace-write", "--skip-git-repo-check"];
+
 // Fixed instruction passed as the prompt argument — never interpolates any
 // variable/untrusted content (see cliRunner.ts). The actual system prompt
 // and user prompt (which embeds untrusted PDF text) go via stdin instead;
 // `codex exec` appends piped stdin to the prompt as a <stdin> block.
 const STDIN_INSTRUCTION =
   "Follow the SYSTEM INSTRUCTIONS and respond to the USER REQUEST below, both provided via stdin.";
+
+// Used in place of STDIN_INSTRUCTION when a workspace was actually
+// materialized (see cliWorkspace.ts) — points the CLI at manifest.json
+// instead of leaving it to guess file locations. Still a fixed string, no
+// interpolation of untrusted content.
+const STDIN_INSTRUCTION_WITH_WORKSPACE =
+  `${STDIN_INSTRUCTION} A manifest.json file in your current working directory ` +
+  "lists any course documents and attached images made available for this " +
+  "request — read it first to find exact file paths.";
 
 function sanitize(text: string): string {
   return text.replace(/\0/g, "");
@@ -47,40 +69,68 @@ function buildStdin(systemPrompt: string, userPrompt: string): string {
 async function runCodex(params: {
   userPrompt: string;
   systemPrompt: string;
+  cliTrustedModeEnabled: boolean;
+  workspaceScope?: GenerateWorkspaceScope;
+  images?: GenerateTextImage[];
 }): Promise<string> {
-  const args = ["exec", ...HARDENING_ARGS, STDIN_INSTRUCTION];
+  // Only pay for materializing a workspace when trusted mode is on AND
+  // there's actually something to put in it — otherwise cwd stays
+  // os.tmpdir(), exactly like the untrusted path.
+  const hasWorkspaceContent = !!(params.workspaceScope?.documentIds?.length || params.images?.length);
+  const useWorkspace = params.cliTrustedModeEnabled && hasWorkspaceContent;
 
-  // Same precaution as claudeCode.ts: an OPENAI_API_KEY in the environment
-  // (e.g. set for the OpenAI API backend) could otherwise outrank the
-  // Codex CLI's own ChatGPT/subscription login, silently billing per-token
-  // instead of using the subscription this backend exists to use.
-  const env = { ...process.env };
-  delete env.OPENAI_API_KEY;
+  const workspace = useWorkspace
+    ? await materializeCliWorkspace({
+        documentIds: params.workspaceScope?.documentIds,
+        inlineFiles: params.images?.map((image, i) => ({
+          filename: `image-${i + 1}`,
+          base64: image.base64,
+          mimeType: image.mimeType,
+        })),
+      })
+    : null;
 
-  let stdout: string;
   try {
-    ({ stdout } = await runCli({
-      command: "codex",
-      args,
-      stdin: buildStdin(params.systemPrompt, params.userPrompt),
-      cwd: os.tmpdir(),
-      env,
-      timeoutMs: 5 * 60 * 1000,
-      maxBufferBytes: 20 * 1024 * 1024,
-    }));
-  } catch (err) {
-    if (err instanceof CliNotFoundError) {
-      throw new Error(
-        "The `codex` CLI isn't on PATH — install it, or switch to a different backend."
-      );
-    }
-    throw err;
-  }
+    const args = [
+      "exec",
+      ...(params.cliTrustedModeEnabled ? TRUSTED_ARGS : HARDENING_ARGS),
+      workspace ? STDIN_INSTRUCTION_WITH_WORKSPACE : STDIN_INSTRUCTION,
+    ];
 
-  // Non-interactive `codex exec` (without --json) prints progress to
-  // stderr and only the final agent message to stdout, so no event-stream
-  // parsing is needed here.
-  return stdout.trim();
+    // Same precaution as claudeCode.ts: an OPENAI_API_KEY in the environment
+    // (e.g. set for the OpenAI API backend) could otherwise outrank the
+    // Codex CLI's own ChatGPT/subscription login, silently billing per-token
+    // instead of using the subscription this backend exists to use.
+    const env = { ...process.env };
+    delete env.OPENAI_API_KEY;
+
+    let stdout: string;
+    try {
+      ({ stdout } = await runCli({
+        command: "codex",
+        args,
+        stdin: buildStdin(params.systemPrompt, params.userPrompt),
+        cwd: workspace?.dir ?? os.tmpdir(),
+        env,
+        timeoutMs: 5 * 60 * 1000,
+        maxBufferBytes: 20 * 1024 * 1024,
+      }));
+    } catch (err) {
+      if (err instanceof CliNotFoundError) {
+        throw new Error(
+          "The `codex` CLI isn't on PATH — install it, or switch to a different backend."
+        );
+      }
+      throw err;
+    }
+
+    // Non-interactive `codex exec` (without --json) prints progress to
+    // stderr and only the final agent message to stdout, so no event-stream
+    // parsing is needed here.
+    return stdout.trim();
+  } finally {
+    await workspace?.cleanup();
+  }
 }
 
 function stripCodeFences(text: string): string {
@@ -91,12 +141,20 @@ function stripCodeFences(text: string): string {
 export async function generateStructured<T>(
   params: GenerateStructuredParams
 ): Promise<T> {
-  const raw = await runCodex({ userPrompt: params.user, systemPrompt: params.system });
+  const { cliTrustedModeEnabled } = await getAppSettings();
+  const raw = await runCodex({
+    userPrompt: params.user,
+    systemPrompt: params.system,
+    cliTrustedModeEnabled,
+    workspaceScope: params.workspaceScope,
+  });
   try {
     return JSON.parse(stripCodeFences(raw)) as T;
   } catch {
     const retryRaw = await runCodex({
       systemPrompt: params.system,
+      cliTrustedModeEnabled,
+      workspaceScope: params.workspaceScope,
       userPrompt: `${params.user}\n\nYour previous response was not valid JSON:\n${raw}\n\nRespond again with ONLY the corrected, valid JSON object — no prose, no markdown code fences.`,
     });
     return JSON.parse(stripCodeFences(retryRaw)) as T;
@@ -104,12 +162,19 @@ export async function generateStructured<T>(
 }
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
-  if (params.images?.length) {
+  const { cliTrustedModeEnabled } = await getAppSettings();
+  if (params.images?.length && !cliTrustedModeEnabled) {
     throw new Error(
-      "Image input isn't supported with the Codex backend — switch to the Anthropic API, OpenAI, Gemini, or Free backend in Settings."
+      "Image input isn't supported with the Codex backend — switch to the Anthropic API, OpenAI, Gemini, or Free backend in Settings, or turn on full tool access for this CLI backend in Settings."
     );
   }
-  return runCodex({ userPrompt: params.user, systemPrompt: params.system });
+  return runCodex({
+    userPrompt: params.user,
+    systemPrompt: params.system,
+    cliTrustedModeEnabled,
+    workspaceScope: params.workspaceScope,
+    images: params.images,
+  });
 }
 
 export function describeError(err: unknown): string {
