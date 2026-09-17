@@ -1487,6 +1487,11 @@ export interface NoteEditorHandle {
 interface NoteEditorProps {
   value: string;
   onChange: (value: string) => void;
+  // Lets a parent (e.g. the title field above this editor in vault/[noteId]/
+  // page.tsx) react to Edit/Preview switching — Preview is read-only for the
+  // body, and the title should follow suit rather than staying editable
+  // while everything below it isn't.
+  onModeChange?: (mode: "edit" | "preview") => void;
 }
 
 // Wraps (or unwraps, if already wrapped) the current selection with `mark`
@@ -1798,7 +1803,7 @@ function InsertTableButton({ onInsert }: { onInsert: (rows: number, cols: number
 }
 
 const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor(
-  { value, onChange },
+  { value, onChange, onModeChange },
   ref
 ) {
   const router = useRouter();
@@ -1842,6 +1847,14 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     const scrollable = el.scrollHeight - el.clientHeight;
     el.scrollTop = fraction * scrollable;
   }
+
+  // Fires on every mode change regardless of which code path caused it
+  // (the toolbar toggle, Cmd/Ctrl+E, or scrollToHighlight forcing Edit) —
+  // an effect keyed on `mode` itself, rather than calling this at each
+  // setMode call site, so a parent can never miss one.
+  useEffect(() => {
+    onModeChange?.(mode);
+  }, [mode, onModeChange]);
 
   // Switching into Preview: a plain div we render ourselves, so its ref is
   // already attached by the time this runs — useLayoutEffect (not useEffect)

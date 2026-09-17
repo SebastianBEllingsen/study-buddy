@@ -53,6 +53,10 @@ export default function NotePage() {
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  // Preview is read-only for the note body (NoteEditor renders it as
+  // rendered markdown, not an editable field) — the title above it should
+  // follow suit rather than staying editable while everything below it isn't.
+  const [noteMode, setNoteMode] = useState<"edit" | "preview">("edit");
   const [deleting, setDeleting] = useState(false);
   const editorRef = useRef<NoteEditorHandle>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,13 +273,14 @@ export default function NotePage() {
           <Input
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
+            readOnly={noteMode === "preview"}
             // px-1.5, not px-0 — flush against the icon read as cramped (a
             // 6px flex gap alone, at text-2xl) rather than intentionally
             // heading-like. bg-transparent dark:bg-transparent overrides the
             // base Input's own dark:bg-input/30 — without it this still
             // reads as a form field (a visible tinted box) rather than
             // plain heading text sitting on the page, dark mode especially.
-            className="h-auto min-w-0 flex-1 border-none bg-transparent px-1.5 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0 dark:bg-transparent"
+            className="h-auto min-w-0 flex-1 border-none bg-transparent px-1.5 font-heading text-2xl font-semibold shadow-none focus-visible:ring-0 dark:bg-transparent read-only:cursor-default"
             placeholder="Untitled"
           />
         </div>
@@ -286,7 +291,12 @@ export default function NotePage() {
             row) and then the page itself. A bordered container around this
             read as a widget embedded in the page rather than the page. */}
         <div className="min-h-0 flex-1">
-          <NoteEditor ref={editorRef} value={markdown} onChange={handleMarkdownChange} />
+          <NoteEditor
+            ref={editorRef}
+            value={markdown}
+            onChange={handleMarkdownChange}
+            onModeChange={setNoteMode}
+          />
         </div>
 
         {detail.backlinks.length > 0 && (
