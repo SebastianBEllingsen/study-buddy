@@ -49,6 +49,7 @@ import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
 import { RowActionsMenu } from "@/components/RowActionsMenu";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -2631,10 +2632,20 @@ export default function CoursePage() {
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground">
-          {editMode
-            ? "Check documents or generated items to move or delete several at once."
-            : "Drag documents or generated items onto a folder to move them, drag one folder onto another's name/icon to nest it as a subfolder (elsewhere on the card to reorder), drag a subfolder into the gaps around the cards to move it back to the top level, or drop documents straight onto a folder to upload."}
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {editMode ? (
+            "Check documents or generated items to move or delete several at once."
+          ) : (
+            <>
+              Drag &amp; drop to organize
+              <HelpTooltip>
+                Drag documents or generated items onto a folder to move them, drag one folder onto
+                another&apos;s name/icon to nest it as a subfolder (elsewhere on the card to
+                reorder), drag a subfolder into the gaps around the cards to move it back to the
+                top level, or drop documents straight onto a folder to upload.
+              </HelpTooltip>
+            </>
+          )}
         </p>
 
         {editMode && selectedDocs.size + selectedItems.size > 0 && (

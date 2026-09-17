@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import { uploadImage } from "@/lib/uploadImage";
 import { ICON_CHOICES, COLOR_CHOICES } from "@/lib/pickerChoices";
 import {
@@ -340,11 +341,13 @@ export function CustomizeCourseDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Page backdrop</Label>
-            <p className="text-xs text-muted-foreground">
-              A large atmospheric background behind the whole course page, like a game&apos;s
-              library page — separate from the cover banner above.
-            </p>
+            <Label className="flex items-center gap-1.5">
+              Page backdrop
+              <HelpTooltip>
+                A large atmospheric background behind the whole course page, like a game&apos;s
+                library page — separate from the cover banner above.
+              </HelpTooltip>
+            </Label>
             <input
               ref={backgroundInputRef}
               type="file"

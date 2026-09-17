@@ -21,6 +21,7 @@ import { useAppTheme, type AppTheme } from "@/components/AppThemeProvider";
 import ThemeToggle from "@/components/ThemeToggle";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import { uploadImage } from "@/lib/uploadImage";
 import { ICON_ASPECT, ICON_OUTPUT, BACKGROUND_ASPECT, BACKGROUND_OUTPUT_WIDTH, BACKGROUND_OUTPUT_HEIGHT } from "@/lib/imageCropPresets";
 import { Button } from "@/components/ui/button";
@@ -275,14 +276,14 @@ function AiSection() {
   return (
     <div className="space-y-3">
       <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           Enable AI features
-          <span className="block text-xs text-muted-foreground">
+          <HelpTooltip>
             On (default): generation, AI chat, grading, and &quot;tidy with AI&quot; all work as normal.
             Off: use Study Buddy as a plain document/notes/flashcards organizer — every AI control
             hides and no AI call is ever made. Uploading, viewing, and manually organizing
             documents, notes, and flashcards all keep working exactly the same either way.
-          </span>
+          </HelpTooltip>
         </span>
         <input
           type="checkbox"
@@ -329,17 +330,21 @@ function AiSection() {
 
       {(backend === "claude_code" || backend === "codex_cli") && (
         <label className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm">
-          <span>
-            Full tool access for this CLI backend
-            <span className="block text-xs text-muted-foreground">
-              Off (default): {AI_LABELS[backend]} runs hardened — no Bash, file, or network
-              tools, in a throwaway temp directory. On: it runs with its normal full
-              permissions (it can run shell commands, write files, and reach the network),
-              confined to a dedicated Study Buddy workspace folder instead of your temp
-              directory — never your app&apos;s own project files or database. This also lets
-              it see images (Crop &amp; Ask, chat image attachments) instead of refusing them.
-              Only turn this on if you trust the material you feed it — a malicious PDF could
-              otherwise try to abuse those tools.
+          <span className="flex flex-col gap-0.5">
+            <span className="flex items-center gap-1.5">
+              Full tool access for this CLI backend
+              <HelpTooltip>
+                Off (default): {AI_LABELS[backend]} runs hardened — no Bash, file, or network
+                tools, in a throwaway temp directory. On: it runs with its normal full
+                permissions (it can run shell commands, write files, and reach the network),
+                confined to a dedicated Study Buddy workspace folder instead of your temp
+                directory — never your app&apos;s own project files or database. This also lets
+                it see images (Crop &amp; Ask, chat image attachments) instead of refusing them.
+              </HelpTooltip>
+            </span>
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              Only enable if you trust the material you feed it — a malicious PDF could try to
+              abuse these tools.
             </span>
           </span>
           <input
@@ -370,12 +375,14 @@ function AiSection() {
       </Button>
 
       <div className="space-y-1.5 border-t pt-3">
-        <Label>Image model (for Crop &amp; Ask)</Label>
-        <p className="text-xs text-muted-foreground">
-          Claude Code and Codex CLI can&apos;t take image input at all — pick a different model
-          just for image-bearing requests (Crop &amp; Ask on a PDF/image) without switching your
-          main model away from a CLI subscription.
-        </p>
+        <Label className="flex items-center gap-1.5">
+          Image model (for Crop &amp; Ask)
+          <HelpTooltip>
+            Claude Code and Codex CLI can&apos;t take image input at all (unless full tool access
+            is on above) — pick a different model just for image-bearing requests (Crop &amp; Ask
+            on a PDF/image) without switching your main model away from a CLI subscription.
+          </HelpTooltip>
+        </Label>
         <Select
           value={settings.imageAiBackend ?? "same"}
           onValueChange={(v) => v && handleImageBackendChange(v)}
@@ -398,12 +405,12 @@ function AiSection() {
       </div>
 
       <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           AI grading for quiz short-answer questions
-          <span className="block text-xs text-muted-foreground">
+          <HelpTooltip>
             Off (default): graded locally by keyword match against the model answer — no API
             call, no partial credit. On: the AI judges each answer and gives written feedback.
-          </span>
+          </HelpTooltip>
         </span>
         <input
           type="checkbox"
@@ -415,14 +422,14 @@ function AiSection() {
       </label>
 
       <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           Efficiency mode
-          <span className="block text-xs text-muted-foreground">
+          <HelpTooltip>
             Off (default): normal generation quality. On: lower reasoning effort and a shorter
             response cap everywhere, plus a cheaper, faster model where the provider offers one
             (Claude backends switch to Haiku) — trades some quality for lower cost/token usage.
             Never changes what source text is sent to the model.
-          </span>
+          </HelpTooltip>
         </span>
         <input
           type="checkbox"
@@ -501,9 +508,7 @@ function CalendarSection() {
         )}
       </h3>
       <p className="text-xs text-muted-foreground">
-        Bring your own Google Cloud OAuth client (same &quot;bring your own key&quot; idea as the
-        AI providers above) — see the setup steps you were given, then paste the Client ID/Secret
-        here.
+        Bring your own Google Cloud OAuth client, then paste its Client ID/Secret below.
       </p>
 
       <div className="space-y-1.5">
@@ -656,12 +661,16 @@ function CalendarFeedsSection() {
         <Rss className="size-3.5" />
         Calendar feeds
       </h3>
-      <p className="text-xs text-muted-foreground">
-        Add a read-only ICS feed URL — any standard iCalendar link: a university portal&apos;s
-        timetable, an LMS&apos;s (e.g. Canvas&apos;s) assignment-due-dates export, a Google Calendar
-        &quot;secret address in iCal format&quot;, an Outlook/Office 365 published calendar — and
-        its events show up alongside Google Calendar. Uncheck &quot;Enabled&quot; to pause a feed
-        without losing it; the two checkboxes below that control where an enabled feed shows up.
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        Add a read-only ICS feed URL (e.g. a Canvas or Google Calendar link) to show its events
+        alongside Google Calendar.
+        <HelpTooltip>
+          Any standard iCalendar link works: a university portal&apos;s timetable, an LMS&apos;s
+          assignment-due-dates export, a Google Calendar &quot;secret address in iCal
+          format&quot;, an Outlook/Office 365 published calendar. Uncheck &quot;Enabled&quot; to
+          pause a feed without losing it; the two checkboxes below control where an enabled feed
+          shows up.
+        </HelpTooltip>
       </p>
 
       {feeds && feeds.length > 0 && (
@@ -914,22 +923,26 @@ function StorageSection() {
             placeholder={settings.hasConnectionString ? "configured" : "not set"}
           />
           <p className="text-xs text-muted-foreground">
-            From your Supabase project: Settings → Database → Connection string (Session pooler).
-            Migrate your local data below before saving, so switching over doesn&apos;t start you
-            from an empty database.
+            From Settings → Database → Connection string (Session pooler) in your Supabase
+            project. Migrate your local data below first, or you&apos;ll start from an empty
+            database.
           </p>
           <Button type="button" variant="outline" size="sm" onClick={handleMigrate} disabled={migrating}>
             {migrating ? "Migrating…" : "Migrate my local data to Supabase"}
           </Button>
 
           <div className="space-y-1.5 border-t pt-3">
-            <Label>Image storage (optional)</Label>
+            <Label className="flex items-center gap-1.5">
+              Image storage (optional)
+              <HelpTooltip>
+                Left blank, course covers/icons and other images keep syncing as part of your
+                database rows like everything else — this just moves them to a Supabase Storage
+                bucket instead, which is lighter on your project&apos;s database bandwidth.
+              </HelpTooltip>
+            </Label>
             <p className="text-xs text-muted-foreground">
-              Left blank, course covers/icons and other images keep syncing as part of your
-              database rows like everything else — this just moves them to a Supabase Storage
-              bucket instead, which is lighter on your project&apos;s database bandwidth. From
-              your Supabase project: Settings → API for the URL and service_role key, and Storage
-              to create a public bucket.
+              From your Supabase project: Settings → API for the URL and service_role key, and
+              Storage to create a public bucket.
             </p>
             <Input
               value={storageUrl}
@@ -950,10 +963,8 @@ function StorageSection() {
             {settings.hasStorageServiceKey && (
               <>
                 <p className="text-xs text-muted-foreground">
-                  Once saved, move your existing course/app images out of the database and into
-                  this bucket. This reads every one of them out of the database first, so it has a
-                  real one-time bandwidth cost — a good time to run it is whenever that&apos;s not
-                  a concern, not necessarily right now.
+                  Moves existing course/app images into this bucket — a one-time bandwidth cost,
+                  so run it whenever that&apos;s convenient rather than right now.
                 </p>
                 <Button
                   type="button"
@@ -1014,12 +1025,12 @@ function AppearanceSection() {
         Appearance
       </h3>
       <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           Light / dark mode
-          <span className="block text-xs text-muted-foreground">
+          <HelpTooltip>
             Independent of the theme below — switches which of its light or dark variant is
             shown.
-          </span>
+          </HelpTooltip>
         </span>
         <ThemeToggle />
       </label>
@@ -1315,11 +1326,9 @@ function BrandingSection() {
           </div>
         )}
         <label className="flex items-center justify-between gap-3 pt-1 text-xs">
-          <span className="text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-muted-foreground">
             Transparent widgets
-            <span className="block text-muted-foreground/70">
-              Widgets drop their card background and sit directly on the dashboard.
-            </span>
+            <HelpTooltip>Widgets drop their card background and sit directly on the dashboard.</HelpTooltip>
           </span>
           <input
             type="checkbox"
@@ -1467,12 +1476,12 @@ function DisplaySection() {
     <div className="space-y-3">
       <h3 className="text-sm font-medium">Display</h3>
       <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           Jump to newly generated content automatically
-          <span className="block text-xs text-muted-foreground">
+          <HelpTooltip>
             Off: stay put and get a dismissible notification instead — it also shows up on the
             course until you open it or dismiss it.
-          </span>
+          </HelpTooltip>
         </span>
         <input
           type="checkbox"
@@ -1483,11 +1492,11 @@ function DisplaySection() {
         />
       </label>
       <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           Show document status badges
-          <span className="block text-xs text-muted-foreground">
+          <HelpTooltip>
             The &quot;extracted, Np&quot; / &quot;processing…&quot; / &quot;image&quot; pill next to each document.
-          </span>
+          </HelpTooltip>
         </span>
         <input
           type="checkbox"
@@ -1524,11 +1533,9 @@ function DisplaySection() {
         </div>
       )}
       <label className="flex items-center justify-between gap-3 text-sm">
-        <span>
+        <span className="flex items-center gap-1.5">
           Show which model generated each item
-          <span className="block text-xs text-muted-foreground">
-            A small badge next to notes, quizzes, and flashcards.
-          </span>
+          <HelpTooltip>A small badge next to notes, quizzes, and flashcards.</HelpTooltip>
         </span>
         <input
           type="checkbox"
