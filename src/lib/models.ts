@@ -2695,6 +2695,20 @@ export type ChatAttachment =
   | { type: "image"; filename: string; mimeType: string; dataUrl: string }
   | { type: "document"; filename: string; mimeType: string; fileBase64: string; extractedText: string };
 
+// A folder/save action the AI proposed via chat (see chatActions.ts) — kept
+// here rather than in chatActions.ts, which already imports several
+// functions from this file, to avoid a circular import.
+export type ChatAction =
+  | { action: "createFolder"; folderName: string }
+  | { action: "saveAttachment"; ref: string; folderId: number | null; newFolderName: string | null };
+
+export interface PendingChatAction {
+  id: string;
+  actions: ChatAction[];
+  status: "pending" | "confirmed_executing" | "executed" | "failed" | "cancelled";
+  resultSummary: string | null;
+}
+
 export interface ChatConversation {
   id: number;
   title: string | null;
@@ -2713,6 +2727,7 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   attachments: ChatAttachment[] | null;
+  pendingAction: PendingChatAction | null;
   createdAt: string;
 }
 
@@ -2736,6 +2751,16 @@ function parseChatAttachments(raw: string | null): ChatAttachment[] | null {
   }
 }
 
+function parsePendingChatAction(raw: string | null): PendingChatAction | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as PendingChatAction) : null;
+  } catch {
+    return null;
+  }
+}
+
 function toChatMessage(row: typeof chat_messages.$inferSelect): ChatMessage {
   return {
     id: row.id,
@@ -2743,6 +2768,7 @@ function toChatMessage(row: typeof chat_messages.$inferSelect): ChatMessage {
     role: row.role,
     content: row.content,
     attachments: parseChatAttachments(row.attachments),
+    pendingAction: parsePendingChatAction(row.pending_action),
     createdAt: row.created_at,
   };
 }
@@ -2799,7 +2825,8 @@ export async function addChatMessage(
   conversationId: number,
   role: ChatRole,
   content: string,
-  attachments?: ChatAttachment[]
+  attachments?: ChatAttachment[],
+  pendingAction?: PendingChatAction
 ): Promise<ChatMessage> {
   const now = nowUtc();
   const [message] = await db
@@ -2809,6 +2836,7 @@ export async function addChatMessage(
       role,
       content,
       attachments: attachments?.length ? JSON.stringify(attachments) : null,
+      pending_action: pendingAction ? JSON.stringify(pendingAction) : null,
       created_at: now,
     })
     .returning();
@@ -2838,6 +2866,24 @@ export async function addChatMessage(
 // bring it back, duplicated, the next time the same text was sent.
 export async function deleteChatMessage(id: number): Promise<void> {
   await db.delete(chat_messages).where(eq(chat_messages.id, id));
+}
+
+export async function getChatMessage(id: number): Promise<ChatMessage | undefined> {
+  const rows = await db.select().from(chat_messages).where(eq(chat_messages.id, id)).limit(1);
+  return rows[0] ? toChatMessage(rows[0]) : undefined;
+}
+
+// Updates only the pendingAction field — used to move a proposed action
+// through pending -> confirmed_executing -> executed/failed, or -> cancelled
+// (see chat.ts's resolvePendingAction). Never touches content/attachments.
+export async function updateChatMessagePendingAction(
+  id: number,
+  pendingAction: PendingChatAction
+): Promise<void> {
+  await db
+    .update(chat_messages)
+    .set({ pending_action: JSON.stringify(pendingAction) })
+    .where(eq(chat_messages.id, id));
 }
 
 // --- Quiz generation presets ---

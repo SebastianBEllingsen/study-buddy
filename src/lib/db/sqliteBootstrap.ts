@@ -518,6 +518,9 @@ export function migrate(database: Database.Database) {
       "ALTER TABLE chat_conversations ADD COLUMN course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL"
     );
   }
+  if (!hasColumn("chat_messages", "pending_action")) {
+    database.exec("ALTER TABLE chat_messages ADD COLUMN pending_action TEXT");
+  }
 }
 
 // Applies schema.sql then migrate() — the full bootstrap sequence any

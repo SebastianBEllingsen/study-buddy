@@ -314,6 +314,10 @@ export const chat_messages = sqliteTable("chat_messages", {
   // JSON-encoded ChatAttachment[] (see models.ts) — NULL when the message
   // has no attachments.
   attachments: text("attachments"),
+  // JSON-encoded PendingChatAction (see chatActions.ts / models.ts) — NULL
+  // unless this assistant message proposed a folder/save action awaiting
+  // (or having received) user confirmation.
+  pending_action: text("pending_action"),
   created_at: text("created_at").notNull(),
 });
 

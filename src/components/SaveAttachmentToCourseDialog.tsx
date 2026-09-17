@@ -107,11 +107,13 @@ export default function SaveAttachmentToCourseDialog({
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Course</label>
             <Select
-              value={courseId !== null ? String(courseId) : undefined}
+              value={courseId !== null ? String(courseId) : ""}
               onValueChange={(v) => setCourseId(Number(v))}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choose a course" />
+                <SelectValue placeholder="Choose a course">
+                  {(v: string) => (v ? (courses.find((c) => String(c.id) === v)?.name ?? v) : "Choose a course")}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {courses.map((c) => (
@@ -125,12 +127,14 @@ export default function SaveAttachmentToCourseDialog({
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Folder</label>
             <Select
-              value={folderId !== null ? String(folderId) : undefined}
+              value={folderId !== null ? String(folderId) : ""}
               onValueChange={(v) => setFolderId(Number(v))}
               disabled={folders.length === 0}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Default folder" />
+                <SelectValue placeholder="Default folder">
+                  {(v: string) => (v ? (folders.find((f) => String(f.id) === v)?.name ?? v) : "Default folder")}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {folders.map((f) => (

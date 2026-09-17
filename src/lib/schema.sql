@@ -256,6 +256,9 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   -- JSON-encoded ChatAttachment[] (see models.ts) — NULL when the message has
   -- no attachments.
   attachments TEXT,
+  -- JSON-encoded PendingChatAction (see chatActions.ts / models.ts) — NULL
+  -- unless this assistant message proposed a folder/save action.
+  pending_action TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

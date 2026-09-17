@@ -33,7 +33,11 @@ function sanitizeSegment(name: string): string {
   return cleaned.slice(0, 80) || "untitled";
 }
 
-function extFromMimeType(mimeType: string): string {
+// Exported for chatActions.ts — an AI-triggered "save this attachment"
+// action derives the on-disk filename's extension from the attachment's
+// mimeType too, for the same reason: a client-supplied filename isn't
+// trustworthy enough to key format handling off of.
+export function extFromMimeType(mimeType: string): string {
   const sub = mimeType.includes("/") ? mimeType.slice(mimeType.indexOf("/") + 1) : mimeType;
   return sub.split("+")[0].replace(/[^a-zA-Z0-9]/g, "") || "bin";
 }

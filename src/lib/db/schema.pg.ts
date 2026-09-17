@@ -382,6 +382,10 @@ export const chat_messages = pgTable(
     // JSON-encoded ChatAttachment[] (see models.ts) — NULL when the message
     // has no attachments.
     attachments: text("attachments"),
+    // JSON-encoded PendingChatAction (see chatActions.ts / models.ts) — NULL
+    // unless this assistant message proposed a folder/save action awaiting
+    // (or having received) user confirmation.
+    pending_action: text("pending_action"),
     created_at: text("created_at").notNull(),
   },
   (table) => [index("idx_chat_messages_conversation_id").on(table.conversation_id)]

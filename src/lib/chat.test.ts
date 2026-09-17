@@ -10,19 +10,34 @@ vi.mock("./aiClient", () => ({
 const addChatMessage = vi.fn();
 const deleteChatMessage = vi.fn();
 const getChatConversation = vi.fn();
+const getChatMessage = vi.fn();
 const getAppSettings = vi.fn();
 const listDocumentsForCourse = vi.fn();
+const listFoldersForCourse = vi.fn();
+const updateChatMessagePendingAction = vi.fn();
 vi.mock("./models", () => ({
   addChatMessage: (...args: unknown[]) => addChatMessage(...args),
   deleteChatMessage: (...args: unknown[]) => deleteChatMessage(...args),
   getChatConversation: (...args: unknown[]) => getChatConversation(...args),
+  getChatMessage: (...args: unknown[]) => getChatMessage(...args),
   getAppSettings: (...args: unknown[]) => getAppSettings(...args),
   listDocumentsForCourse: (...args: unknown[]) => listDocumentsForCourse(...args),
+  listFoldersForCourse: (...args: unknown[]) => listFoldersForCourse(...args),
+  updateChatMessagePendingAction: (...args: unknown[]) => updateChatMessagePendingAction(...args),
 }));
 
 const buildFullCourseContextText = vi.fn();
 vi.mock("./context", () => ({
   buildFullCourseContextText: (...args: unknown[]) => buildFullCourseContextText(...args),
+}));
+
+const buildAvailableAttachmentsList = vi.fn();
+const detectChatActions = vi.fn();
+const executeChatActions = vi.fn();
+vi.mock("./chatActions", () => ({
+  buildAvailableAttachmentsList: (...args: unknown[]) => buildAvailableAttachmentsList(...args),
+  detectChatActions: (...args: unknown[]) => detectChatActions(...args),
+  executeChatActions: (...args: unknown[]) => executeChatActions(...args),
 }));
 
 const extractPdfText = vi.fn();
@@ -36,7 +51,8 @@ vi.mock("./extraction", async () => {
   };
 });
 
-const { sendChatMessage, validateAndExtractAttachments } = await import("./chat");
+const { sendChatMessage, validateAndExtractAttachments, resolvePendingAction, PendingActionNotFoundError } =
+  await import("./chat");
 
 beforeEach(() => {
   generateText.mockReset();
@@ -44,11 +60,19 @@ beforeEach(() => {
   addChatMessage.mockReset();
   deleteChatMessage.mockReset().mockResolvedValue(undefined);
   getChatConversation.mockReset();
+  getChatMessage.mockReset();
   getAppSettings.mockReset().mockResolvedValue({ aiEfficiencyMode: false, cliTrustedModeEnabled: false });
   listDocumentsForCourse.mockReset();
+  listFoldersForCourse.mockReset().mockResolvedValue([]);
+  updateChatMessagePendingAction.mockReset();
   buildFullCourseContextText.mockReset();
   extractPdfText.mockReset();
   extractDocxText.mockReset();
+  buildAvailableAttachmentsList.mockReset().mockReturnValue([]);
+  // Default: no action detected — every existing (non-action) test keeps
+  // exercising the normal generateText path unchanged.
+  detectChatActions.mockReset().mockResolvedValue({ actions: [], confirmationMessage: null });
+  executeChatActions.mockReset();
 });
 
 describe("sendChatMessage", () => {
@@ -66,6 +90,41 @@ describe("sendChatMessage", () => {
 
     expect(reply).toEqual({ id: 2, role: "assistant", content: "hello" });
     expect(deleteChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("instructs the model to use LaTeX delimiters for math", async () => {
+    addChatMessage
+      .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
+      .mockResolvedValueOnce({ id: 2, role: "assistant", content: "hello" });
+    getChatConversation.mockResolvedValue({
+      conversation: { courseId: null },
+      messages: [{ role: "user", content: "hi" }],
+    });
+    generateText.mockResolvedValue("hello");
+
+    await sendChatMessage(1, "hi");
+
+    expect(generateText.mock.calls[0][0].system).toContain("LaTeX");
+  });
+
+  it("strips orphaned math delimiters from the reply before persisting it", async () => {
+    addChatMessage
+      .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
+      .mockResolvedValueOnce({ id: 2, role: "assistant", content: "answer" });
+    getChatConversation.mockResolvedValue({
+      conversation: { courseId: null },
+      messages: [{ role: "user", content: "hi" }],
+    });
+    // Two orphaned "$$" endings with no real math between them — the known
+    // merge artifact stripOrphanMathDelimiters guards against (see
+    // mathSanitizer.test.ts for the same case against the other generation
+    // paths).
+    generateText.mockResolvedValue("Label one: value$$\nLabel two: value$$");
+
+    await sendChatMessage(1, "hi");
+
+    const [, , persistedReply] = addChatMessage.mock.calls[1];
+    expect(persistedReply).not.toContain("$$");
   });
 
   // Regression coverage: sendChatMessage persists the user's turn before
@@ -152,6 +211,101 @@ describe("sendChatMessage", () => {
       expect(call.workspaceScope).toEqual({ documentIds: [1, 2, 3] });
       expect(call.system).not.toContain("Course material follows");
     });
+
+    it("proposes a pending action instead of replying normally, when one is detected", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
+        .mockResolvedValueOnce({
+          id: 2,
+          role: "assistant",
+          content: 'I\'ll create a folder called "Diagrams" and save photo.png there — go ahead?',
+          pendingAction: { id: "abc", actions: [{ action: "createFolder", folderName: "Diagrams" }], status: "pending", resultSummary: null },
+        });
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: 7 },
+        messages: [{ id: 1, role: "user", content: "make a folder called Diagrams" }],
+      });
+      detectChatActions.mockResolvedValue({
+        actions: [{ action: "createFolder", folderName: "Diagrams" }],
+        confirmationMessage: 'I\'ll create a folder called "Diagrams" and save photo.png there — go ahead?',
+      });
+
+      const reply = await sendChatMessage(1, "make a folder called Diagrams");
+
+      expect(reply.pendingAction?.status).toBe("pending");
+      expect(generateText).not.toHaveBeenCalled();
+      // Second addChatMessage call persists the assistant's proposal with
+      // the detected actions attached.
+      const [, role, content, attachments, pendingAction] = addChatMessage.mock.calls[1];
+      expect(role).toBe("assistant");
+      expect(content).toContain("Diagrams");
+      expect(attachments).toBeUndefined();
+      expect(pendingAction).toMatchObject({
+        status: "pending",
+        actions: [{ action: "createFolder", folderName: "Diagrams" }],
+      });
+    });
+  });
+});
+
+describe("resolvePendingAction", () => {
+  it("cancels a pending action without executing anything", async () => {
+    getChatMessage.mockResolvedValue({
+      id: 5,
+      conversationId: 1,
+      pendingAction: { id: "abc", actions: [{ action: "createFolder", folderName: "X" }], status: "pending", resultSummary: null },
+    });
+
+    const result = await resolvePendingAction(1, 5, false);
+
+    expect(result.pendingAction?.status).toBe("cancelled");
+    expect(executeChatActions).not.toHaveBeenCalled();
+    expect(updateChatMessagePendingAction).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ status: "cancelled" })
+    );
+  });
+
+  it("executes actions on confirm and records the result summary", async () => {
+    const pendingAction = {
+      id: "abc",
+      actions: [{ action: "createFolder", folderName: "X" }],
+      status: "pending" as const,
+      resultSummary: null,
+    };
+    getChatMessage.mockResolvedValue({ id: 5, conversationId: 1, pendingAction });
+    getChatConversation.mockResolvedValue({
+      conversation: { courseId: 7 },
+      messages: [],
+    });
+    executeChatActions.mockResolvedValue('Created folder "X".');
+
+    const result = await resolvePendingAction(1, 5, true);
+
+    expect(executeChatActions).toHaveBeenCalledWith(7, pendingAction.actions, []);
+    expect(result.pendingAction).toMatchObject({ status: "executed", resultSummary: 'Created folder "X".' });
+  });
+
+  it("throws when the message has no pending action", async () => {
+    getChatMessage.mockResolvedValue({ id: 5, conversationId: 1, pendingAction: null });
+
+    await expect(resolvePendingAction(1, 5, true)).rejects.toThrow(PendingActionNotFoundError);
+  });
+
+  it("is a no-op (doesn't re-execute) when the action was already resolved", async () => {
+    const resolved = {
+      id: "abc",
+      actions: [{ action: "createFolder", folderName: "X" }],
+      status: "executed" as const,
+      resultSummary: 'Created folder "X".',
+    };
+    getChatMessage.mockResolvedValue({ id: 5, conversationId: 1, pendingAction: resolved });
+
+    const result = await resolvePendingAction(1, 5, true);
+
+    expect(executeChatActions).not.toHaveBeenCalled();
+    expect(updateChatMessagePendingAction).not.toHaveBeenCalled();
+    expect(result.pendingAction).toEqual(resolved);
   });
 });
 

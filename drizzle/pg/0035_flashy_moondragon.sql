@@ -1,0 +1,1 @@
+ALTER TABLE "chat_messages" ADD COLUMN "pending_action" text;

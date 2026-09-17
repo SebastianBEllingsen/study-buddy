@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { toast } from "sonner";
-import { ArrowUp, Bot, FileText, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
+import { ArrowUp, Bot, BookOpen, FileText, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
 import type { ChatAttachment, ChatConversation, ChatMessage, CourseSummary } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -227,6 +227,35 @@ export default function ChatContent({
     }
   }
 
+  async function handleResolveAction(messageId: number, confirm: boolean) {
+    if (activeId === null) return;
+    const optimisticStatus = confirm ? "confirmed_executing" : "cancelled";
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.pendingAction
+          ? { ...m, pendingAction: { ...m.pendingAction, status: optimisticStatus } }
+          : m
+      )
+    );
+    try {
+      const res = await fetch(`/api/chat/conversations/${activeId}/messages/${messageId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm }),
+      });
+      if (!res.ok) throw new Error("Couldn't resolve that action");
+      const updated: ChatMessage = await res.json();
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? updated : m)));
+    } catch {
+      toast.error("Couldn't update that action");
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId && m.pendingAction ? { ...m, pendingAction: { ...m.pendingAction, status: "pending" } } : m
+        )
+      );
+    }
+  }
+
   async function handleCourseScopeChange(courseId: number | null) {
     if (activeId === null) return;
     const previous = activeConversation?.courseId ?? null;
@@ -341,6 +370,7 @@ export default function ChatContent({
           role: "user",
           content,
           attachments: attachments.length > 0 ? attachments.map(composerAttachmentToChatAttachment) : null,
+          pendingAction: null,
           createdAt: "",
         },
       ]);
@@ -415,15 +445,28 @@ export default function ChatContent({
               <Bot className="size-4" />
               AI chat
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {activeId !== null && (
                 <Select
                   value={activeConversation?.courseId != null ? String(activeConversation.courseId) : "none"}
                   onValueChange={(v) => handleCourseScopeChange(v === "none" ? null : Number(v))}
                   disabled={savingCourseScope}
                 >
-                  <SelectTrigger className="h-7 w-40 text-xs">
-                    <SelectValue placeholder="No course" />
+                  <SelectTrigger
+                    size="sm"
+                    title="Scope this chat to a course"
+                    className={`max-w-44 gap-1.5 rounded-full border-transparent px-2.5 shadow-none transition-colors ${
+                      activeConversation?.courseId != null
+                        ? "bg-primary/10 text-primary hover:bg-primary/15 dark:bg-primary/15 dark:hover:bg-primary/20"
+                        : "bg-muted/70 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <BookOpen className="size-3.5 shrink-0" />
+                    <SelectValue placeholder="No course">
+                      {(v: string) =>
+                        v === "none" ? "No course" : (courses.find((c) => String(c.id) === v)?.name ?? v)
+                      }
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No course</SelectItem>
@@ -435,6 +478,7 @@ export default function ChatContent({
                   </SelectContent>
                 </Select>
               )}
+              {activeId !== null && headerActions && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
               {headerActions}
             </div>
           </div>
@@ -492,6 +536,33 @@ export default function ChatContent({
                     </div>
                   ) : (
                     m.content && <p className="whitespace-pre-wrap">{m.content}</p>
+                  )}
+                  {m.pendingAction && (
+                    <div className="mt-2 border-t pt-2">
+                      {m.pendingAction.status === "pending" && (
+                        <div className="flex gap-1.5">
+                          <Button size="xs" onClick={() => handleResolveAction(m.id, true)}>
+                            Confirm
+                          </Button>
+                          <Button size="xs" variant="outline" onClick={() => handleResolveAction(m.id, false)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      )}
+                      {m.pendingAction.status === "confirmed_executing" && (
+                        <p className="text-xs text-muted-foreground">Working on it…</p>
+                      )}
+                      {m.pendingAction.status === "cancelled" && (
+                        <p className="text-xs text-muted-foreground">Cancelled.</p>
+                      )}
+                      {(m.pendingAction.status === "executed" || m.pendingAction.status === "failed") && (
+                        <p
+                          className={`text-xs ${m.pendingAction.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+                        >
+                          {m.pendingAction.resultSummary}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

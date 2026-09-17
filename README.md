@@ -62,9 +62,10 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
   <img src="docs/images/CropAndAskOnPdfViewer.png" width="600" alt="Cropping a region of a PDF to ask AI about it">
 
-- 💬 **A general AI chat, too** — not just per-document Q&A: a persistent assistant independent of any course, with its own saved conversation history for whatever you want to ask
+- 💬 **A general AI chat, too** — not just per-document Q&A: a persistent assistant independent of any course, with its own saved conversation history for whatever you want to ask. Attach images, PDFs, or DOCX files right in the chat (paste, drag-drop, or the paperclip), optionally scope a conversation to one course so it can answer using that course's material, and ask it in plain English to file something away — *"create a folder called Week 3 and save that PDF there"* — it always proposes what it's about to do and waits for you to confirm before creating or saving anything. Math renders live via LaTeX here too.
 
-  <img src="docs/images/AiChatDialogModal.png" width="500" alt="General-purpose AI chat with conversation history">
+  <img src="docs/images/AiChatDialogModal.png" width="500" alt="AI chat scoped to a course, proposing a folder/save action with Confirm and Cancel, alongside an attached image">
+  <img src="docs/images/SaveAttachmentToCourse.png" width="500" alt="Filing a chat attachment into a course and folder via the Save to course dialog">
 
 - 📋 **Paste text or images** — paste a raw Ctrl+A page dump (an LMS assignment page, a lecture site, anything) and hit **Make pretty**: it discards the navigation/footer/boilerplate and keeps only the real content, cleanly formatted — save it as a document (which renders that Markdown and LaTeX live, same as a note) or straight into a note, and paste/drop an image to embed it inline either way
 
@@ -95,9 +96,9 @@ Upload the PDFs for a course and generate study material scoped strictly to that
 
   <img src="docs/images/SearchShowCase.png" width="450" alt="Fuzzy search across notes, quizzes, flashcards, and documents">
 
-- 🤖 **Bring your own AI** — Anthropic, OpenAI, or Gemini API keys; Claude Code or Codex CLI subscriptions; or a free tier via OpenRouter
+- 🤖 **Bring your own AI** — Anthropic, OpenAI, or Gemini API keys; Claude Code or Codex CLI subscriptions; or a free tier via OpenRouter. Claude Code/Codex normally run hardened (no file, shell, or network access, since they're fed your own uploaded material) — flip on **full tool access** in Settings if you'd rather they handle images directly too (Crop & Ask, chat attachments), confined to a disposable workspace folder, never your project files or database
 
-  <img src="docs/images/SettingsMenuAIProvider.png" width="380" alt="AI provider settings">
+  <img src="docs/images/SettingsMenuAIProvider.png" width="380" alt="AI provider settings, with the full tool access toggle shown for Claude Code">
 
 ---
 
@@ -167,6 +168,7 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · Base UI (shadcn/ui) �
 - No OCR — scanned/image-only PDFs are rejected with a clear message, and a directly-uploaded image is viewable and Crop & Ask-able but isn't transcribed, so it's never used as generation source material
 - No Anki `.apkg` export — flashcards are reviewed in-app only
 - PDF and DOCX work out of the box. ODT and PPTX need a local [LibreOffice](https://www.libreoffice.org/) install (`soffice` on your PATH) — they're converted to PDF on upload for viewing and text extraction; without it, uploading one fails with a clear error instead
+- The AI chat's file-management ("create a folder and save this there") handles one create-folder-and/or-save request at a time — no move/rename/delete via chat yet, and if a message both asks a real question and requests a save, only the save proposal gets a reply that turn
 
 ## License
 

@@ -1,16 +1,22 @@
+import crypto from "node:crypto";
 import { generateText, resolveBackendId } from "./aiClient";
 import {
   addChatMessage,
   deleteChatMessage,
   getChatConversation,
+  getChatMessage,
   getAppSettings,
   listDocumentsForCourse,
+  listFoldersForCourse,
+  updateChatMessagePendingAction,
 } from "./models";
-import type { ChatAttachment, ChatMessage } from "./models";
+import type { ChatAttachment, ChatMessage, PendingChatAction } from "./models";
 import { buildFullCourseContextText } from "./context";
 import { parseDataUrlImage, isValidChatImageAttachment } from "./dataUrlImage";
 import { extensionOf } from "./documentFormats";
 import { extractDocxText, extractPdfText, EmptyDocumentError, ScannedPdfError } from "./extraction";
+import { stripOrphanMathDelimiters } from "./mathSanitizer";
+import { buildAvailableAttachmentsList, detectChatActions, executeChatActions } from "./chatActions";
 
 const MAX_TOKENS = 4000;
 const EFFICIENT_MAX_TOKENS = 2000;
@@ -31,7 +37,9 @@ const MAX_CHAT_DOCUMENT_TEXT_LENGTH = 40_000;
 
 const SYSTEM_PROMPT = `You are the AI assistant built into Study Buddy, a study app for courses, notes, quizzes, and flashcards. Have a natural, helpful conversation with the user — you can help with studying, explain concepts, or just chat.
 
-You are being shown the conversation so far as a plain transcript, not a native chat API. Respond with ONLY your next message as the assistant — no "Assistant:" prefix, no restating earlier turns, no meta-commentary about the transcript format.`;
+You are being shown the conversation so far as a plain transcript, not a native chat API. Respond with ONLY your next message as the assistant — no "Assistant:" prefix, no restating earlier turns, no meta-commentary about the transcript format.
+
+Use inline LaTeX ($...$ or $$...$$) for any math, it renders.`;
 
 function truncateExtractedText(text: string): string {
   if (text.length <= MAX_CHAT_DOCUMENT_TEXT_LENGTH) return text;
@@ -104,6 +112,23 @@ function attachmentSuffix(m: ChatMessage): string {
     .join("");
 }
 
+// The message's own `content` already carries the human-readable proposal
+// text (the model's confirmationMessage, see sendChatMessage) — this only
+// adds what happened SINCE it was proposed, for multi-turn continuity (so a
+// later turn knows whether that proposal is still open, was declined, or
+// already went through).
+function pendingActionSuffix(m: ChatMessage): string {
+  const p = m.pendingAction;
+  if (!p) return "";
+  if (p.status === "pending" || p.status === "confirmed_executing") {
+    return "\n[Awaiting the user's confirmation to proceed — nothing has happened yet]";
+  }
+  if (p.status === "cancelled") {
+    return "\n[The user declined — nothing was created or saved]";
+  }
+  return `\n[Result: ${p.resultSummary}]`;
+}
+
 // Every backend (API-based and CLI-based alike) already implements a plain
 // system+user generateText call — rather than adding a genuine multi-turn
 // messages[] path to all six of them, the whole history is folded into one
@@ -112,7 +137,10 @@ function attachmentSuffix(m: ChatMessage): string {
 // zero changes to any of them.
 function buildTranscriptPrompt(messages: ChatMessage[]): string {
   return messages
-    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}${attachmentSuffix(m)}`)
+    .map(
+      (m) =>
+        `${m.role === "user" ? "User" : "Assistant"}: ${m.content}${attachmentSuffix(m)}${pendingActionSuffix(m)}`
+    )
     .join("\n\n");
 }
 
@@ -141,6 +169,35 @@ export async function sendChatMessage(
     }
 
     const { aiEfficiencyMode: efficient, cliTrustedModeEnabled } = await getAppSettings();
+    const transcript = buildTranscriptPrompt(detail.messages);
+
+    // Only ever proposed within this conversation's own course and its own
+    // attachments/folders — see chatActions.ts for how everything here gets
+    // re-validated before anything is actually created/saved. This is a
+    // separate, cheap detection call; when it finds something to propose,
+    // its confirmationMessage stands in as this turn's whole reply (nothing
+    // executes until the user confirms — see resolvePendingAction).
+    if (detail.conversation.courseId != null) {
+      const availableAttachments = buildAvailableAttachmentsList(detail.messages);
+      const folders = await listFoldersForCourse(detail.conversation.courseId);
+      const detected = await detectChatActions({ transcript, availableAttachments, folders });
+
+      if (detected.actions.length > 0 && detected.confirmationMessage) {
+        const pendingAction: PendingChatAction = {
+          id: crypto.randomUUID(),
+          actions: detected.actions,
+          status: "pending",
+          resultSummary: null,
+        };
+        return await addChatMessage(
+          conversationId,
+          "assistant",
+          stripOrphanMathDelimiters(detected.confirmationMessage),
+          undefined,
+          pendingAction
+        );
+      }
+    }
 
     const images = (attachments ?? [])
       .filter((a): a is Extract<ChatAttachment, { type: "image" }> => a.type === "image")
@@ -169,7 +226,7 @@ export async function sendChatMessage(
 
     const reply = await generateText({
       system,
-      user: buildTranscriptPrompt(detail.messages),
+      user: transcript,
       maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
       effort: efficient ? "low" : "medium",
       efficient,
@@ -177,9 +234,63 @@ export async function sendChatMessage(
       workspaceScope: documentIds?.length ? { documentIds } : undefined,
     });
 
-    return await addChatMessage(conversationId, "assistant", reply.trim());
+    return await addChatMessage(conversationId, "assistant", stripOrphanMathDelimiters(reply.trim()));
   } catch (err) {
     await deleteChatMessage(userMessage.id).catch(() => {});
     throw err;
   }
+}
+
+export class PendingActionNotFoundError extends Error {
+  constructor() {
+    super("No pending action found for this message.");
+    this.name = "PendingActionNotFoundError";
+  }
+}
+
+// Confirms or cancels a proposed folder/save action (see sendChatMessage) —
+// the one place these actions actually execute. Re-validates everything
+// against the current course/conversation state at execution time (see
+// chatActions.ts's executeChatActions), since folders/attachments could
+// have changed since the action was proposed.
+export async function resolvePendingAction(
+  conversationId: number,
+  messageId: number,
+  confirm: boolean
+): Promise<ChatMessage> {
+  const message = await getChatMessage(messageId);
+  if (!message || message.conversationId !== conversationId || !message.pendingAction) {
+    throw new PendingActionNotFoundError();
+  }
+  // Already resolved (double-click, stale UI reload) — return as-is rather
+  // than erroring or executing a second time.
+  if (message.pendingAction.status !== "pending") {
+    return message;
+  }
+
+  if (!confirm) {
+    const cancelled: PendingChatAction = { ...message.pendingAction, status: "cancelled" };
+    await updateChatMessagePendingAction(messageId, cancelled);
+    return { ...message, pendingAction: cancelled };
+  }
+
+  await updateChatMessagePendingAction(messageId, { ...message.pendingAction, status: "confirmed_executing" });
+
+  const detail = await getChatConversation(conversationId);
+  const courseId = detail?.conversation.courseId;
+  if (!detail || courseId == null) {
+    const failed: PendingChatAction = {
+      ...message.pendingAction,
+      status: "failed",
+      resultSummary: "This conversation is no longer scoped to a course.",
+    };
+    await updateChatMessagePendingAction(messageId, failed);
+    return { ...message, pendingAction: failed };
+  }
+
+  const availableAttachments = buildAvailableAttachmentsList(detail.messages);
+  const resultSummary = await executeChatActions(courseId, message.pendingAction.actions, availableAttachments);
+  const resolved: PendingChatAction = { ...message.pendingAction, status: "executed", resultSummary };
+  await updateChatMessagePendingAction(messageId, resolved);
+  return { ...message, pendingAction: resolved };
 }
