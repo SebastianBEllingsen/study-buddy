@@ -67,7 +67,7 @@ Upload the PDFs for a course and generate study material scoped strictly to that
   <img src="docs/images/AiChatDialogModal.png" width="500" alt="AI chat scoped to a course, proposing a folder/save action with Confirm and Cancel, alongside an attached image">
   <img src="docs/images/SaveAttachmentToCourse.png" width="500" alt="Filing a chat attachment into a course and folder via the Save to course dialog">
 
-- 📋 **Paste text or images** — paste a raw Ctrl+A page dump (an LMS assignment page, a lecture site, anything) and hit **Make pretty**: it discards the navigation/footer/boilerplate and keeps only the real content, cleanly formatted — save it as a document (which renders that Markdown and LaTeX live, same as a note) or straight into a note, and paste/drop an image to embed it inline either way
+- 📋 **Paste text or images** — paste a raw Ctrl+A page dump (an LMS assignment page, a lecture site, anything) and hit **Make pretty**: it discards the navigation/footer/boilerplate and keeps only the real content, cleanly formatted — save it as a document (which renders that Markdown and LaTeX live, same as a note) or straight into a note, and paste/drop an image to embed it inline either way. I use this to be able to copy Latex from Canvas pages, its usually embedded with mathjax -> [Canvas Latex Copy](https://github.com/SebastianBEllingsen/CLT)
 
   <img src="docs/images/PasteTextFunctionalityMessyInput1.png" width="380" alt="Pasting a raw page dump, with Save as: Document/Note">
 
