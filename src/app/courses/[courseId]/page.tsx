@@ -1050,7 +1050,7 @@ function FolderCard({
         </div>
         <CollapsibleContent>
           <div className="space-y-2 py-1 pl-[1.625rem]">
-            {documents.length + items.length + notes.length === 0 ? (
+            {documents.length + items.length + notes.length + subfolders.length === 0 ? (
               <p className="py-0.5 text-sm text-muted-foreground/70">
                 Nothing here yet — upload a document, generate something, or add a note.
               </p>
