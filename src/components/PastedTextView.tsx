@@ -4,6 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import Linkify from "./Linkify";
+import { normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 
 // Renders pasted-text content with images embedded inline, Obsidian-style
 // (see the "Paste text" dialog's image paste/drop support) — plain
@@ -33,7 +34,7 @@ function MarkdownPastedText({ text }: { text: string }) {
         rehypePlugins={[rehypeKatex]}
         urlTransform={allowDataImages}
       >
-        {text}
+        {normalizeLatexDelimiters(text)}
       </ReactMarkdown>
     </div>
   );

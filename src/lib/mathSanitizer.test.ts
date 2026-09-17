@@ -4,6 +4,8 @@ import {
   sanitizeNotesContent,
   sanitizeQuizContent,
   sanitizeFlashcardsContent,
+  normalizeLatexDelimiters,
+  MATH_PATTERN,
 } from "./mathSanitizer";
 import { InvalidAiResponseError } from "./aiResponseValidation";
 import type { QuizContent, FlashcardsContent } from "./types";
@@ -44,6 +46,41 @@ describe("stripOrphanMathDelimiters", () => {
 
   it("handles an empty string", () => {
     expect(stripOrphanMathDelimiters("")).toBe("");
+  });
+});
+
+describe("normalizeLatexDelimiters", () => {
+  it("converts MathJax-style inline delimiters to $...$", () => {
+    expect(normalizeLatexDelimiters("The formula is \\(E=mc^2\\) approximately.")).toBe(
+      "The formula is $E=mc^2$ approximately."
+    );
+  });
+
+  it("converts MathJax-style display delimiters to $$...$$", () => {
+    expect(normalizeLatexDelimiters("Consider:\n\n\\[\\int_0^1 x^2 dx\\]\n\nDone.")).toBe(
+      "Consider:\n\n$$\\int_0^1 x^2 dx$$\n\nDone."
+    );
+  });
+
+  it("leaves text with no MathJax delimiters untouched", () => {
+    const input = "The formula is $E=mc^2$ already.";
+    expect(normalizeLatexDelimiters(input)).toBe(input);
+  });
+
+  it("handles multiple inline spans in the same string", () => {
+    expect(normalizeLatexDelimiters("\\(p\\) implies \\(q\\)")).toBe("$p$ implies $q$");
+  });
+});
+
+describe("MATH_PATTERN (MathJax delimiter support)", () => {
+  it("matches a \\(...\\) inline span, capturing it in the 4th group", () => {
+    const match = "See \\(x+1\\) here".match(MATH_PATTERN);
+    expect(match).toEqual(["\\(x+1\\)"]);
+  });
+
+  it("matches a \\[...\\] display span, capturing it in the 3rd group", () => {
+    const match = "\\[x+1\\]".match(MATH_PATTERN);
+    expect(match).toEqual(["\\[x+1\\]"]);
   });
 });
 

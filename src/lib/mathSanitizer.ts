@@ -2,10 +2,31 @@ import katex from "katex";
 import type { NotesContent, QuizContent, FlashcardsContent } from "./types";
 import { assertQuizContentShape, assertFlashcardsContentShape } from "./aiResponseValidation";
 
-// Shared with MathText.tsx — the one definition of "what counts as a
-// complete, matched math span," used both for rendering and for stripping
-// orphaned delimiters after generation.
-export const MATH_PATTERN = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+// Shared with MathText.tsx and NoteEditor.tsx's live in-editor concealment —
+// the one definition of "what counts as a complete, matched math span," used
+// for rendering, live-editor concealment, and stripping orphaned delimiters
+// after generation. Groups 1/2 are this app's own $$.../$...$ convention
+// (what every AI prompt in this app is told to emit); groups 3/4 are
+// MathJax's \[...\]/\(...\) convention — never asked for by this app's own
+// prompts, but common in raw Ctrl+A pastes from an LMS/course-portal page
+// (MathJax's own default delimiters), which "Make pretty" preserves
+// verbatim rather than rewriting notation. remark-math (the markdown
+// renderer's own math plugin) only ever recognizes $/$$ , so consumers that
+// feed a string to it still need normalizeLatexDelimiters below — this
+// pattern alone only helps the two consumers that scan raw text themselves.
+export const MATH_PATTERN =
+  /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\[([\s\S]+?)\\\]|\\\(([^\n]+?)\\\)/g;
+
+// remark-math (used by every ReactMarkdown-based renderer in this app) only
+// parses $.../$$...$$ — it has no option to also recognize MathJax's
+// \[...\]/\(...\) delimiters. Converting them here, at render time, fixes
+// pasted-from-the-web math without ever touching what's actually stored
+// (the note/document keeps whatever delimiters were originally pasted).
+export function normalizeLatexDelimiters(text: string): string {
+  return text
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, inner: string) => `$$${inner}$$`)
+    .replace(/\\\(([^\n]+?)\\\)/g, (_, inner: string) => `$${inner}$`);
+}
 
 // Two ORPHAN delimiters (e.g. two separate lines each ending in a stray,
 // unopened `$$` — the known generation-merge bug) can accidentally look like

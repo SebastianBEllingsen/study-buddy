@@ -25,13 +25,11 @@ export function MathText({ text }: { text: string }) {
     if (index > lastIndex) {
       parts.push(text.slice(lastIndex, index));
     }
-    const [full, display, inline] = match;
-    const tex = display ?? inline ?? "";
+    const [full, display, inline, displayLatex, inlineLatex] = match;
+    const tex = display ?? displayLatex ?? inline ?? inlineLatex ?? "";
+    const isDisplay = display !== undefined || displayLatex !== undefined;
     parts.push(
-      <span
-        key={key++}
-        dangerouslySetInnerHTML={{ __html: renderMath(tex, display !== undefined) }}
-      />
+      <span key={key++} dangerouslySetInnerHTML={{ __html: renderMath(tex, isDisplay) }} />
     );
     lastIndex = index + full.length;
   }

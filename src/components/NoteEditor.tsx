@@ -39,7 +39,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import { toast } from "sonner";
-import { MATH_PATTERN } from "@/lib/mathSanitizer";
+import { MATH_PATTERN, normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 import {
   Bold,
   Italic,
@@ -731,11 +731,10 @@ function liveMathFormatting(): Extension {
       // in Edit mode (it still renders fine in Preview) rather than take on
       // that complexity.
       if (view.state.doc.lineAt(from).number !== view.state.doc.lineAt(to).number) continue;
-      const [, display, inline] = match;
-      const tex = display ?? inline ?? "";
-      ranges.push(
-        Decoration.replace({ widget: new MathWidget(tex, display !== undefined) }).range(from, to)
-      );
+      const [, display, inline, displayLatex, inlineLatex] = match;
+      const tex = display ?? displayLatex ?? inline ?? inlineLatex ?? "";
+      const isDisplay = display !== undefined || displayLatex !== undefined;
+      ranges.push(Decoration.replace({ widget: new MathWidget(tex, isDisplay) }).range(from, to));
     }
     return Decoration.set(ranges, true);
   }
@@ -1278,7 +1277,19 @@ const editorTheme = EditorView.theme({
   },
   // Rendered KaTeX — see MathWidget/liveMathFormatting above.
   ".cm-math": { cursor: "text" },
-  ".cm-math-inline": { display: "inline-block", verticalAlign: "middle" },
+  // display:inline-block (rather than this) collapses to 0 computed width
+  // here specifically — confirmed empirically, not just suspected: a
+  // math-only list item (e.g. "- $p$", nothing else on the line) sits right
+  // after listHangingIndent's negative text-indent, and Chromium's
+  // shrink-to-fit sizing for an inline-block whose content is short enough
+  // apparently miscalculates against that indent and returns 0 (the KaTeX
+  // content still paints, since it overflows the collapsed box, but
+  // subsequent inline content on the line then gets positioned as if the
+  // widget took no space at all, garbling the line). inline-flex sizes
+  // correctly in every case tested (single glyph, multi-glyph, with/without
+  // a list marker, with/without trailing text) — same visual result
+  // otherwise, verticalAlign still applies to a flex item next to text.
+  ".cm-math-inline": { display: "inline-flex", verticalAlign: "middle" },
   ".cm-math-display": {
     display: "block",
     margin: "0.5em 0",
@@ -1463,7 +1474,7 @@ function NotePreview({
           ),
         }}
       >
-        {markdownForPreview(markdown, targets)}
+        {normalizeLatexDelimiters(markdownForPreview(markdown, targets))}
       </ReactMarkdown>
     </div>
   );

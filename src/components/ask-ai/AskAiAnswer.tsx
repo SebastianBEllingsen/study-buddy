@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { Button } from "@/components/ui/button";
+import { normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 
 export function AskAiAnswer({
   loading,
@@ -40,7 +41,7 @@ export function AskAiAnswer({
         // as raw "$...$" instead of rendering.
         <div className="markdown-body">
           <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-            {answer}
+            {normalizeLatexDelimiters(answer)}
           </ReactMarkdown>
         </div>
       )}

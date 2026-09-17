@@ -10,6 +10,7 @@ import rehypeKatex from "rehype-katex";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAiEnabled } from "@/lib/useAiEnabled";
+import { normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 import type { AskTurn, CropRect } from "./useCropToAsk";
 
 // Toggle button for entering/leaving crop-to-ask mode — shared styling
@@ -163,7 +164,7 @@ export function CropAskThread({
                 inline LaTeX (e.g. explaining a cropped equation). */}
             <div className="markdown-body">
               <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {turn.answer}
+                {normalizeLatexDelimiters(turn.answer)}
               </ReactMarkdown>
             </div>
           </div>

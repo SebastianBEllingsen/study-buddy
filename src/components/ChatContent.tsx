@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { resizeImageForNote } from "@/lib/resizeImage";
 import { extensionOf } from "@/lib/documentFormats";
+import { normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 import SaveAttachmentToCourseDialog, {
   type SaveableAttachment,
 } from "@/components/SaveAttachmentToCourseDialog";
@@ -531,7 +532,7 @@ export default function ChatContent({
                   {m.role === "assistant" ? (
                     <div className="markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                        {m.content}
+                        {normalizeLatexDelimiters(m.content)}
                       </ReactMarkdown>
                     </div>
                   ) : (
