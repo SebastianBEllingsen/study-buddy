@@ -235,7 +235,10 @@ interface WidgetLayout {
 function StreakWidget({ stats, transparent }: { stats: Stats; transparent: boolean }) {
   if (stats.streak === 0) {
     return (
-      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
+      <Card
+        elevation="flat"
+        className={`h-full items-center justify-center gap-1 overflow-hidden text-center ${transparent ? "" : "border"}`}
+      >
         <Flame className="size-5 text-muted-foreground" />
         <p className="text-xs text-muted-foreground">No streak yet — study today to start one.</p>
       </Card>
@@ -269,7 +272,10 @@ function DueCardsWidget({
 
   if (dueFlashcards.total === 0) {
     return (
-      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border text-center">
+      <Card
+        elevation="flat"
+        className={`h-full items-center justify-center gap-1 overflow-hidden text-center ${transparent ? "" : "border"}`}
+      >
         <Layers className="size-5 text-muted-foreground" />
         <p className="text-xs text-muted-foreground">Nothing due — you&apos;re all caught up.</p>
       </Card>
@@ -511,7 +517,10 @@ function UpcomingEventsWidget({
 
   if (!connected) {
     return (
-      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+      <Card
+        elevation="flat"
+        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+      >
         <CalendarDays className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
         <p className="text-xs text-muted-foreground">
           {compact
@@ -664,7 +673,10 @@ function AssignmentsWidget({
 
   if (feeds && feeds.length === 0) {
     return (
-      <Card elevation="flat" className="h-full items-center justify-center gap-1 overflow-hidden border p-2 text-center">
+      <Card
+        elevation="flat"
+        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+      >
         <ListChecks className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
         <p className="text-xs text-muted-foreground">
           {compact ? "Add a feed" : "Add a calendar feed in Settings to track it here."}
@@ -1116,7 +1128,7 @@ function HomePageContent() {
         </Button>
       </div>
       {topWidgets.length === 0 ? (
-        <Card elevation="flat" className="items-center border py-8 text-center">
+        <Card elevation="flat" className={`items-center py-8 text-center ${transparentWidgets ? "" : "border"}`}>
           <p className="text-sm text-muted-foreground">
             Nothing here — add a widget from Customize.
           </p>
