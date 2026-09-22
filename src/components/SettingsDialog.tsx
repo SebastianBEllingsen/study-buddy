@@ -1151,6 +1151,7 @@ function BrandingSection() {
     dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
     dashboardTransparentWidgets?: boolean;
     dashboardLockBackgroundCrop?: boolean;
+    dashboardBackdropFullPage?: boolean;
   }) {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -1353,7 +1354,7 @@ function BrandingSection() {
               Lock exact crop
               <HelpTooltip>
                 Keeps the backdrop exactly as you cropped it, instead of reframing as the window
-                resizes or zooms. Turns &quot;Backdrop&quot; style into a fixed-height banner too.
+                resizes or zooms.
               </HelpTooltip>
             </span>
             <input
@@ -1361,6 +1362,23 @@ function BrandingSection() {
               className="size-4 shrink-0 accent-primary"
               checked={settings.dashboardLockBackgroundCrop}
               onChange={(e) => saveBranding({ dashboardLockBackgroundCrop: e.target.checked })}
+            />
+          </label>
+        )}
+        {settings.dashboardBackgroundImage && settings.dashboardBannerStyle === "backdrop" && (
+          <label className="flex items-center justify-between gap-3 pt-1 text-xs">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              Full-page backdrop
+              <HelpTooltip>
+                Extends the backdrop behind the second widget zone below your courses too, instead
+                of fading out once it reaches it.
+              </HelpTooltip>
+            </span>
+            <input
+              type="checkbox"
+              className="size-4 shrink-0 accent-primary"
+              checked={settings.dashboardBackdropFullPage}
+              onChange={(e) => saveBranding({ dashboardBackdropFullPage: e.target.checked })}
             />
           </label>
         )}

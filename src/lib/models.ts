@@ -161,6 +161,7 @@ interface SettingsRow {
   ai_grading_enabled: boolean;
   dashboard_transparent_widgets: boolean;
   dashboard_lock_background_crop: boolean;
+  dashboard_backdrop_full_page: boolean;
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
   ai_efficiency_mode: boolean;
@@ -195,6 +196,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       ai_grading_enabled: app_settings.ai_grading_enabled,
       dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
       dashboard_lock_background_crop: app_settings.dashboard_lock_background_crop,
+      dashboard_backdrop_full_page: app_settings.dashboard_backdrop_full_page,
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
@@ -345,10 +347,19 @@ export interface AppSettings {
   // perfectly stable. On: the banner is forced to the exact aspect ratio
   // the backdrop was cropped to at upload (see BACKGROUND_ASPECT in
   // lib/imageCropPresets.ts) and drawn unstretched, so the same crop always
-  // shows regardless of zoom/resize. Applies to both dashboardBannerStyle
-  // values — "backdrop" becomes a fixed-height banner like "overlap" while
-  // this is on, rather than spanning the whole dynamic-height section.
+  // shows regardless of zoom/resize — a fixed, content-independent height
+  // rather than "overlap"'s own small fixed banner. Only meaningful for
+  // dashboardBannerStyle "backdrop"; "overlap" already uses its own small
+  // fixed-height banner regardless of this setting.
   dashboardLockBackgroundCrop: boolean;
+  // Off (the default): the "backdrop" banner (locked crop or not) covers
+  // the top widgets and the course grid, then fades into the plain page
+  // background before the second widget zone below the course list (see
+  // HomeWidgetConfig's "bottom" zone). On: it covers that second zone too,
+  // reading as a true full-page backdrop rather than stopping partway down.
+  // Meaningless for dashboardBannerStyle "overlap", which never spans past
+  // its own small banner.
+  dashboardBackdropFullPage: boolean;
   // Off (the default): a short-answer quiz question is graded locally —
   // word-overlap against the model answer, no API call — instead of asking
   // the AI to judge it. Saves a grading call per quiz on every attempt;
@@ -428,6 +439,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     aiGradingEnabled: row?.ai_grading_enabled ?? false,
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
     dashboardLockBackgroundCrop: row?.dashboard_lock_background_crop ?? false,
+    dashboardBackdropFullPage: row?.dashboard_backdrop_full_page ?? false,
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
@@ -511,6 +523,7 @@ export async function setAppBranding(fields: {
   dashboardBannerStyle?: "overlap" | "backdrop" | null;
   dashboardTransparentWidgets?: boolean;
   dashboardLockBackgroundCrop?: boolean;
+  dashboardBackdropFullPage?: boolean;
 }): Promise<void> {
   const values: Record<string, string | boolean | null> = {};
   if ("appName" in fields) values.app_name = fields.appName ?? null;
@@ -521,6 +534,7 @@ export async function setAppBranding(fields: {
   if ("dashboardBannerStyle" in fields) values.dashboard_banner_style = fields.dashboardBannerStyle ?? null;
   if ("dashboardTransparentWidgets" in fields) values.dashboard_transparent_widgets = fields.dashboardTransparentWidgets ?? false;
   if ("dashboardLockBackgroundCrop" in fields) values.dashboard_lock_background_crop = fields.dashboardLockBackgroundCrop ?? false;
+  if ("dashboardBackdropFullPage" in fields) values.dashboard_backdrop_full_page = fields.dashboardBackdropFullPage ?? false;
   await db
     .update(app_settings)
     .set({ ...values, updated_at: nowUtc() })
@@ -1099,10 +1113,10 @@ export interface LinkTargets {
 }
 
 // Powers the Vault editor's "[[" note completion and its "Insert link"
-// dialog for documents/generated items — one small full listing rather than
-// a search-as-you-type endpoint, since a personal vault/course library is
-// small enough to filter client-side (matches how Combobox is used
-// elsewhere in this app).
+// dialog (documents, generated items, and notes) — one small full listing
+// rather than a search-as-you-type endpoint, since a personal vault/course
+// library is small enough to filter client-side (matches how Combobox is
+// used elsewhere in this app).
 export async function listLinkTargets(): Promise<LinkTargets> {
   const [noteRows, documentRows, itemRows] = await Promise.all([
     db

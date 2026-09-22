@@ -253,6 +253,12 @@ export async function POST(request: Request) {
     }
     branding.dashboardLockBackgroundCrop = body.dashboardLockBackgroundCrop;
   }
+  if ("dashboardBackdropFullPage" in body) {
+    if (typeof body.dashboardBackdropFullPage !== "boolean") {
+      return Response.json({ error: "dashboardBackdropFullPage must be a boolean" }, { status: 400 });
+    }
+    branding.dashboardBackdropFullPage = body.dashboardBackdropFullPage;
+  }
   if (Object.keys(branding).length > 0) {
     // Captured before the write so a replaced/cleared appIconImage or
     // dashboardBackgroundImage's old blob can be cleaned up after — see the

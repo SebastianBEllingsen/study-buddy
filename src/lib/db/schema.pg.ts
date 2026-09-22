@@ -119,6 +119,8 @@ export const app_settings = pgTable("app_settings", {
   dashboard_transparent_widgets: boolean("dashboard_transparent_widgets").notNull().default(false),
   // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
   dashboard_lock_background_crop: boolean("dashboard_lock_background_crop").notNull().default(false),
+  // See AppSettings.dashboardBackdropFullPage's doc comment in models.ts.
+  dashboard_backdrop_full_page: boolean("dashboard_backdrop_full_page").notNull().default(false),
   // See AppSettings.documentBadgesEnabled's doc comment in models.ts.
   document_badges_enabled: boolean("document_badges_enabled").notNull().default(true),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

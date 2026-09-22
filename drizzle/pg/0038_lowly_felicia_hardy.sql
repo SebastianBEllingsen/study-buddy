@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "dashboard_backdrop_full_page" boolean DEFAULT false NOT NULL;

@@ -85,6 +85,10 @@ export const app_settings = sqliteTable("app_settings", {
   dashboard_lock_background_crop: integer("dashboard_lock_background_crop", { mode: "boolean" })
     .notNull()
     .default(false),
+  // See AppSettings.dashboardBackdropFullPage's doc comment in models.ts.
+  dashboard_backdrop_full_page: integer("dashboard_backdrop_full_page", { mode: "boolean" })
+    .notNull()
+    .default(false),
   // See AppSettings.documentBadgesEnabled's doc comment in models.ts.
   document_badges_enabled: integer("document_badges_enabled", { mode: "boolean" })
     .notNull()

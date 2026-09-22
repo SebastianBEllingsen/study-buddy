@@ -114,6 +114,21 @@
   list-style: decimal;
 }
 
+/* remark-gfm marks a task-list item's <li> with this class — dropping the
+   bullet/number here matches GitHub/Obsidian's own task-list rendering
+   (the checkbox itself is the marker) instead of showing both. The
+   checkbox is NotePreview's own "input" component override, which is what
+   makes it actually clickable rather than remark-gfm's default disabled
+   one. */
+.markdown-body li.task-list-item {
+  list-style: none;
+  margin-left: -1.25em;
+}
+
+.markdown-body li.task-list-item input[type="checkbox"] {
+  margin-right: 0.4em;
+}
+
 .markdown-body strong {
   font-weight: 700;
 }

@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, forwardRef } from "react";
+import {
+  Children,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  forwardRef,
+} from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -73,6 +82,7 @@ import type { LinkTargets } from "@/lib/models";
 import { buildNoteLinkSyntax, parseNoteLinks, type NoteLinkMatch, type NoteLinkType } from "@/lib/noteLinks";
 import { resizeImageForNote } from "@/lib/resizeImage";
 import { uploadImage } from "@/lib/uploadImage";
+import { toggleTaskMarkerAtLine } from "@/lib/taskList";
 
 const EMPTY_TARGETS: LinkTargets = { notes: [], documents: [], items: [] };
 
@@ -268,6 +278,86 @@ function markdownLinkPills(): Extension {
       }
       update(update: ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+
+class TaskCheckboxWidget extends WidgetType {
+  constructor(
+    readonly checked: boolean,
+    readonly from: number,
+    readonly to: number
+  ) {
+    super();
+  }
+
+  eq(other: TaskCheckboxWidget): boolean {
+    return other.checked === this.checked && other.from === this.from && other.to === this.to;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = "cm-task-checkbox";
+    input.checked = this.checked;
+    // mousedown (not change/click) so this fires — and can preventDefault
+    // to keep the click from also moving the cursor into the line — before
+    // CodeMirror's own selection handling reacts to the click, same as
+    // every other interactive widget in this file (LinkWidget, etc.).
+    input.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      view.dispatch({ changes: { from: this.from, to: this.to, insert: this.checked ? "[ ]" : "[x]" } });
+    });
+    return input;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+// Renders a GFM task-list marker ("- [ ]"/"- [x]") as a live, clickable
+// checkbox — matching Obsidian's live-preview editor and, on the Preview
+// side, NotePreview's own "input" component override below. Unlike
+// wikilinkPills/markdownLinkPills, this never reveals the raw "[ ]"/"[x]"
+// syntax when the cursor is on that line — a checkbox is already as editable
+// as the raw text would be (clicking it is strictly more convenient), so
+// there's nothing to "drop back to source" for.
+function taskCheckboxes(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    const tree = syntaxTree(view.state);
+    for (const { from, to } of view.visibleRanges) {
+      tree.iterate({
+        from,
+        to,
+        enter: (node) => {
+          if (node.name !== "TaskMarker") return;
+          const checked = view.state.sliceDoc(node.from, node.to).toLowerCase() === "[x]";
+          ranges.push(
+            Decoration.replace({ widget: new TaskCheckboxWidget(checked, node.from, node.to) }).range(
+              node.from,
+              node.to
+            )
+          );
+        },
+      });
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged) {
           this.decorations = build(update.view);
         }
       }
@@ -1173,6 +1263,25 @@ function readStoredFontSize(): FontSizeKey {
   return "md";
 }
 
+// Edit/Preview is likewise a global, persisted-across-notes preference —
+// clicking a [[wikilink]] (or any other note-to-note navigation) shouldn't
+// reset you to Edit just because the new note is a fresh NoteEditor mount.
+// scrollToHighlight's own forced switch to Edit (see the imperative handle
+// below) deliberately bypasses switchMode and this persistence: that's
+// navigation behavior, not a user preference to remember.
+const NOTE_MODE_KEY = "noteEditorMode";
+
+function readStoredMode(): "edit" | "preview" {
+  if (typeof window === "undefined") return "edit";
+  try {
+    const stored = localStorage.getItem(NOTE_MODE_KEY);
+    if (stored === "edit" || stored === "preview") return stored;
+  } catch {
+    // localStorage unavailable (private browsing, etc.) — harmless degradation.
+  }
+  return "edit";
+}
+
 const editorTheme = EditorView.theme({
   "&": {
     fontSize: "var(--note-font-size)",
@@ -1226,6 +1335,11 @@ const editorTheme = EditorView.theme({
     textDecoration: "underline",
     textDecorationColor: "color-mix(in srgb, var(--focus) 45%, transparent)",
     cursor: "pointer",
+  },
+  ".cm-task-checkbox": {
+    cursor: "pointer",
+    verticalAlign: "middle",
+    accentColor: "var(--focus)",
   },
   ".cm-highlight-flash": {
     backgroundColor: "color-mix(in srgb, var(--amber) 40%, transparent)",
@@ -1423,10 +1537,12 @@ function NotePreview({
   markdown,
   targets,
   scrollRef,
+  onToggleTask,
 }: {
   markdown: string;
   targets: LinkTargets;
   scrollRef: React.Ref<HTMLDivElement>;
+  onToggleTask: (lineIndex: number) => void;
 }) {
   return (
     <div
@@ -1472,6 +1588,42 @@ function NotePreview({
               <table>{children}</table>
             </div>
           ),
+          // remark-gfm marks a task-list <li>'s hast node with a checkbox as
+          // its first child, but that child <input> itself carries no source
+          // position (it's synthesized from the parent listItem's `checked`
+          // boolean, not its own parsed token — confirmed empirically, not
+          // just per the type declaring `position` optional). The <li> DOES
+          // have a real position, so this drops react-markdown's own
+          // (disabled) checkbox from the rendered children and replaces it
+          // with a controlled one that toggles by the <li>'s own source
+          // line — stable and pure, unlike a "how many checkboxes have
+          // rendered so far" counter would be under React's dev-mode
+          // double-invoking of component renders.
+          li: ({ node, children, className, ...rest }) => {
+            const inputNode = node?.children.find(
+              (c): c is Extract<typeof c, { tagName: string }> => "tagName" in c && c.tagName === "input"
+            );
+            if (!node || !inputNode || node.position === undefined) {
+              return (
+                <li className={className} {...rest}>
+                  {children}
+                </li>
+              );
+            }
+            const checked = Boolean(inputNode.properties?.checked);
+            const line = node.position.start.line - 1;
+            return (
+              <li className={className} {...rest}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggleTask(line)}
+                  className="cursor-pointer align-middle accent-focus"
+                />
+                {Children.toArray(children).slice(1)}
+              </li>
+            );
+          },
         }}
       >
         {normalizeLatexDelimiters(markdownForPreview(markdown, targets))}
@@ -1810,7 +1962,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const [targets, setTargets] = useState<LinkTargets>(EMPTY_TARGETS);
   const [insertLinkOpen, setInsertLinkOpen] = useState(false);
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  const [mode, setMode] = useState<"edit" | "preview">(readStoredMode);
   const [fontSize, setFontSize] = useState<FontSizeKey>(readStoredFontSize);
   const pendingHighlightRef = useRef<string | null>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
@@ -1838,6 +1990,11 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       pendingScrollFractionRef.current = scrollable > 0 ? el.scrollTop / scrollable : 0;
     }
     setMode(next);
+    try {
+      localStorage.setItem(NOTE_MODE_KEY, next);
+    } catch {
+      // localStorage unavailable — harmless, preference just won't persist.
+    }
   }
 
   function applyPendingScrollFraction(el: HTMLElement) {
@@ -1925,6 +2082,10 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
 
   const onNavigate = useMemo(() => (href: string) => router.push(href), [router]);
 
+  function handleToggleTask(lineIndex: number) {
+    onChange(toggleTaskMarkerAtLine(value, lineIndex));
+  }
+
   const extensions = useMemo(
     () => [
       // Plain markdown() only parses base CommonMark — pass the GFM-extended
@@ -1952,6 +2113,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       autocompletion({ override: [noteLinkCompletionSource(targets), latexCompletionSource] }),
       wikilinkPills(targets, onNavigate),
       markdownLinkPills(),
+      taskCheckboxes(),
       noteImagePills(),
       noteImagePasteDrop(),
       listHangingIndent(),
@@ -2099,7 +2261,12 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
         </>
       ) : (
         <div className="min-h-0 flex-1 overflow-hidden">
-          <NotePreview markdown={value} targets={targets} scrollRef={previewScrollRef} />
+          <NotePreview
+            markdown={value}
+            targets={targets}
+            scrollRef={previewScrollRef}
+            onToggleTask={handleToggleTask}
+          />
         </div>
       )}
 
@@ -2126,9 +2293,10 @@ function InsertLinkDialog({
   targets: LinkTargets;
   onInsert: (syntax: string) => void;
 }) {
-  const [tab, setTab] = useState<"doc" | "item">("doc");
+  const [tab, setTab] = useState<"doc" | "item" | "note">("doc");
   const [selectedDoc, setSelectedDoc] = useState<LinkTargets["documents"][number] | null>(null);
   const [selectedItem, setSelectedItem] = useState<LinkTargets["items"][number] | null>(null);
+  const [selectedNote, setSelectedNote] = useState<LinkTargets["notes"][number] | null>(null);
   const [lines, setLines] = useState<string[] | null>(null);
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
   // Tags each document-lines fetch so a slower, stale response (from
@@ -2147,6 +2315,7 @@ function InsertLinkDialog({
     if (!open) {
       setSelectedDoc(null);
       setSelectedItem(null);
+      setSelectedNote(null);
       setLines(null);
       setSelectedLine(null);
       setTab("doc");
@@ -2180,11 +2349,14 @@ function InsertLinkDialog({
       );
     } else if (tab === "item" && selectedItem) {
       onInsert(buildNoteLinkSyntax({ type: "item", id: selectedItem.id, alias: selectedItem.title }));
+    } else if (tab === "note" && selectedNote) {
+      onInsert(buildNoteLinkSyntax({ type: "note", id: selectedNote.id, alias: selectedNote.title }));
     }
     onOpenChange(false);
   }
 
-  const canInsert = (tab === "doc" && !!selectedDoc) || (tab === "item" && !!selectedItem);
+  const canInsert =
+    (tab === "doc" && !!selectedDoc) || (tab === "item" && !!selectedItem) || (tab === "note" && !!selectedNote);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2192,7 +2364,7 @@ function InsertLinkDialog({
         <DialogHeader>
           <DialogTitle>Insert link</DialogTitle>
           <DialogDescription>
-            Link to a document (optionally a specific line) or a generated item.
+            Link to a document (optionally a specific line), a generated item, or a note.
           </DialogDescription>
         </DialogHeader>
 
@@ -2210,6 +2382,13 @@ function InsertLinkDialog({
             className={`flex-1 rounded-md px-2 py-1 text-sm ${tab === "item" ? "bg-card shadow-sm" : "text-muted-foreground"}`}
           >
             Generated item
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("note")}
+            className={`flex-1 rounded-md px-2 py-1 text-sm ${tab === "note" ? "bg-card shadow-sm" : "text-muted-foreground"}`}
+          >
+            Note
           </button>
         </div>
 
@@ -2283,6 +2462,32 @@ function InsertLinkDialog({
                   <ComboboxItem key={item.id} value={item}>
                     <span className="truncate">
                       {item.title} <span className="text-muted-foreground">— {item.courseName}</span>
+                    </span>
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            </ComboboxPopup>
+          </Combobox>
+        )}
+
+        {tab === "note" && (
+          <Combobox
+            items={targets.notes}
+            value={selectedNote}
+            onValueChange={(v) => setSelectedNote(v)}
+            itemToStringLabel={(n) => `${n.title} — ${n.courseName}`}
+          >
+            <ComboboxInputGroup>
+              <ComboboxInput placeholder="Search notes…" />
+              <ComboboxIcon />
+            </ComboboxInputGroup>
+            <ComboboxPopup>
+              <ComboboxEmpty>No match</ComboboxEmpty>
+              <ComboboxList>
+                {(note: LinkTargets["notes"][number]) => (
+                  <ComboboxItem key={note.id} value={note}>
+                    <span className="truncate">
+                      {note.title} <span className="text-muted-foreground">— {note.courseName}</span>
                     </span>
                   </ComboboxItem>
                 )}

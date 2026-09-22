@@ -1114,6 +1114,11 @@ function HomePageContent() {
   const hasBanner = !!settings?.dashboardBackgroundImage;
   const bannerStyle = settings?.dashboardBannerStyle ?? "overlap";
   const lockCrop = !!settings?.dashboardLockBackgroundCrop;
+  // "Backdrop" (locked or not) is the style where the picture is meant to
+  // read as a real backdrop behind the page rather than a small banner up
+  // top — see the stacking/absolute-fill treatment further down.
+  const isBackdropStyle = hasBanner && (bannerStyle === "backdrop" || lockCrop);
+  const fullPageBackdrop = isBackdropStyle && !!settings?.dashboardBackdropFullPage;
 
   const dashboardSection = settings && (
     <div className="space-y-2">
@@ -1154,63 +1159,8 @@ function HomePageContent() {
     </div>
   );
 
-  return (
+  const coursesSection = (
     <>
-      {hasBanner && bannerStyle === "overlap" && !lockCrop && (
-        // Same full-bleed, Steam-library-style treatment as a course page's
-        // page_background_image — see courses/[courseId]/page.tsx. The
-        // dashboard section right below gets pulled up into this image's
-        // bottom edge (see the negative margin further down) rather than
-        // just sitting underneath it — see Settings' "Banner style".
-        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
-          <div className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64" style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}>
-            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10" />
-          </div>
-        </div>
-      )}
-    <div className="space-y-6">
-      {hasBanner && (bannerStyle === "backdrop" || lockCrop) ? (
-        // Content is pinned right at the top, immediately below the header —
-        // not pushed down by the image's own height — with the image
-        // sitting behind it as a backdrop. Unlocked "backdrop" sizes the
-        // image to match content height exactly (absolute inset-0 fills
-        // whatever box dashboardSection's normal flow establishes, so it
-        // never bleeds past it — see the plain image div below). Locked
-        // crop can't do that (an exact aspect-ratio crop can't also stretch
-        // to an arbitrary content height), so it keeps its own aspect-ratio
-        // height instead, decoupled from content entirely — on a wide
-        // screen that's easily taller than the dashboard section, and since
-        // an absolutely positioned element isn't clipped to its container,
-        // it bleeds straight down past the widgets into "Your courses"
-        // below (which paints over it, same as the widgets do, since both
-        // come later in the DOM than this banner). Both banner style
-        // settings converge on this one treatment when locked — an exact
-        // crop has no dynamic-height mode to fall back to — same as the
-        // gradient direction below, which only ever made sense pinned to
-        // the top: it's what let "backdrop" show a clear image right behind
-        // the heading in the first place.
-        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
-          <div
-            className={lockCrop ? "absolute inset-x-0 top-0 bg-center" : "absolute inset-0 bg-cover bg-center"}
-            style={{
-              backgroundImage: `url(${settings.dashboardBackgroundImage})`,
-              ...(lockCrop ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" } : {}),
-            }}
-          />
-          <div
-            className={`bg-gradient-to-b from-black/10 via-background/70 to-background ${lockCrop ? "absolute inset-x-0 top-0" : "absolute inset-0"}`}
-            style={lockCrop ? { aspectRatio: BACKGROUND_ASPECT } : undefined}
-          />
-          <div className="relative mx-auto max-w-5xl px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
-            {dashboardSection}
-          </div>
-        </div>
-      ) : (
-        // "overlap" (or no banner at all, where this negative margin is
-        // simply never applied) — see the comment on the banner block above.
-        <div className={hasBanner ? "relative -mt-12 sm:-mt-16" : undefined}>{dashboardSection}</div>
-      )}
-
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-semibold">Your courses</h1>
         {courses !== undefined && courses.length > 0 && newCourseDialog}
@@ -1254,23 +1204,117 @@ function HomePageContent() {
           ))}
         </div>
       )}
+    </>
+  );
 
-      {/* A second, independent widget zone below the course list — same
-          catalog as the one above, positioned separately (see
-          HomeWidgetConfig's `zone`). Only rendered once something's
-          actually there, unlike the top zone's empty-state card: an empty
-          box appearing under the courses list by default (before anyone's
-          ever touched Customize) would just be clutter for a feature most
-          people won't reach for right away. */}
-      {bottomWidgets.length > 0 && (
-        <div className="dashboard-grid">
-          {bottomWidgets.map((w) => (
-            <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
-              {renderWidget(w)}
-            </div>
-          ))}
+  // A second, independent widget zone below the course list — same catalog
+  // as the one above, positioned separately (see HomeWidgetConfig's
+  // `zone`). Only rendered once something's actually there, unlike the top
+  // zone's empty-state card: an empty box appearing under the courses list
+  // by default (before anyone's ever touched Customize) would just be
+  // clutter for a feature most people won't reach for right away.
+  const bottomWidgetsSection = bottomWidgets.length > 0 && (
+    <div className="dashboard-grid">
+      {bottomWidgets.map((w) => (
+        <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
+          {renderWidget(w)}
+        </div>
+      ))}
+    </div>
+  );
+
+  // Everything that should sit stacked on top of (or, for unlocked
+  // backdrop, absolutely filling) the backdrop image itself — the top
+  // widgets and the course grid always; the second widget zone too once
+  // "Full-page backdrop" is on. Whatever's left over (bottomWidgetsSection,
+  // when not full-page) renders after the backdrop box in plain flow —
+  // see stackedContent/remainderContent below.
+  const backdropContent = (
+    <>
+      {dashboardSection}
+      {coursesSection}
+      {fullPageBackdrop && bottomWidgetsSection}
+    </>
+  );
+
+  return (
+    <>
+      {hasBanner && bannerStyle === "overlap" && !lockCrop && (
+        // Same full-bleed, Steam-library-style treatment as a course page's
+        // page_background_image — see courses/[courseId]/page.tsx. The
+        // dashboard section right below gets pulled up into this image's
+        // bottom edge (see the negative margin further down) rather than
+        // just sitting underneath it — see Settings' "Banner style".
+        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
+          <div className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64" style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}>
+            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10" />
+          </div>
         </div>
       )}
+    <div className="space-y-6">
+      {isBackdropStyle ? (
+        // The image sits behind everything in backdropContent as a genuine
+        // backdrop, not a small banner: both "Backdrop" banner style and
+        // locking the crop (which forces this treatment regardless of
+        // style — see the "Lock exact crop" setting) want the picture to
+        // actually read as a background behind the page, not just a strip
+        // up top. By default that covers the top widgets and the course
+        // grid, fading out (via the gradient) before the second widget
+        // zone below the courses — "Full-page backdrop" extends it behind
+        // that too, so nothing sits on the plain page background at all.
+        //
+        // Unlocked "backdrop" sizes the image to match backdropContent's
+        // height exactly (absolute inset-0 fills whatever box its normal
+        // flow establishes, so it never bleeds past it). Locked crop can't
+        // do that (an exact aspect-ratio crop can't also stretch to an
+        // arbitrary content height) — it keeps its own aspect-ratio height
+        // instead, decoupled from content, which is often taller than the
+        // content on a wide screen. Image, gradient and content are
+        // stacked into the same CSS grid cell (all row/col-start-1) rather
+        // than the image being absolutely positioned, so the grid
+        // auto-sizes their shared row to whichever of them is tallest —
+        // the wrapper's own box actually grows to contain the full
+        // locked-aspect image (pushing whatever comes after it properly
+        // below) instead of the image bleeding past a box sized only to
+        // the shorter content.
+        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
+          {lockCrop ? (
+            <div className="grid overflow-hidden">
+              <div
+                className="col-start-1 row-start-1 self-start bg-center"
+                style={{
+                  backgroundImage: `url(${settings.dashboardBackgroundImage})`,
+                  aspectRatio: BACKGROUND_ASPECT,
+                  backgroundSize: "100% 100%",
+                }}
+              />
+              <div
+                className="col-start-1 row-start-1 self-start bg-gradient-to-b from-black/10 via-background/70 to-background"
+                style={{ aspectRatio: BACKGROUND_ASPECT }}
+              />
+              <div className="relative col-start-1 row-start-1 mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
+                {backdropContent}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }} />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-background/70 to-background" />
+              <div className="relative mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">{backdropContent}</div>
+            </>
+          )}
+        </div>
+      ) : (
+        // "overlap" (or no banner at all, where this negative margin is
+        // simply never applied) — see the comment on the banner block above.
+        <div className={hasBanner ? "relative -mt-12 space-y-6 sm:-mt-16" : "space-y-6"}>
+          {dashboardSection}
+          {coursesSection}
+          {bottomWidgetsSection}
+        </div>
+      )}
+
+      {isBackdropStyle && !fullPageBackdrop && bottomWidgetsSection}
     </div>
     </>
   );
