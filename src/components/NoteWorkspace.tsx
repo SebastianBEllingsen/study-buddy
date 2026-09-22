@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { ArrowLeft, ExternalLink, Link2, Trash2, X } from "lucide-react";
+import { ArrowLeft, ExternalLink, GitFork, Link2, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import type { Note, NoteBacklink } from "@/lib/models";
+import type { CanvasBacklink, Note, NoteBacklink } from "@/lib/models";
 import { stripNoteLinkSyntax } from "@/lib/noteLinks";
 import NoteEditor, { type NoteEditorHandle } from "@/components/NoteEditor";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
 interface NoteDetail {
   note: Note;
   backlinks: NoteBacklink[];
+  canvasBacklinks?: CanvasBacklink[];
 }
 
 // How long to wait after the last keystroke before autosaving — Obsidian
@@ -247,6 +248,9 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
     );
   }
 
+  const canvasBacklinks = detail.canvasBacklinks ?? [];
+  const backlinkCount = detail.backlinks.length + canvasBacklinks.length;
+
   return (
     <div className="flex h-full flex-col gap-2 px-4 py-3 sm:px-8">
       <div className="flex shrink-0 items-center justify-between gap-2">
@@ -370,11 +374,11 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
         <NoteEditor ref={editorRef} value={markdown} onChange={handleMarkdownChange} onModeChange={setNoteMode} />
       </div>
 
-      {detail.backlinks.length > 0 && (
+      {backlinkCount > 0 && (
         <div className="max-h-32 shrink-0 space-y-1.5 overflow-y-auto rounded-xl border bg-muted/20 p-3">
           <h2 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Link2 className="size-3.5" />
-            {detail.backlinks.length} backlink{detail.backlinks.length === 1 ? "" : "s"}
+            {backlinkCount} backlink{backlinkCount === 1 ? "" : "s"}
           </h2>
           <ul className="space-y-1">
             {detail.backlinks.map((bl, i) => (
@@ -390,6 +394,21 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
                 >
                   <span className="font-medium">{bl.noteTitle}</span>{" "}
                   <span className="text-muted-foreground">— {stripNoteLinkSyntax(bl.context)}</span>
+                </Link>
+              </li>
+            ))}
+            {/* A canvas showing this note (as a card, or via a [[link]] in
+                one of its text cards) counts as a backlink too, like
+                Obsidian — see getCanvasBacklinksForNote. */}
+            {canvasBacklinks.map((bl) => (
+              <li key={`canvas-${bl.canvasId}`}>
+                <Link
+                  href={`/canvas/${bl.canvasId}`}
+                  className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-sm hover:bg-muted"
+                >
+                  <GitFork className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="font-medium">{bl.canvasTitle}</span>
+                  <span className="text-muted-foreground">— canvas</span>
                 </Link>
               </li>
             ))}

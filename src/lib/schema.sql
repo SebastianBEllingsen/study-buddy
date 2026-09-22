@@ -194,6 +194,27 @@ CREATE TABLE IF NOT EXISTS notes (
 -- upgrade path. See sqlite.ts's migrate() for where this index is created,
 -- after the column is guaranteed to exist.
 
+-- Obsidian-style canvases: an infinite board of cards (markdown text, or a
+-- reference to a note/document/generated item/uploaded image) joined by
+-- labeled arrows. Listed in their own section of a course page rather than
+-- inside the folder tree, so there's no folder_id. `data` holds the whole
+-- board as one JSON Canvas 1.0 document (https://jsoncanvas.org — Obsidian's
+-- own open .canvas format; see lib/canvas.ts for the parser and the
+-- "note:12"-style file references used here), saved wholesale on every
+-- autosave rather than normalized into node/edge tables — a canvas is
+-- always loaded and edited as a single unit, and keeping the format
+-- verbatim means it can be exported to/imported from Obsidian as-is.
+CREATE TABLE IF NOT EXISTS canvases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL,
+  data TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_canvases_course_id ON canvases(course_id);
+
 -- Which feed-sourced calendar events the Assignments widget's checklist has
 -- been ticked off for. Keyed by the event's own id (see calendarFeeds.ts's
 -- `${feed.label}:${uid}:${instance.start}` — stable across refetches of the
@@ -211,7 +232,7 @@ CREATE TABLE IF NOT EXISTS completed_assignments (
 -- a full history, so there's nothing to gain from keeping every past visit
 -- (and every unbounded-growth cleanup problem that would come with it).
 CREATE TABLE IF NOT EXISTS recent_views (
-  item_type TEXT NOT NULL, -- 'note' | 'document' | 'item'
+  item_type TEXT NOT NULL, -- 'note' | 'document' | 'item' | 'canvas'
   item_id INTEGER NOT NULL,
   viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (item_type, item_id)

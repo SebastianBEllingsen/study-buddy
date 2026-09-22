@@ -1,6 +1,6 @@
 import { clearRecentViews, listRecentViews, recordRecentView, type RecentViewType } from "@/lib/models";
 
-const VALID_TYPES: RecentViewType[] = ["note", "document", "item"];
+const VALID_TYPES: RecentViewType[] = ["note", "document", "item", "canvas"];
 
 export async function GET() {
   return Response.json({ views: await listRecentViews() });

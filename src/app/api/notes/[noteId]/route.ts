@@ -1,5 +1,6 @@
 import {
   deleteNote,
+  getCanvasBacklinksForNote,
   getNote,
   getNoteBacklinks,
   InvalidDestinationFolderError,
@@ -22,8 +23,8 @@ export async function GET(_request: Request, { params }: Params) {
   const note = await getNote(id);
   if (!note) return Response.json({ error: "Note not found" }, { status: 404 });
 
-  const backlinks = await getNoteBacklinks(id);
-  return Response.json({ note, backlinks });
+  const [backlinks, canvasBacklinks] = await Promise.all([getNoteBacklinks(id), getCanvasBacklinksForNote(id)]);
+  return Response.json({ note, backlinks, canvasBacklinks });
 }
 
 export async function PATCH(request: Request, { params }: Params) {

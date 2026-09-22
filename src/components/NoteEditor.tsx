@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Children,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -11,7 +10,6 @@ import {
   forwardRef,
 } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxTree } from "@codemirror/language";
@@ -41,14 +39,9 @@ import {
   type Extension,
   type Range,
 } from "@codemirror/state";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkBreaks from "remark-breaks";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import { toast } from "sonner";
-import { MATH_PATTERN, normalizeLatexDelimiters } from "@/lib/mathSanitizer";
+import { MATH_PATTERN } from "@/lib/mathSanitizer";
 import {
   Bold,
   Italic,
@@ -79,45 +72,20 @@ import {
 } from "@/components/ui/combobox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LinkTargets } from "@/lib/models";
-import { buildNoteLinkSyntax, parseNoteLinks, type NoteLinkMatch, type NoteLinkType } from "@/lib/noteLinks";
-import { resizeImageForNote } from "@/lib/resizeImage";
-import { uploadImage } from "@/lib/uploadImage";
+import {
+  buildNoteLinkHref,
+  buildNoteLinkSyntax,
+  parseNoteLinks,
+  resolveNoteLinkTarget,
+  type NoteLinkMatch,
+  type NoteLinkType,
+} from "@/lib/noteLinks";
+import { fetchNoteImage, NOTE_IMAGE_SCHEME, noteImageCache, uploadNoteImage } from "@/lib/noteImages";
+import NoteMarkdown from "@/components/NoteMarkdown";
 import { toggleTaskMarkerAtLine } from "@/lib/taskList";
 
 const EMPTY_TARGETS: LinkTargets = { notes: [], documents: [], items: [] };
 
-function resolveTarget(
-  type: NoteLinkType,
-  id: number,
-  targets: LinkTargets
-): { label: string; missing: boolean } {
-  if (type === "note") {
-    const n = targets.notes.find((n) => n.id === id);
-    return n ? { label: n.title, missing: false } : { label: "Missing note", missing: true };
-  }
-  if (type === "doc") {
-    const d = targets.documents.find((d) => d.id === id);
-    return d ? { label: d.filename, missing: false } : { label: "Missing document", missing: true };
-  }
-  const i = targets.items.find((i) => i.id === id);
-  return i ? { label: i.title, missing: false } : { label: "Missing item", missing: true };
-}
-
-function buildHref(match: NoteLinkMatch, targets: LinkTargets): string | null {
-  const highlight = match.snippet ? `?highlight=${encodeURIComponent(match.snippet)}` : "";
-  if (match.type === "note") {
-    const n = targets.notes.find((n) => n.id === match.id);
-    return n ? `/vault/${match.id}${highlight}` : null;
-  }
-  if (match.type === "doc") {
-    const d = targets.documents.find((d) => d.id === match.id);
-    if (!d) return null;
-    const base = `/courses/${d.courseId}?document=${match.id}`;
-    return match.snippet ? `${base}&${highlight.slice(1)}` : base;
-  }
-  const i = targets.items.find((i) => i.id === match.id);
-  return i ? `/items/${match.id}${highlight}` : null;
-}
 
 const LINK_ICON: Record<NoteLinkType, string> = { note: "◆", doc: "▤", item: "◇" };
 
@@ -135,7 +103,7 @@ class LinkWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const resolved = resolveTarget(this.match.type, this.match.id, this.targets);
+    const resolved = resolveNoteLinkTarget(this.match.type, this.match.id, this.targets);
     const span = document.createElement("span");
     span.className = `cm-wikilink${resolved.missing ? " cm-wikilink-missing" : ""}`;
     span.title = resolved.missing
@@ -154,7 +122,7 @@ class LinkWidget extends WidgetType {
     span.addEventListener("mousedown", (e) => {
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault();
-        const href = buildHref(this.match, this.targets);
+        const href = buildNoteLinkHref(this.match, this.targets);
         if (href) this.onNavigate(href);
       }
     });
@@ -366,45 +334,11 @@ function taskCheckboxes(): Extension {
   );
 }
 
-// Pictures pasted/dropped into a note (see noteImagePasteDrop below) are
-// uploaded once and referenced in the markdown source by this short pseudo-
-// scheme plus their uploaded_images row id — never the raw data URL, which
-// for a real photo/screenshot can run to hundreds of KB of base64 text.
-// Obsidian's own approach for a pasted image is the same idea (a short
-// wikilink to a saved file, not the image data inline); this is this app's
-// equivalent, since there's no separate attachments folder to save a real
-// file into — everything already lives in the uploaded_images table.
-const NOTE_IMAGE_SCHEME = "studybuddy-image:";
 // Custom drag payload type for reordering an already-embedded image within
 // the note (see the widget's dragstart and moveNoteImageLine below) — an OS
 // file drag (Finder/Explorer) never sets this, so the drop handler can tell
 // the two apart before deciding what to do with a drop.
 const NOTE_IMAGE_MOVE_MIME = "application/x-studybuddy-note-image";
-
-// Resolved data URLs are cached at module scope (not per-editor-instance)
-// since the same image id can appear in more than one place across a
-// session — Preview and Edit mode both render the same reference
-// independently, and switching notes shouldn't mean re-fetching an image
-// already seen once.
-const noteImageCache = new Map<number, string>();
-const noteImageFetches = new Map<number, Promise<string>>();
-
-function fetchNoteImage(id: number): Promise<string> {
-  const cached = noteImageCache.get(id);
-  if (cached) return Promise.resolve(cached);
-  const inFlight = noteImageFetches.get(id);
-  if (inFlight) return inFlight;
-  const promise = fetch(`/api/uploaded-images/${id}`)
-    .then((r) => (r.ok ? r.json() : null))
-    .then((body: { image?: { url: string } } | null) => {
-      const url = body?.image?.url ?? "";
-      if (url) noteImageCache.set(id, url);
-      noteImageFetches.delete(id);
-      return url;
-    });
-  noteImageFetches.set(id, promise);
-  return promise;
-}
 
 class NoteImageWidget extends WidgetType {
   constructor(readonly imageId: number) {
@@ -556,17 +490,8 @@ async function insertNoteImage(view: EditorView, file: File, insertPos: number):
   }
 
   try {
-    const blob = await resizeImageForNote(file);
-    const url = await uploadImage(blob, "note");
-    const res = await fetch("/api/uploaded-images", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "note", url }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body?.error ?? "Upload failed");
-    noteImageCache.set(body.image.id, url);
-    replacePlaceholder(`![](${NOTE_IMAGE_SCHEME}${body.image.id})`);
+    const imageId = await uploadNoteImage(file);
+    replacePlaceholder(`![](${NOTE_IMAGE_SCHEME}${imageId})`);
   } catch {
     replacePlaceholder("");
     toast.error("Couldn't add that image");
@@ -1464,75 +1389,6 @@ const editorTheme = EditorView.theme({
   },
 });
 
-// Swaps every [[type:id|alias]] for a real markdown link the rendered
-// Preview can follow — Reading-view equivalent of the clickable pills
-// Edit mode shows via wikilinkPills above.
-function markdownForPreview(source: string, targets: LinkTargets): string {
-  const matches = parseNoteLinks(source);
-  if (matches.length === 0) return source;
-  let out = "";
-  let cursor = 0;
-  for (const match of matches) {
-    out += source.slice(cursor, match.start);
-    const resolved = resolveTarget(match.type, match.id, targets);
-    const label = match.alias ?? resolved.label;
-    const href = buildHref(match, targets);
-    out += href ? `[${label}](${href})` : label;
-    cursor = match.end;
-  }
-  out += source.slice(cursor);
-  return out;
-}
-
-// Preview-mode counterpart to NoteImageWidget: ReactMarkdown hands this
-// whatever raw src the markdown source carries, which for a pasted picture
-// is a studybuddy-image:<id> reference rather than a real URL — resolves it
-// through the same cache/fetch every Edit-mode widget already shares, so a
-// note switched to Preview shows the actual picture instead of a broken
-// image icon.
-function NoteMarkdownImage({ src: rawSrc, alt }: { src?: string | Blob; alt?: string }) {
-  // react-markdown types <img>'s src as string | Blob (a plain HTML
-  // attribute type, not something this app's own markdown ever actually
-  // produces) — a Blob here would mean something upstream is doing
-  // something unexpected, so just treat it as "no image" rather than
-  // guessing how to render it.
-  const src = typeof rawSrc === "string" ? rawSrc : undefined;
-  const isNoteImage = !!src && src.startsWith(NOTE_IMAGE_SCHEME);
-  const [resolvedSrc, setResolvedSrc] = useState<string | null>(() =>
-    isNoteImage ? (noteImageCache.get(Number(src!.slice(NOTE_IMAGE_SCHEME.length))) ?? null) : (src ?? null)
-  );
-  // A plain (non-note-image) src change is synced during render — compared
-  // against the src resolvedSrc was last computed for — rather than in the
-  // effect below, matching this app's established pattern elsewhere for
-  // avoiding a synchronous setState inside an effect body. The effect
-  // itself is left for what actually needs it: the async fetch when src
-  // *is* a note-image reference.
-  const [syncedFor, setSyncedFor] = useState(src);
-  if (!isNoteImage && src !== syncedFor) {
-    setSyncedFor(src);
-    setResolvedSrc(src ?? null);
-  }
-
-  useEffect(() => {
-    if (!isNoteImage) return;
-    const id = Number(src!.slice(NOTE_IMAGE_SCHEME.length));
-    if (!Number.isFinite(id)) return;
-    let cancelled = false;
-    fetchNoteImage(id).then((dataUrl) => {
-      if (!cancelled && dataUrl) setResolvedSrc(dataUrl);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [src, isNoteImage]);
-
-  if (!resolvedSrc) {
-    return <span className="my-2 block h-32 w-full animate-pulse rounded-lg bg-muted" />;
-  }
-  // eslint-disable-next-line @next/next/no-img-element -- a data: URL / user-uploaded image, not a next/image-optimizable asset
-  return <img src={resolvedSrc} alt={alt ?? ""} className="rounded-lg border" />;
-}
-
 function NotePreview({
   markdown,
   targets,
@@ -1550,84 +1406,7 @@ function NotePreview({
       className="markdown-body h-full overflow-y-auto px-4 py-4"
       style={{ fontSize: "var(--note-font-size)" }}
     >
-      <ReactMarkdown
-        // remarkBreaks: a plain Enter in the editor is just a newline in the
-        // raw source, but CommonMark treats a single newline inside a
-        // paragraph as nothing (soft-wraps, no visible break) — without
-        // this, pressing Enter looks identical to Edit but disappears in
-        // Preview. This turns every source newline into a real line break,
-        // matching what you actually typed.
-        remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        // react-markdown sanitizes every href/src through its own built-in
-        // urlTransform by default, allow-listing only http(s)/irc(s)/
-        // mailto/xmpp — a studybuddy-image: reference isn't a URL a browser
-        // would ever navigate to or fetch on its own (NoteMarkdownImage
-        // resolves it itself, via a same-origin API call), so it's safe to
-        // let through unchanged; everything else still goes through the
-        // default sanitizer, same protection as before for a link/image a
-        // note's own markdown might otherwise carry.
-        urlTransform={(url) => (url.startsWith(NOTE_IMAGE_SCHEME) ? url : defaultUrlTransform(url))}
-        components={{
-          a: ({ href, children }) =>
-            href && href.startsWith("/") ? (
-              <Link href={href}>{children}</Link>
-            ) : (
-              <a href={href} target="_blank" rel="noreferrer">
-                {children}
-              </a>
-            ),
-          img: ({ src, alt }) => <NoteMarkdownImage src={src} alt={alt} />,
-          // A wide table shouldn't force the whole note wider (or scroll
-          // horizontally itself, per the artifact-design "wrap wide content
-          // in its own overflow-x container" rule) — the table scrolls
-          // inside this wrapper instead. See globals.css's .markdown-body
-          // table rules for the actual borders/header styling.
-          table: ({ children }) => (
-            <div className="markdown-body-table-wrap">
-              <table>{children}</table>
-            </div>
-          ),
-          // remark-gfm marks a task-list <li>'s hast node with a checkbox as
-          // its first child, but that child <input> itself carries no source
-          // position (it's synthesized from the parent listItem's `checked`
-          // boolean, not its own parsed token — confirmed empirically, not
-          // just per the type declaring `position` optional). The <li> DOES
-          // have a real position, so this drops react-markdown's own
-          // (disabled) checkbox from the rendered children and replaces it
-          // with a controlled one that toggles by the <li>'s own source
-          // line — stable and pure, unlike a "how many checkboxes have
-          // rendered so far" counter would be under React's dev-mode
-          // double-invoking of component renders.
-          li: ({ node, children, className, ...rest }) => {
-            const inputNode = node?.children.find(
-              (c): c is Extract<typeof c, { tagName: string }> => "tagName" in c && c.tagName === "input"
-            );
-            if (!node || !inputNode || node.position === undefined) {
-              return (
-                <li className={className} {...rest}>
-                  {children}
-                </li>
-              );
-            }
-            const checked = Boolean(inputNode.properties?.checked);
-            const line = node.position.start.line - 1;
-            return (
-              <li className={className} {...rest}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onToggleTask(line)}
-                  className="cursor-pointer align-middle accent-focus"
-                />
-                {Children.toArray(children).slice(1)}
-              </li>
-            );
-          },
-        }}
-      >
-        {normalizeLatexDelimiters(markdownForPreview(markdown, targets))}
-      </ReactMarkdown>
+      <NoteMarkdown markdown={markdown} targets={targets} onToggleTask={onToggleTask} />
     </div>
   );
 }

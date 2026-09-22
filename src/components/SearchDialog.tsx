@@ -44,7 +44,16 @@ interface NoteSearchResult {
   snippets: string[];
 }
 
-type SearchResult = ItemSearchResult | DocumentSearchResult | NoteSearchResult;
+interface CanvasSearchResult {
+  kind: "canvas";
+  canvasId: number;
+  canvasTitle: string;
+  courseId: number;
+  courseName: string;
+  snippets: string[];
+}
+
+type SearchResult = ItemSearchResult | DocumentSearchResult | NoteSearchResult | CanvasSearchResult;
 
 const MODE_LABELS: Record<GenerationMode, string> = {
   quiz: "Quiz",
@@ -196,13 +205,30 @@ export default function SearchDialog() {
                     ? highlight
                       ? `/vault/${r.noteId}?${highlight}`
                       : `/vault/${r.noteId}`
-                    : (() => {
+                    : r.kind === "canvas"
+                      ? `/canvas/${r.canvasId}`
+                      : (() => {
                         const base = `/courses/${r.courseId}?document=${r.documentId}`;
                         return highlight ? `${base}&${highlight}` : base;
                       })();
-              const key = r.kind === "item" ? `item-${r.itemId}` : r.kind === "note" ? `note-${r.noteId}` : `doc-${r.documentId}`;
-              const badgeLabel = r.kind === "item" ? MODE_LABELS[r.mode] : r.kind === "note" ? "Vault" : "Document";
-              const titleText = r.kind === "item" ? r.itemTitle : r.kind === "note" ? r.noteTitle : r.filename;
+              const key =
+                r.kind === "item"
+                  ? `item-${r.itemId}`
+                  : r.kind === "note"
+                    ? `note-${r.noteId}`
+                    : r.kind === "canvas"
+                      ? `canvas-${r.canvasId}`
+                      : `doc-${r.documentId}`;
+              const badgeLabel =
+                r.kind === "item" ? MODE_LABELS[r.mode] : r.kind === "note" ? "Vault" : r.kind === "canvas" ? "Canvas" : "Document";
+              const titleText =
+                r.kind === "item"
+                  ? r.itemTitle
+                  : r.kind === "note"
+                    ? r.noteTitle
+                    : r.kind === "canvas"
+                      ? r.canvasTitle
+                      : r.filename;
 
               return (
                 <Link

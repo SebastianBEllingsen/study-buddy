@@ -89,6 +89,7 @@ export let flashcard_reviews = initial.schema.flashcard_reviews;
 export let flashcard_schedule = initial.schema.flashcard_schedule;
 export let calendar_feeds = initial.schema.calendar_feeds;
 export let notes = initial.schema.notes;
+export let canvases = initial.schema.canvases;
 export let completed_assignments = initial.schema.completed_assignments;
 export let recent_views = initial.schema.recent_views;
 export let uploaded_images = initial.schema.uploaded_images;
@@ -119,6 +120,7 @@ export async function reconnect(): Promise<{ ok: boolean; error: string | null }
     flashcard_schedule = next.schema.flashcard_schedule;
     calendar_feeds = next.schema.calendar_feeds;
     notes = next.schema.notes;
+    canvases = next.schema.canvases;
     completed_assignments = next.schema.completed_assignments;
     recent_views = next.schema.recent_views;
     uploaded_images = next.schema.uploaded_images;

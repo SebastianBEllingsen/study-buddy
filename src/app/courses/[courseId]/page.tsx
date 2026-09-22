@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
+  CanvasSummary,
   Course,
   DocumentSummaryRow,
   DueFlashcardItem,
@@ -99,6 +100,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import DocumentViewer, { type ViewedDocument } from "@/components/DocumentViewer";
+import { CourseCanvasSection } from "@/components/canvas/CourseCanvasSection";
 import { resizeImageToDataUrl } from "@/lib/resizeImage";
 import { UPLOAD_ACCEPT, extensionOf, isImageExtension } from "@/lib/documentFormats";
 
@@ -108,6 +110,7 @@ interface CourseDetail {
   documents: DocumentSummaryRow[];
   items: GeneratedItemSummary[];
   notes: Note[];
+  canvases: CanvasSummary[];
 }
 
 const MODE_LABELS: Record<GenerationMode, string> = {
@@ -2824,6 +2827,8 @@ export default function CoursePage() {
             ))}
         </div>
       </section>
+
+      <CourseCanvasSection courseId={Number(courseId)} canvases={detail.canvases ?? []} onChanged={() => refresh()} />
 
       {/* The page's one primary call-to-action still gets a touch of its own
           identity — a tinted top edge and a soft background wash in the

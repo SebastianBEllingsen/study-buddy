@@ -37,7 +37,7 @@ const {
   getGeneratedItem,
   moveGeneratedItem,
   recordUploadedImage,
-  isUploadedImageReferencedInNotes,
+  isUploadedImageReferencedInContent,
   upsertFlashcardSchedule,
   logFlashcardReview,
   getFlashcardScheduleForItem,
@@ -48,6 +48,17 @@ const {
   CannotNestSubfolderError,
   listDueFlashcardItems,
   searchAll,
+  createCanvas,
+  getCanvas,
+  listCanvasesForCourse,
+  renameCanvas,
+  updateCanvasData,
+  reorderCanvases,
+  deleteCanvas,
+  getCanvasBacklinksForNote,
+  canvasCandidates,
+  recordRecentView,
+  listRecentViews,
 } = await import("./models");
 
 beforeEach(() => {
@@ -62,9 +73,11 @@ beforeEach(() => {
   db.delete(schema.generated_items).run();
   db.delete(schema.documents).run();
   db.delete(schema.notes).run();
+  db.delete(schema.canvases).run();
   db.delete(schema.folders).run();
   db.delete(schema.courses).run();
   db.delete(schema.uploaded_images).run();
+  db.delete(schema.recent_views).run();
 });
 
 async function makeCourseWithFolder(name = "Course") {
@@ -365,19 +378,19 @@ describe("deleteCourse cascade", () => {
   });
 });
 
-describe("isUploadedImageReferencedInNotes", () => {
+describe("isUploadedImageReferencedInContent", () => {
   it("returns true when a note embeds the image by id", async () => {
     const { course, folder } = await makeCourseWithFolder();
     const image = await recordUploadedImage("icon", "data:image/png;base64,AAAA");
     const note = await createNote("N", course.id, folder.id);
     await updateNoteMarkdown(note.id, `Look: ![x](studybuddy-image:${image.id})`);
 
-    expect(await isUploadedImageReferencedInNotes(image.id)).toBe(true);
+    expect(await isUploadedImageReferencedInContent(image.id)).toBe(true);
   });
 
   it("returns false when no note references the image", async () => {
     const image = await recordUploadedImage("icon", "data:image/png;base64,AAAA");
-    expect(await isUploadedImageReferencedInNotes(image.id)).toBe(false);
+    expect(await isUploadedImageReferencedInContent(image.id)).toBe(false);
   });
 
   it("does not false-positive on a numeric prefix match (id 1 referenced by id 10's text)", async () => {
@@ -385,7 +398,7 @@ describe("isUploadedImageReferencedInNotes", () => {
     // referencing a *different* image's id (with a trailing digit) and
     // asserted the first image wasn't referenced — which passed whether or
     // not the implementation's negative-lookahead prefix guard
-    // (`(?!\d)` in models.ts's isUploadedImageReferencedInNotes) was there
+    // (`(?!\d)` in models.ts's isUploadedImageReferencedInContent) was there
     // at all, since two distinct ids never share a "studybuddy-image:N"
     // substring to begin with. The actual prefix-collision case is the
     // *same* id with an extra trailing digit appended — "studybuddy-image:1"
@@ -398,7 +411,116 @@ describe("isUploadedImageReferencedInNotes", () => {
     // other, unrelated image) — must not be read as also referencing
     // image1 just because "studybuddy-image:1" is a text prefix of it.
     await updateNoteMarkdown(note.id, `![x](studybuddy-image:${image1.id}0)`);
-    expect(await isUploadedImageReferencedInNotes(image1.id)).toBe(false);
+    expect(await isUploadedImageReferencedInContent(image1.id)).toBe(false);
+  });
+});
+
+describe("canvases", () => {
+  const fileNode = (id: string, file: string) => ({ id, type: "file" as const, file, x: 0, y: 0, width: 400, height: 400 });
+
+  it("appends new canvases at increasing positions and lists them without their data", async () => {
+    const course = await createCourse("C");
+    const a = await createCanvas("A", course.id);
+    const b = await createCanvas("B", course.id);
+    expect([a.position, b.position]).toEqual([0, 1]);
+    expect(a.data).toEqual({ nodes: [], edges: [] });
+
+    const list = await listCanvasesForCourse(course.id);
+    expect(list.map((c) => c.title)).toEqual(["A", "B"]);
+    expect(list[0]).not.toHaveProperty("data");
+  });
+
+  it("persists renames, data, and reorders", async () => {
+    const course = await createCourse("C");
+    const a = await createCanvas("A", course.id);
+    const b = await createCanvas("B", course.id);
+    await renameCanvas(a.id, "Renamed");
+    const data = { nodes: [{ id: "t", type: "text" as const, text: "hi", x: 1, y: 2, width: 250, height: 60 }], edges: [] };
+    await updateCanvasData(a.id, data);
+    await reorderCanvases(course.id, [b.id, a.id]);
+
+    const stored = await getCanvas(a.id);
+    expect(stored?.title).toBe("Renamed");
+    expect(stored?.data).toEqual(data);
+    expect((await listCanvasesForCourse(course.id)).map((c) => c.id)).toEqual([b.id, a.id]);
+  });
+
+  it("reads a corrupted data column back as an empty board", async () => {
+    const course = await createCourse("C");
+    const canvas = await createCanvas("A", course.id);
+    testDb.db.update(testDb.schema.canvases).set({ data: "{broken" }).where(eq(testDb.schema.canvases.id, canvas.id)).run();
+    expect((await getCanvas(canvas.id))?.data).toEqual({ nodes: [], edges: [] });
+  });
+
+  it("is removed with its course and by deleteCanvas", async () => {
+    const course = await createCourse("C");
+    const a = await createCanvas("A", course.id);
+    const b = await createCanvas("B", course.id);
+    await deleteCanvas(a.id);
+    expect(await getCanvas(a.id)).toBeUndefined();
+    await deleteCourse(course.id);
+    expect(await getCanvas(b.id)).toBeUndefined();
+  });
+
+  it("reports canvases that show a note as its backlinks", async () => {
+    const { course, folder } = await makeCourseWithFolder();
+    const note = await createNote("N", course.id, folder.id);
+    const asCard = await createCanvas("Card", course.id, { nodes: [fileNode("f", `note:${note.id}`)], edges: [] });
+    const asLink = await createCanvas("Link", course.id, {
+      nodes: [{ id: "t", type: "text", text: `see [[note:${note.id}]]`, x: 0, y: 0, width: 250, height: 60 }],
+      edges: [],
+    });
+    await createCanvas("Unrelated", course.id, { nodes: [fileNode("f", `note:${note.id + 1}`)], edges: [] });
+
+    const backlinks = await getCanvasBacklinksForNote(note.id);
+    expect(backlinks.map((b) => b.canvasId).sort()).toEqual([asCard.id, asLink.id].sort());
+  });
+
+  it("is searchable by its title, text cards, group names and arrow labels", async () => {
+    const course = await createCourse("C");
+    const canvas = await createCanvas("Laptop plan", course.id, {
+      nodes: [
+        { id: "t", type: "text", text: "Mainboard\nUses a [[note:99|Buck converter]]", x: 0, y: 0, width: 250, height: 60 },
+        { id: "u", type: "text", text: "Other", x: 300, y: 0, width: 250, height: 60 },
+        { id: "g", type: "group", label: "Peripheral system", x: -50, y: -50, width: 900, height: 300 },
+      ],
+      edges: [{ id: "e", fromNode: "t", toNode: "u", label: "thunderbolt" }],
+    });
+
+    for (const query of ["Laptop plan", "Mainboard", "Peripheral", "thunderbolt", "Buck converter"]) {
+      const results = await searchAll(query, course.id);
+      expect(results, query).toContainEqual(
+        expect.objectContaining({ kind: "canvas", canvasId: canvas.id, canvasTitle: "Laptop plan" })
+      );
+    }
+  });
+
+  it("builds search candidates without the raw [[link]] syntax", () => {
+    const candidates = canvasCandidates(
+      "Title",
+      { nodes: [{ id: "t", type: "text", text: "see [[note:1|Intro]]", x: 0, y: 0, width: 250, height: 60 }], edges: [] },
+      "canvas:1"
+    );
+    expect(candidates.map((c) => c.text)).toEqual(["Title", "see Intro"]);
+  });
+
+  it("shows up in recent activity, and drops out once deleted", async () => {
+    const course = await createCourse("C");
+    const canvas = await createCanvas("Board", course.id);
+    await recordRecentView("canvas", canvas.id);
+    expect(await listRecentViews()).toEqual([
+      expect.objectContaining({ type: "canvas", id: canvas.id, title: "Board", courseId: course.id, courseName: "C" }),
+    ]);
+    await deleteCanvas(canvas.id);
+    expect(await listRecentViews()).toEqual([]);
+  });
+
+  it("keeps an uploaded image that a canvas still shows from being treated as unused", async () => {
+    const course = await createCourse("C");
+    const image = await recordUploadedImage("note", "data:image/png;base64,AAAA");
+    expect(await isUploadedImageReferencedInContent(image.id)).toBe(false);
+    await createCanvas("A", course.id, { nodes: [fileNode("i", `image:${image.id}`)], edges: [] });
+    expect(await isUploadedImageReferencedInContent(image.id)).toBe(true);
   });
 });
 

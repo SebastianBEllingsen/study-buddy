@@ -329,6 +329,23 @@ export const notes = pgTable(
   ]
 );
 
+// Obsidian-style canvases — see the matching comment in schema.sql.
+export const canvases = pgTable(
+  "canvases",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    title: text("title").notNull(),
+    data: text("data").notNull().default('{"nodes":[],"edges":[]}'),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_canvases_course_id").on(table.course_id)]
+);
+
 // Checked-off state for the Assignments widget's checklist — see the
 // matching comment in schema.sql for why this keys by the feed event's own
 // id rather than a foreign key.

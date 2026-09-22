@@ -1,4 +1,4 @@
-import { deleteUploadedImage, getUploadedImage, isUploadedImageReferencedInNotes } from "@/lib/models";
+import { deleteUploadedImage, getUploadedImage, isUploadedImageReferencedInContent } from "@/lib/models";
 import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
 import { parseId } from "@/lib/routeParams";
 
@@ -24,13 +24,13 @@ export async function DELETE(_request: Request, { params }: Params) {
   // branding) once this library row is gone — see its own comment.
   const existing = await getUploadedImage(id);
   if (!existing) return new Response(null, { status: 204 });
-  // Notes embed this row by id (studybuddy-image:<id>), which
+  // Notes and canvases embed this row by id (studybuddy-image:<id> / image:<id>), which
   // cleanupReplacedImage's url-based check below can't see — deleting it
-  // out from under a note would leave a permanently broken image with no
+  // out from under one would leave a permanently broken image with no
   // way to recover which picture it used to be.
-  if (await isUploadedImageReferencedInNotes(id)) {
+  if (await isUploadedImageReferencedInContent(id)) {
     return Response.json(
-      { error: "This image is used in a note — remove it there first." },
+      { error: "This image is used in a note or canvas — remove it there first." },
       { status: 409 }
     );
   }

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseNoteLinks, buildNoteLinkSyntax, stripNoteLinkSyntax } from "./noteLinks";
+import {
+  parseNoteLinks,
+  buildNoteLinkSyntax,
+  stripNoteLinkSyntax,
+  buildNoteLinkHref,
+  resolveNoteLinkTarget,
+} from "./noteLinks";
 
 describe("buildNoteLinkSyntax / parseNoteLinks round-trip", () => {
   it("round-trips a plain note link with no snippet/alias", () => {
@@ -74,5 +80,26 @@ describe("stripNoteLinkSyntax", () => {
 
   it("leaves plain text with no links untouched", () => {
     expect(stripNoteLinkSyntax("Nothing to see here.")).toBe("Nothing to see here.");
+  });
+});
+
+describe("resolveNoteLinkTarget / buildNoteLinkHref", () => {
+  const targets = {
+    notes: [{ id: 1, title: "Intro", courseId: 5, courseName: "C" }],
+    documents: [{ id: 2, filename: "lec.pdf", courseId: 5, courseName: "C" }],
+    items: [{ id: 3, title: "Quiz 1", courseId: 5, courseName: "C", mode: "quiz" as const }],
+  };
+
+  it("labels existing targets and flags missing ones", () => {
+    expect(resolveNoteLinkTarget("note", 1, targets)).toEqual({ label: "Intro", missing: false });
+    expect(resolveNoteLinkTarget("doc", 99, targets)).toEqual({ label: "Missing document", missing: true });
+  });
+
+  it("builds hrefs, carrying a snippet as a highlight", () => {
+    expect(buildNoteLinkHref({ type: "note", id: 1, snippet: "a b" }, targets)).toBe("/vault/1?highlight=a%20b");
+    expect(buildNoteLinkHref({ type: "doc", id: 2 }, targets)).toBe("/courses/5?document=2");
+    expect(buildNoteLinkHref({ type: "doc", id: 2, snippet: "x" }, targets)).toBe("/courses/5?document=2&highlight=x");
+    expect(buildNoteLinkHref({ type: "item", id: 3 }, targets)).toBe("/items/3");
+    expect(buildNoteLinkHref({ type: "item", id: 4 }, targets)).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import {
   Clock,
   FileText,
   Flame,
+  GitFork,
   GripVertical,
   Layers,
   ListChecks,
@@ -790,6 +791,7 @@ function AssignmentsWidget({
 function recentViewHref(view: RecentView): string {
   if (view.type === "note") return `/vault/${view.id}`;
   if (view.type === "document") return `/courses/${view.courseId}?document=${view.id}`;
+  if (view.type === "canvas") return `/canvas/${view.id}`;
   return `/items/${view.id}`;
 }
 
@@ -797,6 +799,7 @@ function RecentViewIcon({ type }: { type: RecentView["type"] }) {
   const className = "size-3.5 shrink-0 text-muted-foreground";
   if (type === "note") return <StickyNote className={className} />;
   if (type === "document") return <FileText className={className} />;
+  if (type === "canvas") return <GitFork className={className} />;
   return <Sparkles className={className} />;
 }
 

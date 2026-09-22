@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "katex/dist/katex.min.css";
+@import "@xyflow/react/dist/base.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -824,4 +825,168 @@ li .katex {
 }
 :root[data-app-font="mono"] {
   --heading-font: var(--font-geist-mono);
+}
+/* --- Canvas (components/canvas/*) ---
+   JSON Canvas's six preset colors (red, orange, yellow, green, cyan,
+   purple — see lib/canvas.ts). Red/green/cyan borrow the theme's own role
+   tokens so they re-skin with the appearance theme like everything else;
+   orange/yellow/purple have no role token to borrow, so they get a light
+   and a dark value of their own. Defined after every theme block so these
+   win regardless of which theme is active. */
+:root {
+  --canvas-1: var(--clay);
+  --canvas-2: #cf7a2e;
+  --canvas-3: #b8952a;
+  --canvas-4: var(--sage);
+  --canvas-5: var(--focus);
+  --canvas-6: #8a67c2;
+  --canvas-edge: color-mix(in oklab, var(--foreground) 42%, transparent);
+  --canvas-dot: color-mix(in oklab, var(--foreground) 16%, transparent);
+}
+.dark {
+  --canvas-2: #e39650;
+  --canvas-3: #d6b64c;
+  --canvas-6: #a88ae0;
+}
+
+.canvas-board .react-flow {
+  --xy-selection-background-color: color-mix(in oklab, var(--focus) 8%, transparent);
+  --xy-selection-border: 1px solid color-mix(in oklab, var(--focus) 60%, transparent);
+  --xy-edge-stroke: var(--canvas-edge);
+  --xy-connectionline-stroke: var(--canvas-edge);
+  --xy-connectionline-stroke-width: 2;
+  background: var(--background);
+}
+
+/* A card's accent (--card-accent, set inline from its color) tints both its
+   border and, faintly, its fill — Obsidian's colored-card look. */
+.canvas-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 2px solid var(--card-accent, var(--border));
+  background: color-mix(in oklab, var(--card-accent, transparent) 7%, var(--card));
+  color: var(--card-foreground);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  transition: box-shadow 120ms ease;
+}
+.react-flow__node.selected > .canvas-card,
+.react-flow__node.selected > .canvas-group {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.canvas-card-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px 16px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+/* Only a selected card scrolls its own overflow — otherwise the wheel
+   belongs to the board, same as Obsidian. */
+.react-flow__node.selected .canvas-card-body {
+  overflow-y: auto;
+}
+.canvas-card-body.markdown-body > :first-child {
+  margin-top: 0;
+}
+.canvas-card-body.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.canvas-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--card-accent, var(--border)) 50%, var(--border));
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.canvas-group {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  border: 2px solid var(--card-accent, color-mix(in oklab, var(--foreground) 22%, transparent));
+  background: color-mix(in oklab, var(--card-accent, var(--foreground)) 4%, transparent);
+}
+.canvas-group-label {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 6px;
+  max-width: 100%;
+  padding: 3px 12px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--card-accent, var(--foreground)) 12%, var(--background));
+}
+
+/* Connection dots — one per side, invisible until you hover a card (or
+   are mid-connection, when every card's dots show as drop targets). */
+.canvas-handle.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 999px;
+  border: 2px solid var(--muted-foreground);
+  background: var(--card);
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.react-flow__node:hover .canvas-handle.react-flow__handle,
+.react-flow__node.selected .canvas-handle.react-flow__handle,
+.canvas-board.is-connecting .canvas-handle.react-flow__handle {
+  opacity: 1;
+}
+/* Each side's base transform (from React Flow's base.css) centers the dot
+   on the card's edge differently, so the hover grow has to repeat it. */
+.canvas-handle.react-flow__handle:hover {
+  border-color: var(--focus);
+}
+.canvas-handle.react-flow__handle-top:hover,
+.canvas-handle.react-flow__handle-left:hover {
+  transform: translate(-50%, -50%) scale(1.25);
+}
+.canvas-handle.react-flow__handle-bottom:hover {
+  transform: translate(-50%, 50%) scale(1.25);
+}
+.canvas-handle.react-flow__handle-right:hover {
+  transform: translate(50%, -50%) scale(1.25);
+}
+
+.canvas-resize-handle.react-flow__resize-control.handle {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1.5px solid var(--ring);
+  background: var(--card);
+}
+.canvas-resize-line.react-flow__resize-control.line {
+  border-color: transparent;
+}
+
+.canvas-edge-label {
+  position: absolute;
+  pointer-events: all;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre;
+  color: var(--foreground);
+  background: var(--background);
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3;
 }

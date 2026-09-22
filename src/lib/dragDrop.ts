@@ -7,6 +7,7 @@ export type DragPayload =
   | { kind: "document"; id: number }
   | { kind: "item"; id: number }
   | { kind: "note"; id: number }
+  | { kind: "canvas"; id: number }
   | { kind: "folder"; id: number }
   | { kind: "course"; id: number }
   | { kind: "widget"; id: string };

@@ -1,3 +1,5 @@
+import type { LinkTargets } from "@/lib/models";
+
 // Shared syntax for the Vault's internal links — [[note:12]], optionally
 // with a #<url-encoded snippet> deep-link anchor and a |Alias display label,
 // e.g. [[doc:7#Amdahl%27s%20law|Amdahl's law]]. Notes are the only place
@@ -64,4 +66,42 @@ export function buildNoteLinkSyntax(target: NoteLinkTarget): string {
 // human-readable label it was inserted with) or drop it if it has none.
 export function stripNoteLinkSyntax(markdown: string): string {
   return markdown.replace(LINK_RE, (_raw, _type, _id, _snippet, alias) => alias ?? "");
+}
+
+// Display label for a link target, looked up in the (small, client-side)
+// listing from /api/link-targets — shared by NoteEditor's pills, its
+// Preview, and canvas cards, so a deleted target reads the same everywhere.
+export function resolveNoteLinkTarget(
+  type: NoteLinkType,
+  id: number,
+  targets: LinkTargets
+): { label: string; missing: boolean } {
+  if (type === "note") {
+    const n = targets.notes.find((n) => n.id === id);
+    return n ? { label: n.title, missing: false } : { label: "Missing note", missing: true };
+  }
+  if (type === "doc") {
+    const d = targets.documents.find((d) => d.id === id);
+    return d ? { label: d.filename, missing: false } : { label: "Missing document", missing: true };
+  }
+  const i = targets.items.find((i) => i.id === id);
+  return i ? { label: i.title, missing: false } : { label: "Missing item", missing: true };
+}
+
+// Where following a link goes, or null if its target no longer exists. A
+// snippet becomes a ?highlight= so the destination scrolls to it.
+export function buildNoteLinkHref(target: NoteLinkTarget, targets: LinkTargets): string | null {
+  const highlight = target.snippet ? `?highlight=${encodeURIComponent(target.snippet)}` : "";
+  if (target.type === "note") {
+    const n = targets.notes.find((n) => n.id === target.id);
+    return n ? `/vault/${target.id}${highlight}` : null;
+  }
+  if (target.type === "doc") {
+    const d = targets.documents.find((d) => d.id === target.id);
+    if (!d) return null;
+    const base = `/courses/${d.courseId}?document=${target.id}`;
+    return target.snippet ? `${base}&${highlight.slice(1)}` : base;
+  }
+  const i = targets.items.find((i) => i.id === target.id);
+  return i ? `/items/${target.id}${highlight}` : null;
 }

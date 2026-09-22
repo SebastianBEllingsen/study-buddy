@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import {
   deleteCourse,
   getCourse,
+  listCanvasesForCourse,
   listDocumentSummariesForCourse,
   listFoldersForCourse,
   listGeneratedItemSummariesForCourse,
@@ -26,13 +27,14 @@ export async function GET(_request: Request, { params }: Params) {
   if (!course) {
     return Response.json({ error: "Course not found" }, { status: 404 });
   }
-  const [folders, documents, items, notes] = await Promise.all([
+  const [folders, documents, items, notes, canvases] = await Promise.all([
     listFoldersForCourse(id),
     listDocumentSummariesForCourse(id),
     listGeneratedItemSummariesForCourse(id),
     listNotesForCourse(id),
+    listCanvasesForCourse(id),
   ]);
-  return Response.json({ course, folders, documents, items, notes });
+  return Response.json({ course, folders, documents, items, notes, canvases });
 }
 
 export async function PATCH(request: Request, { params }: Params) {

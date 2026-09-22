@@ -5,6 +5,7 @@ import Fuse from "fuse.js";
 import {
   db,
   app_settings,
+  canvases,
   calendar_feeds,
   completed_assignments,
   courses,
@@ -28,6 +29,7 @@ import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettin
 import { computeDueCardIndices } from "./spacedRepetition";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
+import { canvasReferencesTarget, emptyCanvas, parseCanvasJson, type CanvasData } from "./canvas";
 
 // "image" is distinct from "failed": a plain image (png/jpg/...) has no text
 // to extract by design (no OCR — see extraction.ts), not a broken upload —
@@ -688,7 +690,7 @@ export async function setAssignmentCompleted(eventId: string, completed: boolean
 // recent_views schema comment for why this is one upserted row per item
 // rather than an append-only visit log.
 
-export type RecentViewType = "note" | "document" | "item";
+export type RecentViewType = "note" | "document" | "item" | "canvas";
 
 export interface RecentView {
   type: RecentViewType;
@@ -730,8 +732,9 @@ export async function listRecentViews(limit = 8): Promise<RecentView[]> {
   const noteIds = rows.filter((r) => r.item_type === "note").map((r) => r.item_id);
   const docIds = rows.filter((r) => r.item_type === "document").map((r) => r.item_id);
   const itemIds = rows.filter((r) => r.item_type === "item").map((r) => r.item_id);
+  const canvasIds = rows.filter((r) => r.item_type === "canvas").map((r) => r.item_id);
 
-  const [noteRows, docRows, itemRows] = await Promise.all([
+  const [noteRows, docRows, itemRows, canvasRows] = await Promise.all([
     noteIds.length
       ? db
           .select({ id: notes.id, title: notes.title, course_id: notes.course_id, course_name: courses.name })
@@ -759,11 +762,19 @@ export async function listRecentViews(limit = 8): Promise<RecentView[]> {
           .leftJoin(courses, eq(generated_items.course_id, courses.id))
           .where(inArray(generated_items.id, itemIds))
       : Promise.resolve([]),
+    canvasIds.length
+      ? db
+          .select({ id: canvases.id, title: canvases.title, course_id: canvases.course_id, course_name: courses.name })
+          .from(canvases)
+          .leftJoin(courses, eq(canvases.course_id, courses.id))
+          .where(inArray(canvases.id, canvasIds))
+      : Promise.resolve([]),
   ]);
 
   const noteMap = new Map(noteRows.map((r) => [r.id, r]));
   const docMap = new Map(docRows.map((r) => [r.id, r]));
   const itemMap = new Map(itemRows.map((r) => [r.id, r]));
+  const canvasMap = new Map(canvasRows.map((r) => [r.id, r]));
 
   const result: RecentView[] = [];
   for (const row of rows) {
@@ -790,6 +801,11 @@ export async function listRecentViews(limit = 8): Promise<RecentView[]> {
           mode: i.mode as GenerationMode,
           viewedAt: row.viewed_at,
         });
+      }
+    } else if (row.item_type === "canvas") {
+      const c = canvasMap.get(row.item_id);
+      if (c) {
+        result.push({ type: "canvas", id: c.id, title: c.title, courseId: c.course_id, courseName: c.course_name ?? "", viewedAt: row.viewed_at });
       }
     }
   }
@@ -882,10 +898,19 @@ export async function isImageUrlReferenced(url: string): Promise<boolean> {
 // getNoteBacklinks, since there's no denormalized index of note image
 // embeds either. The negative lookahead keeps id=1 from matching inside
 // id=12's reference.
-export async function isUploadedImageReferencedInNotes(id: number): Promise<boolean> {
-  const rows = await db.select({ markdown: notes.markdown }).from(notes);
+//
+// Canvases count too: an image card ("image:<id>") or a studybuddy-image
+// embed inside a canvas text card holds the row just as firmly as a note
+// does — missing that would let the library picker delete an image a
+// canvas is still showing.
+export async function isUploadedImageReferencedInContent(id: number): Promise<boolean> {
+  const [noteRows, canvasRows] = await Promise.all([
+    db.select({ markdown: notes.markdown }).from(notes),
+    db.select({ data: canvases.data }).from(canvases),
+  ]);
   const pattern = new RegExp(`studybuddy-image:${id}(?!\\d)`);
-  return rows.some((row) => pattern.test(row.markdown));
+  if (noteRows.some((row) => pattern.test(row.markdown))) return true;
+  return canvasRows.some((row) => canvasReferencesTarget(parseCanvasJson(row.data), { type: "image", id }));
 }
 
 // Migration-only (see /api/storage-settings/migrate-images): every
@@ -1104,6 +1129,114 @@ export async function getNoteBacklinks(id: number): Promise<NoteBacklink[]> {
     }
   }
   return backlinks;
+}
+
+// --- Canvases: Obsidian-style boards of cards and arrows ---
+// Organized per course like notes, but in their own section of the course
+// page rather than inside the folder tree (so no folder_id). The board
+// itself is one JSON Canvas document in `data` — see lib/canvas.ts for the
+// format and schema.sql for why it's a single column.
+
+export interface CanvasSummary {
+  id: number;
+  course_id: number;
+  position: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Canvas extends CanvasSummary {
+  data: CanvasData;
+}
+
+const canvasSummaryColumns = () => ({
+  id: canvases.id,
+  course_id: canvases.course_id,
+  position: canvases.position,
+  title: canvases.title,
+  created_at: canvases.created_at,
+  updated_at: canvases.updated_at,
+});
+
+export async function getCanvas(id: number): Promise<Canvas | undefined> {
+  const [row] = await db.select().from(canvases).where(eq(canvases.id, id));
+  if (!row) return undefined;
+  return { ...row, data: parseCanvasJson(row.data) };
+}
+
+// Summaries only — the course page lists canvases by title and never needs
+// what's on them, and a busy board's JSON can be large.
+export async function listCanvasesForCourse(courseId: number): Promise<CanvasSummary[]> {
+  return db
+    .select(canvasSummaryColumns())
+    .from(canvases)
+    .where(eq(canvases.course_id, courseId))
+    .orderBy(asc(canvases.position), desc(canvases.created_at));
+}
+
+export async function createCanvas(title: string, courseId: number, data: CanvasData = emptyCanvas()): Promise<Canvas> {
+  const now = nowUtc();
+  // Same atomicity concern as createNote — the position read and the insert
+  // have to happen together or two quick creates land on the same slot.
+  const row = await runTransaction(async (tx) => {
+    const [{ next }] = await tx
+      .select({ next: sql<number>`COALESCE(MAX(${canvases.position}), -1) + 1` })
+      .from(canvases)
+      .where(eq(canvases.course_id, courseId));
+    const [inserted] = await tx
+      .insert(canvases)
+      .values({
+        title,
+        course_id: courseId,
+        position: next,
+        data: JSON.stringify(data),
+        created_at: now,
+        updated_at: now,
+      })
+      .returning();
+    return inserted;
+  });
+  return { ...row, data: parseCanvasJson(row.data) };
+}
+
+export async function renameCanvas(id: number, title: string): Promise<void> {
+  await db.update(canvases).set({ title, updated_at: nowUtc() }).where(eq(canvases.id, id));
+}
+
+// Callers pass data that's already been through sanitizeCanvasData — this
+// stores it as-is.
+export async function updateCanvasData(id: number, data: CanvasData): Promise<void> {
+  await db.update(canvases).set({ data: JSON.stringify(data), updated_at: nowUtc() }).where(eq(canvases.id, id));
+}
+
+export async function reorderCanvases(courseId: number, orderedIds: number[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await db
+    .update(canvases)
+    .set({ position: positionCases(canvases.id, orderedIds) })
+    .where(and(eq(canvases.course_id, courseId), inArray(canvases.id, orderedIds)));
+}
+
+export async function deleteCanvas(id: number): Promise<void> {
+  await db.delete(canvases).where(eq(canvases.id, id));
+}
+
+export interface CanvasBacklink {
+  canvasId: number;
+  canvasTitle: string;
+  courseId: number;
+}
+
+// Canvases that show this note, either as a whole card or via a [[note:id]]
+// link inside a text card — Obsidian lists a canvas embedding a note among
+// that note's backlinks, and so does the Vault. Same scan-everything,
+// compute-at-read-time approach as getNoteBacklinks.
+export async function getCanvasBacklinksForNote(noteId: number): Promise<CanvasBacklink[]> {
+  const rows = await db.select().from(canvases);
+  return rows
+    .filter((row) => canvasReferencesTarget(parseCanvasJson(row.data), { type: "note", id: noteId }))
+    .map((row) => ({ canvasId: row.id, canvasTitle: row.title, courseId: row.course_id }));
 }
 
 export interface LinkTargets {
@@ -2317,7 +2450,16 @@ export interface NoteSearchResult {
   snippets: string[];
 }
 
-export type SearchResult = ItemSearchResult | DocumentSearchResult | NoteSearchResult;
+export interface CanvasSearchResult {
+  kind: "canvas";
+  canvasId: number;
+  canvasTitle: string;
+  courseId: number;
+  courseName: string;
+  snippets: string[];
+}
+
+export type SearchResult = ItemSearchResult | DocumentSearchResult | NoteSearchResult | CanvasSearchResult;
 
 const MAX_SNIPPETS_PER_ITEM = 3;
 
@@ -2379,9 +2521,25 @@ function noteCandidates(markdown: string, key: string): SearchCandidate[] {
     .map((line) => ({ key, text: line }));
 }
 
+// A canvas is searchable by everything written ON it — its title, its
+// text cards (line by line, like a note), group names, and arrow labels.
+// Note/document cards aren't expanded here: those notes and documents are
+// already search results of their own.
+export function canvasCandidates(title: string, data: CanvasData, key: string): SearchCandidate[] {
+  const candidates: SearchCandidate[] = [{ key, text: title }];
+  for (const node of data.nodes) {
+    if (node.type === "text") candidates.push(...noteCandidates(node.text, key));
+    else if (node.type === "group" && node.label) candidates.push({ key, text: node.label });
+  }
+  for (const edge of data.edges) {
+    if (edge.label) candidates.push({ key, text: edge.label });
+  }
+  return candidates;
+}
+
 interface SearchCorpus {
   candidates: SearchCandidate[];
-  metaByKey: Map<string, ItemSearchResult | DocumentSearchResult | NoteSearchResult>;
+  metaByKey: Map<string, SearchResult>;
 }
 
 // The search box is debounced (see SearchDialog.tsx) but still fires once
@@ -2431,14 +2589,26 @@ async function loadSearchCorpus(courseId?: number): Promise<SearchCorpus> {
     .from(notes)
     .innerJoin(courses, eq(courses.id, notes.course_id));
 
-  const [itemRows, documentRows, noteRows] = await Promise.all([
+  const canvasesBase = db
+    .select({
+      id: canvases.id,
+      course_id: canvases.course_id,
+      title: canvases.title,
+      data: canvases.data,
+      course_name: courses.name,
+    })
+    .from(canvases)
+    .innerJoin(courses, eq(courses.id, canvases.course_id));
+
+  const [itemRows, documentRows, noteRows, canvasRows] = await Promise.all([
     courseId ? itemsBase.where(eq(generated_items.course_id, courseId)) : itemsBase,
     courseId ? documentsBase.where(eq(documents.course_id, courseId)) : documentsBase,
     courseId ? notesBase.where(eq(notes.course_id, courseId)) : notesBase,
+    courseId ? canvasesBase.where(eq(canvases.course_id, courseId)) : canvasesBase,
   ]);
 
   const candidates: SearchCandidate[] = [];
-  const metaByKey = new Map<string, ItemSearchResult | DocumentSearchResult | NoteSearchResult>();
+  const metaByKey = new Map<string, SearchResult>();
 
   for (const row of itemRows) {
     const item = row.generated_items;
@@ -2479,6 +2649,19 @@ async function loadSearchCorpus(courseId?: number): Promise<SearchCorpus> {
       noteTitle: note.title,
       courseId: note.course_id!,
       courseName: note.course_name,
+      snippets: [],
+    });
+  }
+
+  for (const canvas of canvasRows) {
+    const key = `canvas:${canvas.id}`;
+    candidates.push(...canvasCandidates(canvas.title, parseCanvasJson(canvas.data), key));
+    metaByKey.set(key, {
+      kind: "canvas",
+      canvasId: canvas.id,
+      canvasTitle: canvas.title,
+      courseId: canvas.course_id,
+      courseName: canvas.course_name,
       snippets: [],
     });
   }
