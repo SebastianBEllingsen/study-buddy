@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { and, asc, desc, eq, gte, inArray, isNotNull, lte, max, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, max, or, sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import Fuse from "fuse.js";
 import {
@@ -56,7 +56,6 @@ export interface Folder {
   id: number;
   course_id: number;
   name: string;
-  is_master: boolean;
   position: number;
   // Non-null means this folder is a subfolder of another. One level of
   // nesting only — a subfolder's own parent_folder_id is always null, and
@@ -74,14 +73,13 @@ export class CannotNestSubfolderError extends Error {
   }
 }
 
-// Every document and every generated item always belongs to a real folder —
-// folder_id is never NULL from the application. A pooled ("All course
-// material") generation still lands in the course's default folder; see
-// lib/generate.ts.
+// folder_id is null for a document/item/note filed directly on the course
+// page rather than inside any folder — a real, intended state (not just an
+// ON DELETE SET NULL fallback), same as source_folder_id below.
 export interface DocumentRow {
   id: number;
   course_id: number;
-  folder_id: number;
+  folder_id: number | null;
   position: number;
   filename: string;
   file_path: string;
@@ -96,7 +94,7 @@ export interface DocumentRow {
 export interface GeneratedItem {
   id: number;
   course_id: number;
-  folder_id: number;
+  folder_id: number | null;
   position: number;
   mode: GenerationMode;
   title: string;
@@ -907,7 +905,7 @@ export async function updateUploadedImageUrl(id: number, url: string): Promise<v
 export interface Note {
   id: number;
   course_id: number;
-  folder_id: number;
+  folder_id: number | null;
   position: number;
   title: string;
   markdown: string;
@@ -931,6 +929,13 @@ export async function listNotesForCourse(courseId: number): Promise<Note[]> {
     .orderBy(asc(notes.position), desc(notes.created_at))) as Note[];
 }
 
+// folder_id null means "filed directly on the course page" — a real,
+// intended state (see DocumentRow's doc comment), not matchable with plain
+// eq() the way a real folder id is.
+function folderPredicate(column: AnySQLiteColumn, folderId: number | null) {
+  return folderId === null ? isNull(column) : eq(column, folderId);
+}
+
 async function assertTitleAvailable(title: string, excludeId?: number): Promise<void> {
   const existing = await db.select().from(notes);
   const collision = existing.find(
@@ -940,19 +945,20 @@ async function assertTitleAvailable(title: string, excludeId?: number): Promise<
 }
 
 // Same pattern as nextDocumentPosition — a newly created (or moved) note
-// lands at the end of its destination folder.
-async function nextNotePosition(folderId: number, tx: typeof db = db): Promise<number> {
+// lands at the end of its destination folder (or, for folderId null, the
+// end of the course's top-level "on the course page" list).
+async function nextNotePosition(courseId: number, folderId: number | null, tx: typeof db = db): Promise<number> {
   const [{ next }] = await tx
     .select({ next: sql<number>`COALESCE(MAX(${notes.position}), -1) + 1` })
     .from(notes)
-    .where(eq(notes.folder_id, folderId));
+    .where(and(eq(notes.course_id, courseId), folderPredicate(notes.folder_id, folderId)));
   return next;
 }
 
 export async function createNote(
   title: string,
   courseId: number,
-  folderId?: number,
+  folderId?: number | null,
   markdown = ""
 ): Promise<Note> {
   await assertTitleAvailable(title);
@@ -966,7 +972,7 @@ export async function createNote(
       throw new InvalidDestinationFolderError();
     }
   }
-  const resolvedFolderId = folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
+  const resolvedFolderId = folderId ?? null;
   const now = nowUtc();
   // Same atomicity concern as createDocument — see its comment.
   const note = await runTransaction(async (tx) => {
@@ -977,7 +983,7 @@ export async function createNote(
         markdown,
         course_id: courseId,
         folder_id: resolvedFolderId,
-        position: await nextNotePosition(resolvedFolderId, tx),
+        position: await nextNotePosition(courseId, resolvedFolderId, tx),
         created_at: now,
         updated_at: now,
       })
@@ -1000,19 +1006,24 @@ export async function updateNoteIcon(id: number, icon: string | null): Promise<v
   await db.update(notes).set({ icon, updated_at: nowUtc() }).where(eq(notes.id, id));
 }
 
-// Lands at the end of the destination folder — same as moveDocument.
-export async function moveNote(id: number, folderId: number): Promise<void> {
+// Lands at the end of the destination folder (or the course's top-level
+// list, for folderId null — "un-filing" a note back onto the course page is
+// always a valid move, so there's nothing to check against) — same as
+// moveDocument.
+export async function moveNote(id: number, folderId: number | null): Promise<void> {
   const note = await getNote(id);
   if (!note) return;
-  const destination = await getFolder(folderId);
-  if (!destination || destination.course_id !== note.course_id) {
-    throw new InvalidDestinationFolderError();
+  if (folderId != null) {
+    const destination = await getFolder(folderId);
+    if (!destination || destination.course_id !== note.course_id) {
+      throw new InvalidDestinationFolderError();
+    }
   }
   // Same atomicity concern as moveDocument — see its comment.
   await runTransaction(async (tx) => {
     await tx
       .update(notes)
-      .set({ folder_id: folderId, position: await nextNotePosition(folderId, tx) })
+      .set({ folder_id: folderId, position: await nextNotePosition(note.course_id, folderId, tx) })
       .where(eq(notes.id, id));
   });
 }
@@ -1030,12 +1041,14 @@ function positionCases(idColumn: AnySQLiteColumn, orderedIds: number[]) {
   );
 }
 
-export async function reorderNotes(folderId: number, orderedIds: number[]): Promise<void> {
+export async function reorderNotes(courseId: number, folderId: number | null, orderedIds: number[]): Promise<void> {
   if (orderedIds.length === 0) return;
   await db
     .update(notes)
     .set({ position: positionCases(notes.id, orderedIds) })
-    .where(and(eq(notes.folder_id, folderId), inArray(notes.id, orderedIds)));
+    .where(
+      and(eq(notes.course_id, courseId), folderPredicate(notes.folder_id, folderId), inArray(notes.id, orderedIds))
+    );
 }
 
 export async function deleteNote(id: number): Promise<void> {
@@ -1257,13 +1270,11 @@ export async function setHomeWidgets(widgets: HomeWidgetConfig[]): Promise<void>
 // --- Courses ---
 
 // A new course starts with zero folders — an empty course page shows
-// nothing until something's actually added, rather than a permanent-looking
-// "Unsorted" folder sitting there unused. The default folder only comes into
-// being the first time something actually needs one (see
-// getOrCreateDefaultFolder), whenever that ends up being. New courses are
-// prepended (position below every existing course) rather than appended, so
-// a course you just created still shows up first — the "newest first"
-// behavior this app had before manual ordering existed.
+// nothing until something's actually added, filed directly on the page
+// itself (folder_id null) until the user organizes it into a real folder.
+// New courses are prepended (position below every existing course) rather
+// than appended, so a course you just created still shows up first — the
+// "newest first" behavior this app had before manual ordering existed.
 export async function createCourse(name: string): Promise<Course> {
   const [{ next }] = await db
     .select({ next: sql<number>`COALESCE(MIN(${courses.position}), 1) - 1` })
@@ -1364,8 +1375,10 @@ export async function deleteCourse(id: number): Promise<void> {
 
 // --- Folders ---
 // One tree per course: a folder holds both its documents and its generated
-// items directly (see lib/generate.ts and lib/context.ts). Every course has
-// exactly one permanent, undeletable default folder ("Unsorted").
+// items directly (see lib/generate.ts and lib/context.ts). Filing something
+// with no folder chosen leaves its folder_id null — it renders directly on
+// the course page instead of inside any folder (see DocumentRow's doc
+// comment).
 
 export async function createFolder(
   courseId: number,
@@ -1424,44 +1437,6 @@ export class InvalidDestinationFolderError extends Error {
   }
 }
 
-// The one "if you don't say where, it goes here" folder per course — never
-// pre-created (see createCourse), so an empty course shows nothing rather
-// than a permanent "Unsorted" folder no one asked for yet. Created lazily
-// the first time something actually needs a home (an upload with no folder
-// chosen, a pooled "all course material" generation, …), and no more
-// protected against deletion than any other folder — delete it and the next
-// thing that needs a default just gets a fresh one (see deleteFolder).
-// Like the rest of this app, assumes one device at a time: two concurrent
-// callers racing to create the first one for the same course could each
-// insert their own, leaving two folders briefly flagged as the default.
-async function insertDefaultFolder(courseId: number, tx: typeof db): Promise<Folder> {
-  const [{ next }] = await tx
-    .select({ next: sql<number>`COALESCE(MAX(${folders.position}), -1) + 1` })
-    .from(folders)
-    .where(eq(folders.course_id, courseId));
-  const [folder] = await tx
-    .insert(folders)
-    .values({
-      course_id: courseId,
-      name: "Unsorted",
-      is_master: true,
-      position: next,
-      created_at: nowUtc(),
-    })
-    .returning();
-  return folder;
-}
-
-export async function getOrCreateDefaultFolder(courseId: number, tx: typeof db = db): Promise<Folder> {
-  const rows = await tx
-    .select()
-    .from(folders)
-    .where(and(eq(folders.course_id, courseId), eq(folders.is_master, true)))
-    .limit(1);
-  if (rows[0]) return rows[0];
-  return insertDefaultFolder(courseId, tx);
-}
-
 export async function renameFolder(id: number, name: string): Promise<void> {
   await db.update(folders).set({ name }).where(eq(folders.id, id));
 }
@@ -1485,7 +1460,7 @@ export async function updateFolderCustomization(
 // A non-null value nests, subject to the one-level rule below.
 export async function nestFolder(id: number, parentFolderId: number | null): Promise<void> {
   const folder = await getFolder(id);
-  if (!folder || folder.is_master) return;
+  if (!folder) return;
 
   if (parentFolderId == null) {
     await db.update(folders).set({ parent_folder_id: null }).where(eq(folders.id, id));
@@ -1532,18 +1507,17 @@ export async function listFoldersForCourse(courseId: number): Promise<Folder[]> 
     .orderBy(asc(folders.position), asc(folders.created_at));
 }
 
-// Deleting a folder never orphans anything: its documents and generated
-// items are reassigned to the course's default folder first, so the
-// "everything always belongs to a real folder" invariant holds even here.
-// The default folder itself can't be deleted.
+// Deleting a folder never orphans anything: its documents/generated items/
+// notes just move to the course page (folder_id null) instead of being
+// deleted along with it.
 export async function deleteFolder(id: number): Promise<void> {
   const folder = await getFolder(id);
   if (!folder) return;
 
   // Deleting a parent folder takes its subfolders with it (one level of
   // nesting, so this is never recursive) — every one of them needs its own
-  // documents/items/notes reassigned first too, same as the parent, so
-  // nothing winds up with a NULL folder_id.
+  // documents/items/notes moved to the course page first too, same as the
+  // parent.
   const subfolders = await db
     .select()
     .from(folders)
@@ -1551,43 +1525,9 @@ export async function deleteFolder(id: number): Promise<void> {
   const targetIds = [id, ...subfolders.map((f) => f.id)];
 
   await runTransaction(async (tx) => {
-    const [hasDocs] = await tx
-      .select({ id: documents.id })
-      .from(documents)
-      .where(inArray(documents.folder_id, targetIds))
-      .limit(1);
-    const [hasItems] = await tx
-      .select({ id: generated_items.id })
-      .from(generated_items)
-      .where(inArray(generated_items.folder_id, targetIds))
-      .limit(1);
-    const [hasNotes] = await tx
-      .select({ id: notes.id })
-      .from(notes)
-      .where(inArray(notes.folder_id, targetIds))
-      .limit(1);
-
-    // Only actually needed when there's something to reassign — an empty
-    // folder just gets deleted, no default folder conjured up to receive
-    // nothing (that would recreate the exact clutter getOrCreateDefaultFolder
-    // exists to avoid).
-    if (hasDocs || hasItems || hasNotes) {
-      // The reassignment target is normally the course's one default
-      // folder — but if THIS folder (or the current default folder, same
-      // thing when folder.is_master) is what's being deleted, it can't be
-      // its own replacement, so a fresh one is created here instead of
-      // fetched.
-      const root = folder.is_master
-        ? await insertDefaultFolder(folder.course_id, tx)
-        : await getOrCreateDefaultFolder(folder.course_id, tx);
-      await tx.update(documents).set({ folder_id: root.id }).where(inArray(documents.folder_id, targetIds));
-      await tx
-        .update(generated_items)
-        .set({ folder_id: root.id })
-        .where(inArray(generated_items.folder_id, targetIds));
-      await tx.update(notes).set({ folder_id: root.id }).where(inArray(notes.folder_id, targetIds));
-    }
-
+    await tx.update(documents).set({ folder_id: null }).where(inArray(documents.folder_id, targetIds));
+    await tx.update(generated_items).set({ folder_id: null }).where(inArray(generated_items.folder_id, targetIds));
+    await tx.update(notes).set({ folder_id: null }).where(inArray(notes.folder_id, targetIds));
     await tx.delete(folders).where(inArray(folders.id, targetIds));
   });
 }
@@ -1597,17 +1537,17 @@ export async function deleteFolder(id: number): Promise<void> {
 // Documents display oldest-first within a folder (see listDocumentsForCourse),
 // so a newly uploaded/pasted/moved-in document appends to the end — same
 // convention as folders' own position (see createFolder).
-async function nextDocumentPosition(folderId: number, tx: typeof db = db): Promise<number> {
+async function nextDocumentPosition(courseId: number, folderId: number | null, tx: typeof db = db): Promise<number> {
   const [{ next }] = await tx
     .select({ next: sql<number>`COALESCE(MAX(${documents.position}), -1) + 1` })
     .from(documents)
-    .where(eq(documents.folder_id, folderId));
+    .where(and(eq(documents.course_id, courseId), folderPredicate(documents.folder_id, folderId)));
   return next;
 }
 
 export async function createDocument(params: {
   courseId: number;
-  folderId: number;
+  folderId: number | null;
   filename: string;
   filePath: string;
   // null for pasted-text documents, which have no underlying file — see
@@ -1618,10 +1558,13 @@ export async function createDocument(params: {
   // folderId here (from either the file-upload or paste-text route) was
   // otherwise never checked against courseId, letting a crafted request
   // create a document whose course_id disagrees with its own folder's
-  // course_id.
-  const folder = await getFolder(params.folderId);
-  if (!folder || folder.course_id !== params.courseId) {
-    throw new InvalidDestinationFolderError();
+  // course_id. No check needed when folderId is null — filing directly on
+  // the course page is always valid.
+  if (params.folderId != null) {
+    const folder = await getFolder(params.folderId);
+    if (!folder || folder.course_id !== params.courseId) {
+      throw new InvalidDestinationFolderError();
+    }
   }
   // Reading the next position and inserting at it must be atomic — two
   // concurrent uploads into the same folder (e.g. a multi-file
@@ -1633,7 +1576,7 @@ export async function createDocument(params: {
       .values({
         course_id: params.courseId,
         folder_id: params.folderId,
-        position: await nextDocumentPosition(params.folderId, tx),
+        position: await nextDocumentPosition(params.courseId, params.folderId, tx),
         filename: params.filename,
         file_path: params.filePath,
         file_base64: params.fileBase64,
@@ -1798,22 +1741,27 @@ export async function deleteDocument(id: number): Promise<void> {
   await db.delete(documents).where(eq(documents.id, id));
 }
 
-export async function moveDocument(id: number, folderId: number): Promise<void> {
+// Lands at the end of the destination folder (or the course's top-level
+// list, for folderId null — un-filing a document back onto the course page
+// is always valid, nothing to check against).
+export async function moveDocument(id: number, folderId: number | null): Promise<void> {
   const doc = await getDocument(id);
   if (!doc) return;
-  const destination = await getFolder(folderId);
-  if (!destination || destination.course_id !== doc.course_id) {
-    throw new InvalidDestinationFolderError();
+  if (folderId != null) {
+    const destination = await getFolder(folderId);
+    if (!destination || destination.course_id !== doc.course_id) {
+      throw new InvalidDestinationFolderError();
+    }
   }
-  // Lands at the end of the destination folder — same place a newly
-  // uploaded document would, rather than keeping whatever position number
-  // it happened to have in its old folder (meaningless there). Wrapped in a
-  // transaction for the same reason as createDocument — two concurrent
-  // moves into the same folder must not read the same next position.
+  // Same place a newly uploaded document would land, rather than keeping
+  // whatever position number it happened to have in its old folder
+  // (meaningless there). Wrapped in a transaction for the same reason as
+  // createDocument — two concurrent moves into the same folder must not
+  // read the same next position.
   await runTransaction(async (tx) => {
     await tx
       .update(documents)
-      .set({ folder_id: folderId, position: await nextDocumentPosition(folderId, tx) })
+      .set({ folder_id: folderId, position: await nextDocumentPosition(doc.course_id, folderId, tx) })
       .where(eq(documents.id, id));
   });
 }
@@ -1826,12 +1774,22 @@ export async function renameDocument(id: number, filename: string): Promise<void
 // reorderFolders — scoped to one folder at a time (documents display
 // per-folder, see listDocumentsForCourse), so `folderId` guards against
 // reordering documents that aren't actually there.
-export async function reorderDocuments(folderId: number, orderedIds: number[]): Promise<void> {
+export async function reorderDocuments(
+  courseId: number,
+  folderId: number | null,
+  orderedIds: number[]
+): Promise<void> {
   if (orderedIds.length === 0) return;
   await db
     .update(documents)
     .set({ position: positionCases(documents.id, orderedIds) })
-    .where(and(eq(documents.folder_id, folderId), inArray(documents.id, orderedIds)));
+    .where(
+      and(
+        eq(documents.course_id, courseId),
+        folderPredicate(documents.folder_id, folderId),
+        inArray(documents.id, orderedIds)
+      )
+    );
 }
 
 // --- Generated items ---
@@ -1842,17 +1800,21 @@ export async function reorderDocuments(folderId: number, orderedIds: number[]): 
 // listGeneratedItemsForCourse), so a newly generated/moved-in item prepends
 // to the front — mirrors courses' own "prepend" position convention (see
 // createCourse) rather than documents' "append" one.
-async function nextGeneratedItemPosition(folderId: number, tx: typeof db = db): Promise<number> {
+async function nextGeneratedItemPosition(
+  courseId: number,
+  folderId: number | null,
+  tx: typeof db = db
+): Promise<number> {
   const [{ next }] = await tx
     .select({ next: sql<number>`COALESCE(MIN(${generated_items.position}), 1) - 1` })
     .from(generated_items)
-    .where(eq(generated_items.folder_id, folderId));
+    .where(and(eq(generated_items.course_id, courseId), folderPredicate(generated_items.folder_id, folderId)));
   return next;
 }
 
 export async function createGeneratedItem(params: {
   courseId: number;
-  folderId: number;
+  folderId: number | null;
   sourceFolderId: number | null;
   sourceHandpicked: boolean;
   mode: GenerationMode;
@@ -1869,7 +1831,7 @@ export async function createGeneratedItem(params: {
       .values({
         course_id: params.courseId,
         folder_id: params.folderId,
-        position: await nextGeneratedItemPosition(params.folderId, tx),
+        position: await nextGeneratedItemPosition(params.courseId, params.folderId, tx),
         source_folder_id: params.sourceFolderId,
         source_handpicked: params.sourceHandpicked,
         mode: params.mode,
@@ -1959,32 +1921,47 @@ export async function updateGeneratedItemContent(params: {
   return item as GeneratedItem;
 }
 
-export async function moveGeneratedItem(id: number, folderId: number): Promise<void> {
+// Lands at the front of the destination folder (or the course's top-level
+// list, for folderId null — un-filing back onto the course page is always
+// valid, nothing to check against) — same place a freshly generated item
+// would land.
+export async function moveGeneratedItem(id: number, folderId: number | null): Promise<void> {
   const item = await getGeneratedItem(id);
   if (!item) return;
-  const destination = await getFolder(folderId);
-  if (!destination || destination.course_id !== item.course_id) {
-    throw new InvalidDestinationFolderError();
+  if (folderId != null) {
+    const destination = await getFolder(folderId);
+    if (!destination || destination.course_id !== item.course_id) {
+      throw new InvalidDestinationFolderError();
+    }
   }
-  // Lands at the front of the destination folder — same place a freshly
-  // generated item would. Wrapped in a transaction for the same reason as
-  // moveDocument — see its comment.
+  // Wrapped in a transaction for the same reason as moveDocument — see its
+  // comment.
   await runTransaction(async (tx) => {
     await tx
       .update(generated_items)
-      .set({ folder_id: folderId, position: await nextGeneratedItemPosition(folderId, tx) })
+      .set({ folder_id: folderId, position: await nextGeneratedItemPosition(item.course_id, folderId, tx) })
       .where(eq(generated_items.id, id));
   });
 }
 
 // Applies a new drag-and-drop order in one transaction, same pattern as
 // reorderDocuments/reorderFolders.
-export async function reorderGeneratedItems(folderId: number, orderedIds: number[]): Promise<void> {
+export async function reorderGeneratedItems(
+  courseId: number,
+  folderId: number | null,
+  orderedIds: number[]
+): Promise<void> {
   if (orderedIds.length === 0) return;
   await db
     .update(generated_items)
     .set({ position: positionCases(generated_items.id, orderedIds) })
-    .where(and(eq(generated_items.folder_id, folderId), inArray(generated_items.id, orderedIds)));
+    .where(
+      and(
+        eq(generated_items.course_id, courseId),
+        folderPredicate(generated_items.folder_id, folderId),
+        inArray(generated_items.id, orderedIds)
+      )
+    );
 }
 
 // quiz_attempts/flashcard_reviews reference generated_items ON DELETE CASCADE,

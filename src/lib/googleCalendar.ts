@@ -3,6 +3,7 @@ import {
   getGoogleClientCredentials,
   getGoogleTokens,
   setGoogleTokens,
+  disconnectGoogleCalendar,
   type GoogleClientCredentials,
 } from "./models";
 
@@ -225,6 +226,21 @@ export function describeGoogleCalendarError(err: unknown): string {
     if (code === 401) return "Google rejected the connection — try reconnecting in Settings.";
     if (code === 403) return "Google denied this request — check the Calendar API is enabled for your project.";
     if (code === 404) return "That event no longer exists on your Google Calendar.";
+  }
+  const message = err instanceof Error ? err.message : "";
+  // invalid_grant means the stored refresh token itself is dead — revoked
+  // (myaccount.google.com/permissions), expired (an OAuth client left in
+  // Google Cloud's "Testing" publish status has its refresh tokens
+  // auto-expire after 7 days), or invalidated by a Google account security
+  // event. Never transient — Google returns 5xx/a timeout for that, not a
+  // definitive invalid_grant — so the dead tokens are cleared here instead
+  // of left around claiming a connection that no longer works; without
+  // this, Settings keeps showing "Connected" over a token that will never
+  // successfully refresh again, and every request just fails the same way
+  // until the user notices and manually disconnects/reconnects.
+  if (/invalid_grant/i.test(message)) {
+    disconnectGoogleCalendar().catch((e) => console.error("Failed to clear dead Google tokens:", e));
+    return "Google's connection has expired or been revoked — reconnect in Settings.";
   }
   return err instanceof Error ? err.message : "Google Calendar request failed.";
 }

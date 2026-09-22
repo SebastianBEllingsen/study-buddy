@@ -105,7 +105,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   try {
     if (hasFolderId) {
-      if (!Number.isInteger(body.folderId)) {
+      if (body.folderId !== null && !Number.isInteger(body.folderId)) {
         return Response.json({ error: "Invalid folder" }, { status: 400 });
       }
       await moveDocument(id, body.folderId);

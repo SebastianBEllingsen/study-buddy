@@ -92,7 +92,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const body = await request.json();
 
     if (body?.folderId !== undefined) {
-      if (!Number.isInteger(body.folderId)) {
+      if (body.folderId !== null && !Number.isInteger(body.folderId)) {
         return Response.json({ error: "folderId is required" }, { status: 400 });
       }
       await moveGeneratedItem(id, body.folderId);

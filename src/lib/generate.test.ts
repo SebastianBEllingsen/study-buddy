@@ -22,7 +22,6 @@ vi.mock("./context", () => ({
 
 vi.mock("./models", () => ({
   createGeneratedItem: vi.fn(async (params: Record<string, unknown>) => ({ id: 1, ...params })),
-  getOrCreateDefaultFolder: vi.fn().mockResolvedValue({ id: 1 }),
   getCourse: vi.fn(),
   getFolder: vi.fn(),
   getNewDocumentsForItem: vi.fn(),

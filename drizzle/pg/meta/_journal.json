@@ -253,6 +253,13 @@
       "when": 1789665820714,
       "tag": "0036_yielding_klaw",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790079417024,
+      "tag": "0037_redundant_rockslide",
+      "breakpoints": true
     }
   ]
 }

@@ -33,7 +33,6 @@ CREATE TABLE IF NOT EXISTS folders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  is_master INTEGER NOT NULL DEFAULT 0,
   position INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -171,13 +170,13 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
 -- personal single-user vault doesn't need a DB-level race guard on top of
 -- the app-level check.
 --
--- course_id/folder_id are nullable here (unlike documents/generated_items'
--- NOT NULL) purely because they were ALTER'd onto this table after it
--- already shipped — SQLite's ALTER TABLE ADD COLUMN can't add a NOT NULL
+-- course_id is nullable purely because it was ALTER'd onto this table after
+-- it already shipped — SQLite's ALTER TABLE ADD COLUMN can't add a NOT NULL
 -- column without a default, and there's no meaningful default course to
 -- fall back to. Application code (models.ts's createNote) always populates
--- both, defaulting folder_id to the course's master folder, so in practice
--- every note has both set, the same as documents/generated_items.
+-- it. folder_id is nullable by design, same as documents/generated_items —
+-- null means the note is filed directly on the course page rather than
+-- inside any folder.
 CREATE TABLE IF NOT EXISTS notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,

@@ -186,7 +186,6 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
           set: upsertSet([
             "course_id",
             "name",
-            "is_master",
             "position",
             "parent_folder_id",
             "icon",

@@ -1,4 +1,4 @@
-import { getFolder, getOrCreateDefaultFolder } from "@/lib/models";
+import { getFolder } from "@/lib/models";
 import { ingestDocumentBytes, UnsupportedDocumentTypeError } from "@/lib/documentIngest";
 import { parseId } from "@/lib/routeParams";
 
@@ -12,8 +12,8 @@ export async function POST(request: Request, { params }: Params) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    // Omitted (rather than required) so an empty course with no folders yet
-    // can still be uploaded into — see getOrCreateDefaultFolder.
+    // Omitted (rather than required) so an upload with no folder chosen
+    // lands directly on the course page instead (folder_id null).
     const folderIdRaw = formData.get("folderId");
     const explicitFolderId = folderIdRaw === null ? null : Number(folderIdRaw);
     if (!(file instanceof File)) {
@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: Params) {
     if (explicitFolderId !== null && !Number.isInteger(explicitFolderId)) {
       return Response.json({ error: "Invalid folder" }, { status: 400 });
     }
-    const folderId = explicitFolderId ?? (await getOrCreateDefaultFolder(id)).id;
+    const folderId = explicitFolderId;
     // Validated up front, before anything is written to disk — createDocument
     // enforces this same check (see its own comment), but checking here too
     // means a crafted explicitFolderId from another course 400s cleanly

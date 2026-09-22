@@ -41,8 +41,8 @@ export async function PATCH(request: Request, { params }: Params) {
     if (typeof body.markdown === "string") {
       await updateNoteMarkdown(id, body.markdown);
     }
-    if (Number.isInteger(body.folderId)) {
-      await moveNote(id, body.folderId as number);
+    if (body.folderId === null || Number.isInteger(body.folderId)) {
+      await moveNote(id, body.folderId as number | null);
     }
     if ("icon" in body) {
       if (body.icon !== null && !isValidIcon(body.icon)) {

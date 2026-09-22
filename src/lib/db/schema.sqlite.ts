@@ -116,7 +116,6 @@ export const folders = sqliteTable("folders", {
     .notNull()
     .references(() => courses.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  is_master: integer("is_master", { mode: "boolean" }).notNull().default(false),
   position: integer("position").notNull().default(0),
   // One level of nesting only — a subfolder's own parent_folder_id is
   // always null. Cascades so deleting a parent takes its subfolders with

@@ -13,6 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { CourseSummary, Folder } from "@/lib/models";
 
+// Select needs a string value — this maps to `folderId: null` ("save
+// directly on the course page", the same destination a course-page upload
+// with no folder chosen lands in).
+const COURSE_PAGE_SENTINEL = "__course__";
+
 export interface SaveableAttachment {
   filename: string;
   mimeType: string;
@@ -67,7 +72,7 @@ export default function SaveAttachmentToCourseDialog({
       .then((r) => r.json())
       .then((detail: { folders: Folder[] }) => {
         setFolders(detail.folders);
-        setFolderId(detail.folders.find((f) => f.is_master)?.id ?? detail.folders[0]?.id ?? null);
+        setFolderId(null);
       })
       .catch(() => toast.error("Couldn't load folders"));
   }, [courseId]);
@@ -127,16 +132,18 @@ export default function SaveAttachmentToCourseDialog({
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Folder</label>
             <Select
-              value={folderId !== null ? String(folderId) : ""}
-              onValueChange={(v) => setFolderId(Number(v))}
-              disabled={folders.length === 0}
+              value={folderId !== null ? String(folderId) : COURSE_PAGE_SENTINEL}
+              onValueChange={(v) => setFolderId(v === COURSE_PAGE_SENTINEL ? null : Number(v))}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Default folder">
-                  {(v: string) => (v ? (folders.find((f) => String(f.id) === v)?.name ?? v) : "Default folder")}
+                <SelectValue>
+                  {(v: string) =>
+                    v === COURSE_PAGE_SENTINEL ? "This course page" : (folders.find((f) => String(f.id) === v)?.name ?? v)
+                  }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
                 {folders.map((f) => (
                   <SelectItem key={f.id} value={String(f.id)}>
                     {f.name}

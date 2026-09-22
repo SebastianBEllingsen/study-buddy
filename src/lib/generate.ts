@@ -2,7 +2,6 @@ import { buildCourseContext, chunkCourseContext, combineDocumentText } from "./c
 import { generateStructured, generateText, getModelInfo } from "./aiClient";
 import {
   createGeneratedItem,
-  getOrCreateDefaultFolder,
   getCourse,
   getFolder,
   getNewDocumentsForItem,
@@ -261,10 +260,10 @@ export async function generateForCourse(
 
   const title = `${MODE_LABELS[mode]} — ${context.courseName} (${context.scopeLabel})`;
 
-  let storageFolderId: number;
+  let storageFolderId: number | null;
   if (options?.destinationFolderId !== undefined) {
     if (options.destinationFolderId === null) {
-      storageFolderId = (await getOrCreateDefaultFolder(courseId)).id;
+      storageFolderId = null;
     } else {
       const destination = await getFolder(options.destinationFolderId);
       if (!destination || destination.course_id !== courseId) {
@@ -276,8 +275,8 @@ export async function generateForCourse(
     // No explicit destination given: same as before this existed — scoped
     // to a specific folder -> filed right there, alongside the documents it
     // was generated from. Pooled ("All course material", context.folderId
-    // null) -> the course's default folder.
-    storageFolderId = context.folderId ?? (await getOrCreateDefaultFolder(courseId)).id;
+    // null) -> the course page itself.
+    storageFolderId = context.folderId;
   }
 
   return createGeneratedItem({

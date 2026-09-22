@@ -91,7 +91,7 @@ export async function buildCourseContext(
       .filter((f) => f.parent_folder_id === folderId)
       .map((f) => f.id);
     const folderIds = [folderId, ...subfolderIds];
-    documents = extracted.filter((d) => folderIds.includes(d.folder_id));
+    documents = extracted.filter((d) => d.folder_id !== null && folderIds.includes(d.folder_id));
     scopeLabel = subfolderIds.length > 0 ? `${folder.name} (incl. subfolders)` : folder.name;
     resolvedFolderId = folderId;
   } else {

@@ -1,4 +1,4 @@
-import { createDocument, getOrCreateDefaultFolder, markDocumentExtracted, InvalidDestinationFolderError } from "@/lib/models";
+import { createDocument, markDocumentExtracted, InvalidDestinationFolderError } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
@@ -18,9 +18,8 @@ export async function POST(request: Request, { params }: Params) {
   const body = await request.json().catch(() => ({}));
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   const text = typeof body?.text === "string" ? body.text.trim() : "";
-  // Omitted or explicitly null (rather than required) so an empty course
-  // with no folders yet can still be pasted into — see
-  // getOrCreateDefaultFolder.
+  // Omitted or explicitly null (rather than required) so a paste with no
+  // folder chosen lands directly on the course page instead (folder_id null).
   const explicitFolderId = body?.folderId == null ? null : Number(body.folderId);
 
   if (!title) {
@@ -34,10 +33,9 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    const folderId = explicitFolderId ?? (await getOrCreateDefaultFolder(id)).id;
     const doc = await createDocument({
       courseId: id,
-      folderId,
+      folderId: explicitFolderId,
       filename: title,
       filePath: "",
       fileBase64: null,

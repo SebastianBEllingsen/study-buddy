@@ -7,6 +7,7 @@ import useSWR from "swr";
 import {
   ChevronRight,
   ClipboardPaste,
+  ExternalLink,
   FileText,
   Folder as FolderIcon,
   FolderPlus,
@@ -128,22 +129,29 @@ const MODE_META: Record<GenerationMode, { icon: LucideIcon; borderClass: string;
 
 const ALL_MATERIAL = "all";
 const NEW_FOLDER_SENTINEL = "__new__";
-// Stands in for the course's default folder ("Unsorted") when it doesn't
-// exist yet — it's never pre-created (see getOrCreateDefaultFolder), so a
-// brand-new course has no real folder id to preselect in these dropdowns.
-// Resolving to `null` (rather than creating it up front) lets the server
-// create it lazily, only if the upload/paste actually goes through.
-const DEFAULT_FOLDER_SENTINEL = "__default__";
+// Stands in for filing something directly on the course page rather than
+// inside any folder (folder_id null) — Select needs a string value, so this
+// maps to `null` wherever it's read.
+const COURSE_PAGE_SENTINEL = "__course__";
 // Generation's "Save to" destination defaults to this — same behavior as
 // before that control existed: file alongside the source folder when
-// scoped to one, otherwise the course's default folder (see
-// generateForCourse's own destinationFolderId doc comment). Picking a real
-// folder, Unsorted, or "+ Create new folder" below overrides it.
+// scoped to one, otherwise the course page itself (see generateForCourse's
+// own destinationFolderId doc comment). Picking a real folder, the course
+// page, or "+ Create new folder" below overrides it.
 const AUTO_DESTINATION_SENTINEL = "__auto__";
 
 // Folder-level key format is unchanged from before, so existing stored
 // preferences keep working; a section suffix (e.g. "documents", "generated")
 // namespaces the two sub-sections independently under the same folder.
+// Pops a note into its own browser window — e.g. so it can sit next to this
+// course page while browsing other material. Reuses the same window name
+// per note rather than a fresh one each click, so clicking twice focuses the
+// existing window instead of stacking duplicates — same convention as
+// DocumentViewer's own Detach.
+function detachNote(noteId: number) {
+  window.open(`/vault/${noteId}/detached`, `study-buddy-note-${noteId}`, "noopener,width=900,height=1000");
+}
+
 function collapseKey(folderId: number, section?: string) {
   return section
     ? `studybuddy:folder:${folderId}:${section}:collapsed`
@@ -231,18 +239,27 @@ function FolderSelect({
   ariaLabel,
 }: {
   folders: Folder[];
-  value: number;
-  onChange: (folderId: number) => void;
+  value: number | null;
+  onChange: (folderId: number | null) => void;
   ariaLabel: string;
 }) {
   return (
-    <Select value={String(value)} onValueChange={(v) => v && onChange(Number(v))}>
+    <Select
+      value={value === null ? COURSE_PAGE_SENTINEL : String(value)}
+      onValueChange={(v) => {
+        if (!v) return;
+        onChange(v === COURSE_PAGE_SENTINEL ? null : Number(v));
+      }}
+    >
       <SelectTrigger size="sm" aria-label={ariaLabel}>
         <SelectValue>
-          {(v: string) => folders.find((f) => String(f.id) === v)?.name ?? v}
+          {(v: string) =>
+            v === COURSE_PAGE_SENTINEL ? "This course page" : (folders.find((f) => String(f.id) === v)?.name ?? v)
+          }
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
         {folders.map((folder) => (
           <SelectItem key={folder.id} value={String(folder.id)}>
             {folder.name}
@@ -293,7 +310,7 @@ function DocumentPickerDialog({
     });
   }
 
-  const byFolder = new Map<number, DocumentSummaryRow[]>();
+  const byFolder = new Map<number | null, DocumentSummaryRow[]>();
   for (const doc of documents) {
     const list = byFolder.get(doc.folder_id) ?? [];
     list.push(doc);
@@ -314,9 +331,9 @@ function DocumentPickerDialog({
             <p className="text-sm text-muted-foreground">No documents in this course yet.</p>
           ) : (
             [...byFolder.entries()].map(([folderId, docs]) => (
-              <div key={folderId} className="space-y-1">
+              <div key={String(folderId)} className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">
-                  {folders.find((f) => f.id === folderId)?.name ?? "Unsorted"}
+                  {folderId === null ? "This course page" : (folders.find((f) => f.id === folderId)?.name ?? "This course page")}
                 </p>
                 {docs.map((doc) => (
                   <label
@@ -371,14 +388,14 @@ function DocumentList({
   onReorder,
 }: {
   documents: DocumentSummaryRow[];
-  folderId: number;
+  folderId: number | null;
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (documentId: number) => void;
   onDelete: (documentId: number) => void;
   onRename: (documentId: number, filename: string) => void;
   onView: (doc: DocumentSummaryRow) => void;
-  onReorder: (folderId: number, orderedIds: number[]) => void;
+  onReorder: (folderId: number | null, orderedIds: number[]) => void;
 }) {
   // A single renamingId (not one useState per row) — only one document's
   // name can be in edit mode at a time, same shape as ChatContent's
@@ -535,14 +552,14 @@ function GeneratedItemList({
   onReorder,
 }: {
   items: GeneratedItemSummary[];
-  folderId: number;
+  folderId: number | null;
   dueByItemId: Map<number, number>;
   notifiedItemIds: Set<number>;
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (itemId: number) => void;
   onDelete: (itemId: number) => void;
-  onReorder: (folderId: number, orderedIds: number[]) => void;
+  onReorder: (folderId: number | null, orderedIds: number[]) => void;
 }) {
   const { push: pushWithTransition } = useViewTransitionRouter();
   const modelBadge = useShowModelBadge();
@@ -655,11 +672,11 @@ function NoteList({
   onReorder,
 }: {
   notes: Note[];
-  folderId: number;
+  folderId: number | null;
   folders: Folder[];
-  onMove: (noteId: number, folderId: number) => void;
+  onMove: (noteId: number, folderId: number | null) => void;
   onDelete: (noteId: number) => void;
-  onReorder: (folderId: number, orderedIds: number[]) => void;
+  onReorder: (folderId: number | null, orderedIds: number[]) => void;
 }) {
   // Same reorder-by-drop-on-a-sibling-row pattern as DocumentList/
   // GeneratedItemList's row-level handleDrop.
@@ -709,6 +726,14 @@ function NoteList({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Open ${note.title} in a new window`}
+              onClick={() => detachNote(note.id)}
+            >
+              <ExternalLink className="size-3.5 text-muted-foreground" />
+            </Button>
             <RowActionsMenu
               ariaLabel={`Actions for ${note.title}`}
               deleteLabel="Delete note"
@@ -779,21 +804,21 @@ function FolderCard({
   onToggleSelectItem: (itemId: number) => void;
   onUpload: (folderId: number, files: FileList) => Promise<void>;
   onDeleteDocument: (documentId: number) => void;
-  onMoveDocument: (documentId: number, folderId: number) => void;
+  onMoveDocument: (documentId: number, folderId: number | null) => void;
   onRenameDocument: (documentId: number, filename: string) => void;
   onViewDocument: (doc: DocumentSummaryRow) => void;
-  onMoveItem: (itemId: number, folderId: number) => void;
+  onMoveItem: (itemId: number, folderId: number | null) => void;
   onDeleteItem: (itemId: number) => void;
-  onMoveNote: (noteId: number, folderId: number) => void;
+  onMoveNote: (noteId: number, folderId: number | null) => void;
   onDeleteNote: (noteId: number) => void;
-  onReorderNotes: (folderId: number, orderedIds: number[]) => void;
+  onReorderNotes: (folderId: number | null, orderedIds: number[]) => void;
   onAddToFolder: (folderId: number, kind: "upload" | "note") => void;
   onDeleteFolder: (folderId: number) => Promise<void>;
   onRenameFolder: (folderId: number, name: string) => Promise<void>;
   onCustomizeFolder: (folderId: number, fields: { icon?: string | null; color?: string | null }) => void;
   onReorder: (draggedFolderId: number, targetFolderId: number) => void;
-  onReorderDocuments: (folderId: number, orderedIds: number[]) => void;
-  onReorderItems: (folderId: number, orderedIds: number[]) => void;
+  onReorderDocuments: (folderId: number | null, orderedIds: number[]) => void;
+  onReorderItems: (folderId: number | null, orderedIds: number[]) => void;
   onNest: (draggedFolderId: number, parentFolderId: number) => void;
   onCreateSubfolder: (parentFolderId: number) => void;
   // True for a folder rendered inside its parent's card — hides subfolder-
@@ -1040,7 +1065,7 @@ function FolderCard({
                   contentClassName="w-64"
                   actions={[{ label: "Rename", icon: Pencil, onSelect: () => setRenaming(true) }]}
                   deleteLabel="Delete folder"
-                  deleteDescription="Its contents (and any subfolders' contents) aren't deleted — they move to Unsorted instead."
+                  deleteDescription="Its contents (and any subfolders' contents) aren't deleted — they move to the course page instead."
                   onDelete={() => onDeleteFolder(folder.id)}
                 >
                   <FolderCustomizeFields folder={folder} onCustomize={onCustomizeFolder} />
@@ -1158,19 +1183,18 @@ function BulkActionBar({
 }: {
   count: number;
   folders: Folder[];
-  onMove: (folderId: number) => Promise<void>;
+  onMove: (folderId: number | null) => Promise<void>;
   onDelete: () => Promise<void>;
   onClear: () => void;
 }) {
-  const [moveTo, setMoveTo] = useState<string>(String(folders.find((f) => f.is_master)?.id ?? ""));
+  const [moveTo, setMoveTo] = useState<string>(COURSE_PAGE_SENTINEL);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function handleMoveClick() {
-    if (!moveTo) return;
     setBusy(true);
     try {
-      await onMove(Number(moveTo));
+      await onMove(moveTo === COURSE_PAGE_SENTINEL ? null : Number(moveTo));
     } finally {
       setBusy(false);
     }
@@ -1189,7 +1213,12 @@ function BulkActionBar({
   return (
     <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2 shadow-md">
       <span className="px-1 text-sm font-medium">{count} selected</span>
-      <FolderSelect folders={folders} value={Number(moveTo)} onChange={(id) => setMoveTo(String(id))} ariaLabel="Move selected to folder" />
+      <FolderSelect
+        folders={folders}
+        value={moveTo === COURSE_PAGE_SENTINEL ? null : Number(moveTo)}
+        onChange={(id) => setMoveTo(id === null ? COURSE_PAGE_SENTINEL : String(id))}
+        ariaLabel="Move selected to folder"
+      />
       <Button size="sm" variant="outline" disabled={busy} onClick={handleMoveClick}>
         Move
       </Button>
@@ -1309,7 +1338,7 @@ export default function CoursePage() {
   // Where to file the generated item — independent of `scope`/
   // `generationDocIds` above, which only pick the source material. Same
   // sentinel pattern as uploadDestination (see AUTO_DESTINATION_SENTINEL,
-  // DEFAULT_FOLDER_SENTINEL, NEW_FOLDER_SENTINEL).
+  // COURSE_PAGE_SENTINEL, NEW_FOLDER_SENTINEL).
   const [generationDestination, setGenerationDestination] = useState<string>(AUTO_DESTINATION_SENTINEL);
   const [generationNewFolderName, setGenerationNewFolderName] = useState("");
   const [quizDialogOpen, setQuizDialogOpen] = useState(false);
@@ -1353,17 +1382,13 @@ export default function CoursePage() {
     clearSelection();
   }
 
-  // Seeds the upload-destination dropdown to the default folder the first
-  // time detail has folders to seed it from — render-phase sync (see
-  // CustomizeCourseDialog's seededFor) rather than a useEffect; the
-  // `!uploadDestination` guard makes this a no-op on every later update.
-  // Falls back to DEFAULT_FOLDER_SENTINEL when there's no real default
-  // folder yet (a still-empty course) rather than an empty string, so the
-  // dropdown always has a valid, selected option.
+  // Seeds the upload-destination dropdown to the course page itself the
+  // first time detail loads — render-phase sync (see CustomizeCourseDialog's
+  // seededFor) rather than a useEffect; the `!uploadDestination` guard makes
+  // this a no-op on every later update, so the dropdown always has a valid,
+  // selected option.
   if (detail && !uploadDestination) {
-    setUploadDestination(
-      detail.folders.find((f) => f.is_master)?.id.toString() ?? DEFAULT_FOLDER_SENTINEL
-    );
+    setUploadDestination(COURSE_PAGE_SENTINEL);
   }
 
   // itemId → how many of its cards are due — GeneratedItemList and the
@@ -1430,10 +1455,8 @@ export default function CoursePage() {
     router.replace(`/courses/${courseId}`, { scroll: false });
   }
 
-  // folderId null means "the default folder" — omitted from the request
-  // entirely rather than resolved to a real id here, so the server creates
-  // it lazily (see getOrCreateDefaultFolder) only if this upload actually
-  // succeeds.
+  // folderId null means "directly on the course page" — omitted from the
+  // request entirely rather than sent explicitly, though either works.
   async function handleUpload(folderId: number | null, files: FileList) {
     setError(null);
     let uploaded = 0;
@@ -1466,9 +1489,10 @@ export default function CoursePage() {
   // Pre-scopes the Upload/New note dialogs (which otherwise default to
   // whatever destination was last picked) to one specific folder — used by
   // that folder's own "+" menu, so "Upload files" from inside "App Ideas"
-  // doesn't need "App Ideas" re-picked from the destination dropdown.
-  function openAddToFolder(folderId: number, kind: "upload" | "note") {
-    setUploadDestination(String(folderId));
+  // doesn't need "App Ideas" re-picked from the destination dropdown. `null`
+  // pre-scopes to the course page itself (the top-level section's own "+" menu).
+  function openAddToFolder(folderId: number | null, kind: "upload" | "note") {
+    setUploadDestination(folderId === null ? COURSE_PAGE_SENTINEL : String(folderId));
     if (kind === "upload") setUploadOpen(true);
     else setNoteOpen(true);
   }
@@ -1503,12 +1527,10 @@ export default function CoursePage() {
 
   // Shared by the upload and paste-text dialogs — both pick a destination
   // folder from the same uploadDestination/uploadNewFolderName state,
-  // including "+ Create new folder". `null` means "the default folder,
-  // created lazily server-side if it doesn't exist yet" (see
-  // DEFAULT_FOLDER_SENTINEL) — never resolved to a real id here, so nothing
-  // gets created unless the upload/paste actually goes through.
+  // including "+ Create new folder". `null` means "directly on the course
+  // page" (see COURSE_PAGE_SENTINEL).
   async function resolveDestinationFolderId(): Promise<number | null> {
-    if (uploadDestination === DEFAULT_FOLDER_SENTINEL) {
+    if (uploadDestination === COURSE_PAGE_SENTINEL) {
       return null;
     }
     if (uploadDestination !== NEW_FOLDER_SENTINEL) {
@@ -1535,7 +1557,7 @@ export default function CoursePage() {
     if (generationDestination === AUTO_DESTINATION_SENTINEL) {
       return undefined;
     }
-    if (generationDestination === DEFAULT_FOLDER_SENTINEL) {
+    if (generationDestination === COURSE_PAGE_SENTINEL) {
       return null;
     }
     if (generationDestination !== NEW_FOLDER_SENTINEL) {
@@ -1692,7 +1714,7 @@ export default function CoursePage() {
     refresh();
   }
 
-  async function handleMoveDocument(documentId: number, folderId: number) {
+  async function handleMoveDocument(documentId: number, folderId: number | null) {
     await fetch(`/api/courses/${courseId}/documents/${documentId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1714,7 +1736,7 @@ export default function CoursePage() {
     refresh();
   }
 
-  async function handleMoveItem(itemId: number, folderId: number) {
+  async function handleMoveItem(itemId: number, folderId: number | null) {
     await fetch(`/api/items/${itemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1728,7 +1750,7 @@ export default function CoursePage() {
     refresh();
   }
 
-  async function handleMoveNote(noteId: number, folderId: number) {
+  async function handleMoveNote(noteId: number, folderId: number | null) {
     await fetch(`/api/notes/${noteId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1742,7 +1764,7 @@ export default function CoursePage() {
     refresh();
   }
 
-  async function handleReorderNotes(folderId: number, orderedIds: number[]) {
+  async function handleReorderNotes(folderId: number | null, orderedIds: number[]) {
     await fetch(`/api/courses/${courseId}/notes/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1751,9 +1773,8 @@ export default function CoursePage() {
     refresh();
   }
 
-  // `folderId` null omits the field entirely — the server lazily creates
-  // the default "Unsorted" folder in that case (see getOrCreateDefaultFolder),
-  // same as an upload with no destination picked.
+  // `folderId` null omits the field entirely — the note lands directly on
+  // the course page, same as an upload with no destination picked.
   async function handleCreateNote(folderId: number | null, title: string) {
     const res = await fetch(`/api/courses/${courseId}/notes`, {
       method: "POST",
@@ -1786,7 +1807,7 @@ export default function CoursePage() {
     }
   }
 
-  async function handleBulkMove(folderId: number) {
+  async function handleBulkMove(folderId: number | null) {
     await Promise.all([
       ...Array.from(selectedDocs).map((id) =>
         fetch(`/api/courses/${courseId}/documents/${id}`, {
@@ -1843,7 +1864,7 @@ export default function CoursePage() {
   // Unlike handleReorderFolders, DocumentList/GeneratedItemList already
   // compute the full new order themselves (dragging one row onto another
   // within an already-known, already-ordered array) — these just persist it.
-  async function handleReorderDocuments(folderId: number, orderedIds: number[]) {
+  async function handleReorderDocuments(folderId: number | null, orderedIds: number[]) {
     await fetch(`/api/courses/${courseId}/documents/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1852,7 +1873,7 @@ export default function CoursePage() {
     refresh();
   }
 
-  async function handleReorderItems(folderId: number, orderedIds: number[]) {
+  async function handleReorderItems(folderId: number | null, orderedIds: number[]) {
     await fetch(`/api/courses/${courseId}/generated/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1904,6 +1925,9 @@ export default function CoursePage() {
   // Visual cue for the "drag a subfolder out" drop zone around the folder
   // cards — see handleUnnestFolder.
   const [folderListDragOver, setFolderListDragOver] = useState(false);
+  // Same cue for the top-level "on this page" section — a document/item/note
+  // dropped here gets un-filed (folder_id null).
+  const [topLevelDragOver, setTopLevelDragOver] = useState(false);
   function setAllFoldersOpen(open: boolean) {
     if (!detail) return;
     for (const folder of detail.folders) {
@@ -2014,13 +2038,17 @@ export default function CoursePage() {
 
   // Exact match — a folder card only ever shows what's filed directly in
   // it; a parent's subfolders' contents render in their own nested cards,
-  // not merged in here (see FolderCard).
-  const docsByFolder = (folderId: number) =>
+  // not merged in here (see FolderCard). folderId null matches whatever's
+  // filed directly on the course page itself, outside any folder.
+  const docsByFolder = (folderId: number | null) =>
     detail.documents.filter((d) => d.folder_id === folderId);
-  const itemsByFolder = (folderId: number) =>
+  const itemsByFolder = (folderId: number | null) =>
     detail.items.filter((i) => i.folder_id === folderId);
-  const notesByFolder = (folderId: number) =>
+  const notesByFolder = (folderId: number | null) =>
     detail.notes.filter((n) => n.folder_id === folderId);
+  const topLevelDocuments = docsByFolder(null);
+  const topLevelItems = itemsByFolder(null);
+  const topLevelNotes = notesByFolder(null);
 
   // Picking a parent folder as the generation scope pools it with its own
   // subfolders — matches buildCourseContext's scoping in lib/context.ts.
@@ -2036,11 +2064,6 @@ export default function CoursePage() {
         : pooledFolderIds(Number(scope)).some((id) =>
             docsByFolder(id).some((d) => d.status === "extracted")
           );
-
-  // Whether the course already has its default folder — if not (a still-
-  // empty course, or one where it was deleted), the upload/paste dialogs'
-  // destination dropdown offers DEFAULT_FOLDER_SENTINEL in its place.
-  const hasDefaultFolder = detail.folders.some((f) => f.is_master);
 
   const viewingDocument = viewingDocumentData?.document ?? null;
 
@@ -2338,16 +2361,14 @@ export default function CoursePage() {
                             {(v: string) =>
                               v === NEW_FOLDER_SENTINEL
                                 ? "+ Create new folder"
-                                : v === DEFAULT_FOLDER_SENTINEL
-                                  ? "Unsorted"
+                                : v === COURSE_PAGE_SENTINEL
+                                  ? "This course page"
                                   : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {!hasDefaultFolder && (
-                            <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
-                          )}
+                          <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
                           {detail.folders.map((folder) => (
                             <SelectItem key={folder.id} value={String(folder.id)}>
                               {folder.name}
@@ -2419,16 +2440,14 @@ export default function CoursePage() {
                             {(v: string) =>
                               v === NEW_FOLDER_SENTINEL
                                 ? "+ Create new folder"
-                                : v === DEFAULT_FOLDER_SENTINEL
-                                  ? "Unsorted"
+                                : v === COURSE_PAGE_SENTINEL
+                                  ? "This course page"
                                   : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {!hasDefaultFolder && (
-                            <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
-                          )}
+                          <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
                           {detail.folders.map((folder) => (
                             <SelectItem key={folder.id} value={String(folder.id)}>
                               {folder.name}
@@ -2580,16 +2599,14 @@ export default function CoursePage() {
                             {(v: string) =>
                               v === NEW_FOLDER_SENTINEL
                                 ? "+ Create new folder"
-                                : v === DEFAULT_FOLDER_SENTINEL
-                                  ? "Unsorted"
+                                : v === COURSE_PAGE_SENTINEL
+                                  ? "This course page"
                                   : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {!hasDefaultFolder && (
-                            <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
-                          )}
+                          <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
                           {detail.folders.map((folder) => (
                             <SelectItem key={folder.id} value={String(folder.id)}>
                               {folder.name}
@@ -2658,6 +2675,91 @@ export default function CoursePage() {
           />
         )}
 
+        {/* Anything with no folder chosen lands here, directly on the course
+            page — no card border/name row (unlike FolderCard), since this is
+            the page's own content rather than a nested container. */}
+        <div
+          className={`space-y-2 rounded-md transition-colors ${
+            topLevelDragOver ? "bg-primary/5 ring-1 ring-primary" : ""
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setTopLevelDragOver(true);
+          }}
+          onDragLeave={() => setTopLevelDragOver(false)}
+          onDrop={async (e) => {
+            e.preventDefault();
+            setTopLevelDragOver(false);
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+              await handleUpload(null, e.dataTransfer.files);
+              return;
+            }
+            const payload = readDragPayload(e);
+            if (!payload) return;
+            if (payload.kind === "document") handleMoveDocument(payload.id, null);
+            else if (payload.kind === "item") handleMoveItem(payload.id, null);
+            else if (payload.kind === "note") handleMoveNote(payload.id, null);
+          }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-muted-foreground">On this page</span>
+            <RowActionsMenu
+              ariaLabel="Add to this course page"
+              triggerIcon={Plus}
+              actions={[
+                { label: "Upload files", icon: Upload, onSelect: () => openAddToFolder(null, "upload") },
+                { label: "New note", icon: StickyNote, onSelect: () => openAddToFolder(null, "note") },
+              ]}
+            />
+          </div>
+          {topLevelDocuments.length + topLevelItems.length + topLevelNotes.length === 0 ? (
+            detail.folders.length > 0 && (
+              <p className="py-0.5 text-sm text-muted-foreground/70">
+                Nothing filed directly on the course page yet.
+              </p>
+            )
+          ) : (
+            <ul className="divide-y divide-border/60">
+              {topLevelDocuments.length > 0 && (
+                <DocumentList
+                  documents={topLevelDocuments}
+                  folderId={null}
+                  editMode={editMode}
+                  selected={selectedDocs}
+                  onToggleSelect={toggleSelectDoc}
+                  onDelete={handleDeleteDocument}
+                  onRename={handleRenameDocument}
+                  onView={(doc) => openDocumentViewer(doc.id)}
+                  onReorder={handleReorderDocuments}
+                />
+              )}
+              {topLevelItems.length > 0 && (
+                <GeneratedItemList
+                  items={topLevelItems}
+                  folderId={null}
+                  dueByItemId={dueByItemId}
+                  notifiedItemIds={notifiedItemIds}
+                  editMode={editMode}
+                  selected={selectedItems}
+                  onToggleSelect={toggleSelectItem}
+                  onDelete={handleDeleteItem}
+                  onReorder={handleReorderItems}
+                />
+              )}
+              {topLevelNotes.length > 0 && (
+                <NoteList
+                  notes={topLevelNotes}
+                  folderId={null}
+                  folders={detail.folders}
+                  onMove={handleMoveNote}
+                  onDelete={handleDeleteNote}
+                  onReorder={handleReorderNotes}
+                />
+              )}
+            </ul>
+          )}
+        </div>
+
         <div
           className={`space-y-3 rounded-lg transition-colors ${
             folderListDragOver ? "outline-2 outline-dashed outline-primary/40" : ""
@@ -2674,11 +2776,14 @@ export default function CoursePage() {
             if (payload?.kind === "folder") handleUnnestFolder(payload.id);
           }}
         >
-          {detail.folders.length === 0 && (
-            <p className="py-1 text-sm text-muted-foreground/70">
-              Nothing here yet — upload a document, paste some text, or create a folder to get started.
-            </p>
-          )}
+          {detail.folders.length === 0 &&
+            topLevelDocuments.length === 0 &&
+            topLevelItems.length === 0 &&
+            topLevelNotes.length === 0 && (
+              <p className="py-1 text-sm text-muted-foreground/70">
+                Nothing here yet — upload a document, paste some text, or create a folder to get started.
+              </p>
+            )}
           {detail.folders
             .filter((folder) => folder.parent_folder_id == null)
             .map((folder) => (
@@ -2836,17 +2941,15 @@ export default function CoursePage() {
                       ? "Same as source"
                       : v === NEW_FOLDER_SENTINEL
                         ? "+ Create new folder"
-                        : v === DEFAULT_FOLDER_SENTINEL
-                          ? "Unsorted"
+                        : v === COURSE_PAGE_SENTINEL
+                          ? "This course page"
                           : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
                   }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={AUTO_DESTINATION_SENTINEL}>Same as source</SelectItem>
-                {!hasDefaultFolder && (
-                  <SelectItem value={DEFAULT_FOLDER_SENTINEL}>Unsorted</SelectItem>
-                )}
+                <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
                 {detail.folders.map((folder) => (
                   <SelectItem key={folder.id} value={String(folder.id)}>
                     {folder.name}

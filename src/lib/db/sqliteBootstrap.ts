@@ -35,11 +35,6 @@ export function migrate(database: Database.Database) {
       "ALTER TABLE generated_items ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL"
     );
   }
-  if (!hasColumn("folders", "is_master")) {
-    database.exec(
-      "ALTER TABLE folders ADD COLUMN is_master INTEGER NOT NULL DEFAULT 0"
-    );
-  }
   if (!hasColumn("folders", "parent_folder_id")) {
     database.exec(
       "ALTER TABLE folders ADD COLUMN parent_folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE"
@@ -178,63 +173,13 @@ export function migrate(database: Database.Database) {
     "CREATE INDEX IF NOT EXISTS idx_generated_items_source_folder_id ON generated_items(source_folder_id)"
   );
 
-  // Every document/generated_item/note must belong to a real folder — no
-  // NULL ("floating") state. A course itself no longer gets a default
-  // folder created just for existing, though (see createCourse/
-  // getOrCreateDefaultFolder in models.ts) — an empty course now shows
-  // nothing rather than a permanent "Unsorted" no one asked for. So this
-  // only creates one for a course that actually has orphaned (NULL
-  // folder_id) content needing a home, exactly mirroring what
-  // getOrCreateDefaultFolder does lazily at request time: a still-empty
-  // course must NOT get one conjured up here just for having zero folders.
-  // notes.folder_id doesn't necessarily exist yet at this point in an
-  // upgrade (added further below) — skip notes here in that case; any
-  // pre-folder-feature notes needing a home predate this backfill either way.
-  const notesHasFolderId = hasColumn("notes", "folder_id");
-  const orphanedContentUnion = notesHasFolderId
-    ? `SELECT course_id FROM documents WHERE folder_id IS NULL
-       UNION SELECT course_id FROM generated_items WHERE folder_id IS NULL
-       UNION SELECT course_id FROM notes WHERE folder_id IS NULL AND course_id IS NOT NULL`
-    : `SELECT course_id FROM documents WHERE folder_id IS NULL
-       UNION SELECT course_id FROM generated_items WHERE folder_id IS NULL`;
-  const coursesNeedingDefault = database
-    .prepare(
-      `SELECT DISTINCT course_id AS id FROM (${orphanedContentUnion})
-       WHERE course_id NOT IN (SELECT course_id FROM folders WHERE is_master = 1)`
-    )
-    .all() as { id: number }[];
-
-  if (coursesNeedingDefault.length > 0) {
-    const insertDefault = database.prepare(
-      "INSERT INTO folders (course_id, name, is_master) VALUES (?, 'Unsorted', 1)"
-    );
-    const backfillDocuments = database.prepare(
-      "UPDATE documents SET folder_id = ? WHERE course_id = ? AND folder_id IS NULL"
-    );
-    const backfillItems = database.prepare(
-      "UPDATE generated_items SET folder_id = ? WHERE course_id = ? AND folder_id IS NULL"
-    );
-    const backfillNotes = notesHasFolderId
-      ? database.prepare("UPDATE notes SET folder_id = ? WHERE course_id = ? AND folder_id IS NULL")
-      : null;
-
-    const backfillCourse = database.transaction((courseId: number) => {
-      const { lastInsertRowid } = insertDefault.run(courseId);
-      backfillDocuments.run(lastInsertRowid, courseId);
-      backfillItems.run(lastInsertRowid, courseId);
-      backfillNotes?.run(lastInsertRowid, courseId);
-    });
-
-    for (const { id } of coursesNeedingDefault) {
-      backfillCourse(id);
-    }
-  }
+  // A document/generated_item/note with folder_id NULL is filed directly on
+  // the course page — a real, intended state (see DocumentRow's doc comment
+  // in models.ts), not something needing a home conjured up for it.
 
   const backfillPositions = (courseId: number) => {
     const ordered = database
-      .prepare(
-        "SELECT id FROM folders WHERE course_id = ? ORDER BY is_master DESC, created_at ASC"
-      )
+      .prepare("SELECT id FROM folders WHERE course_id = ? ORDER BY created_at ASC")
       .all(courseId) as { id: number }[];
     const setPosition = database.prepare(
       "UPDATE folders SET position = ? WHERE id = ?"
@@ -324,6 +269,39 @@ export function migrate(database: Database.Database) {
     ).map((r) => r.id);
     for (const id of courseIds) {
       backfillPositions(id);
+    }
+  }
+
+  // The "Unsorted" master folder concept is retired — anything filed there
+  // now belongs directly on the course page instead (folder_id NULL). Runs
+  // after the legacy tree-merge above (which still needs is_master to find
+  // each tree's root, if this database is old enough to have gone through
+  // it). Any real subfolder someone nested under a master folder is
+  // preserved by un-nesting it to top level first, rather than letting
+  // parent_folder_id's ON DELETE CASCADE take it down too; documents/
+  // generated_items/notes.folder_id and generated_items.source_folder_id
+  // all null out automatically via their own ON DELETE SET NULL once the
+  // folder row itself is deleted (foreign_keys is ON — see db/sqlite.ts).
+  if (hasColumn("folders", "is_master")) {
+    const masterFolders = database
+      .prepare("SELECT id FROM folders WHERE is_master = 1")
+      .all() as { id: number }[];
+    const unnestSubfolders = database.prepare(
+      "UPDATE folders SET parent_folder_id = NULL WHERE parent_folder_id = ?"
+    );
+    const deleteFolder = database.prepare("DELETE FROM folders WHERE id = ?");
+    const dissolve = database.transaction((folderId: number) => {
+      unnestSubfolders.run(folderId);
+      deleteFolder.run(folderId);
+    });
+    for (const { id } of masterFolders) {
+      dissolve(id);
+    }
+    try {
+      database.exec("ALTER TABLE folders DROP COLUMN is_master");
+    } catch (err) {
+      // Non-fatal, same reasoning as the `tree` column drop above.
+      console.warn("Could not drop folders.is_master column:", err);
     }
   }
 

@@ -31,7 +31,7 @@ export class UnsupportedDocumentTypeError extends Error {
 // leaving an orphaned file on disk after createDocument rejects it.
 export async function ingestDocumentBytes(params: {
   courseId: number;
-  folderId: number;
+  folderId: number | null;
   filename: string;
   buffer: Buffer;
 }): Promise<DocumentRow> {

@@ -24,7 +24,6 @@ function makeFolder(id: number, name: string) {
     id,
     course_id: 7,
     name,
-    is_master: false,
     position: 0,
     parent_folder_id: null,
     icon: null,

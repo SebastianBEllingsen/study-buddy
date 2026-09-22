@@ -26,7 +26,6 @@ const {
   getFolder,
   deleteFolder,
   nestFolder,
-  getOrCreateDefaultFolder,
   createDocument,
   getDocument,
   moveDocument,
@@ -268,7 +267,7 @@ describe("cross-course create-path validation", () => {
 });
 
 describe("deleteFolder reassignment", () => {
-  it("reassigns documents/items/notes to the course's default folder rather than orphaning them", async () => {
+  it("moves documents/items/notes to the course page (folder_id null) rather than orphaning them", async () => {
     const course = await createCourse("C");
     const folder = await createFolder(course.id, "Doomed");
     const doc = await createDocument({
@@ -282,25 +281,69 @@ describe("deleteFolder reassignment", () => {
 
     await deleteFolder(folder.id);
 
-    const defaultFolder = await getOrCreateDefaultFolder(course.id);
-    expect(defaultFolder.id).not.toBe(folder.id);
     const movedDoc = await getDocument(doc.id);
     const movedNote = await getNote(note.id);
-    expect(movedDoc?.folder_id).toBe(defaultFolder.id);
-    expect(movedNote?.folder_id).toBe(defaultFolder.id);
+    expect(movedDoc?.folder_id).toBeNull();
+    expect(movedNote?.folder_id).toBeNull();
     // The deleted folder itself is really gone.
     expect(await getFolder(folder.id)).toBeUndefined();
   });
 
-  it("just deletes an empty folder with nothing to reassign, no default folder conjured up", async () => {
+  it("just deletes an empty folder with nothing to reassign", async () => {
     const course = await createCourse("C");
     const folder = await createFolder(course.id, "Empty");
     await deleteFolder(folder.id);
     expect(await getFolder(folder.id)).toBeUndefined();
-    // No content existed, so no "Unsorted" folder should have been created.
     const { db, schema } = testDb;
     const remaining = db.select().from(schema.folders).all();
     expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("filing with no folder chosen", () => {
+  it("creating a document/note/generated item with folderId null lands directly on the course page", async () => {
+    const course = await createCourse("C");
+    const doc = await createDocument({
+      courseId: course.id,
+      folderId: null,
+      filename: "doc.pdf",
+      filePath: "/tmp/doc.pdf",
+      fileBase64: null,
+    });
+    const note = await createNote("N", course.id, null);
+    const item = await createGeneratedItem({
+      courseId: course.id,
+      folderId: null,
+      sourceFolderId: null,
+      sourceHandpicked: false,
+      mode: "notes",
+      title: "T",
+      contentJson: {},
+      sourceDocumentIds: [],
+    });
+
+    expect(doc.folder_id).toBeNull();
+    expect(note.folder_id).toBeNull();
+    expect(item.folder_id).toBeNull();
+    // No "Unsorted" (or any other) folder should have been conjured up.
+    const { db, schema } = testDb;
+    const folders = db.select().from(schema.folders).all();
+    expect(folders).toHaveLength(0);
+  });
+
+  it("moving a document back to folderId null un-files it onto the course page", async () => {
+    const { course, folder } = await makeCourseWithFolder();
+    const doc = await createDocument({
+      courseId: course.id,
+      folderId: folder.id,
+      filename: "doc.pdf",
+      filePath: "/tmp/doc.pdf",
+      fileBase64: null,
+    });
+
+    await moveDocument(doc.id, null);
+
+    expect((await getDocument(doc.id))?.folder_id).toBeNull();
   });
 });
 

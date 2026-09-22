@@ -1156,53 +1156,51 @@ function HomePageContent() {
 
   return (
     <>
-      {hasBanner && (bannerStyle === "overlap" || lockCrop) && (
+      {hasBanner && bannerStyle === "overlap" && !lockCrop && (
         // Same full-bleed, Steam-library-style treatment as a course page's
         // page_background_image — see courses/[courseId]/page.tsx. The
         // dashboard section right below gets pulled up into this image's
-        // bottom edge (see the negative margin below) rather than just
-        // sitting underneath it — see Settings' "Banner style". When
-        // dashboardLockBackgroundCrop is on, "backdrop" renders here too
-        // (just with its own gradient direction) instead of the dynamic
-        // full-section treatment below — a locked exact-aspect crop can't
-        // also stretch to an arbitrary content height, so locking forces
-        // both banner styles into this same fixed-ratio strip.
+        // bottom edge (see the negative margin further down) rather than
+        // just sitting underneath it — see Settings' "Banner style".
         <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
-          <div
-            className={
-              lockCrop
-                ? "relative overflow-hidden bg-center"
-                : "relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
-            }
-            style={{
-              backgroundImage: `url(${settings.dashboardBackgroundImage})`,
-              ...(lockCrop ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" } : {}),
-            }}
-          >
-            <div
-              className={
-                bannerStyle === "backdrop"
-                  ? "absolute inset-0 bg-gradient-to-b from-black/10 via-background/70 to-background"
-                  : "absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10"
-              }
-            />
+          <div className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64" style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}>
+            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10" />
           </div>
         </div>
       )}
     <div className="space-y-6">
-      {hasBanner && bannerStyle === "backdrop" && !lockCrop ? (
-        // The banner spans the whole dashboard section — heading through
-        // every widget row, not just its top edge — so it has to size
-        // itself to however tall that content ends up being (one widget row
-        // or three) rather than a fixed height: this wrapper is "relative"
-        // and the image is "absolute inset-0", so it just fills whatever
-        // box dashboardSection's own normal-flow layout establishes.
+      {hasBanner && (bannerStyle === "backdrop" || lockCrop) ? (
+        // Content is pinned right at the top, immediately below the header —
+        // not pushed down by the image's own height — with the image
+        // sitting behind it as a backdrop. Unlocked "backdrop" sizes the
+        // image to match content height exactly (absolute inset-0 fills
+        // whatever box dashboardSection's normal flow establishes, so it
+        // never bleeds past it — see the plain image div below). Locked
+        // crop can't do that (an exact aspect-ratio crop can't also stretch
+        // to an arbitrary content height), so it keeps its own aspect-ratio
+        // height instead, decoupled from content entirely — on a wide
+        // screen that's easily taller than the dashboard section, and since
+        // an absolutely positioned element isn't clipped to its container,
+        // it bleeds straight down past the widgets into "Your courses"
+        // below (which paints over it, same as the widgets do, since both
+        // come later in the DOM than this banner). Both banner style
+        // settings converge on this one treatment when locked — an exact
+        // crop has no dynamic-height mode to fall back to — same as the
+        // gradient direction below, which only ever made sense pinned to
+        // the top: it's what let "backdrop" show a clear image right behind
+        // the heading in the first place.
         <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
           <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}
+            className={lockCrop ? "absolute inset-x-0 top-0 bg-center" : "absolute inset-0 bg-cover bg-center"}
+            style={{
+              backgroundImage: `url(${settings.dashboardBackgroundImage})`,
+              ...(lockCrop ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" } : {}),
+            }}
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-background/70 to-background" />
+          <div
+            className={`bg-gradient-to-b from-black/10 via-background/70 to-background ${lockCrop ? "absolute inset-x-0 top-0" : "absolute inset-0"}`}
+            style={lockCrop ? { aspectRatio: BACKGROUND_ASPECT } : undefined}
+          />
           <div className="relative mx-auto max-w-5xl px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
             {dashboardSection}
           </div>
