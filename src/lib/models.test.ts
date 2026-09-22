@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import type { TestDb } from "./db/testHarness";
+import { PgDialect } from "drizzle-orm/pg-core";
+import * as pgSchema from "./db/schema.pg";
 
 // models.ts imports db/courses/folders/.../runTransaction from "./db" —
 // mocked here to point at a throwaway in-memory SQLite database (see
@@ -59,6 +61,7 @@ const {
   canvasCandidates,
   recordRecentView,
   listRecentViews,
+  positionCases,
 } = await import("./models");
 
 beforeEach(() => {
@@ -130,6 +133,21 @@ describe("position assignment", () => {
     );
     const positions = docs.map((d) => d.position).sort((a, b) => a - b);
     expect(positions).toEqual([0, 1, 2, 3, 4]);
+  });
+});
+
+describe("positionCases on Postgres", () => {
+  // Regression: this suite runs on SQLite, which accepted the untyped
+  // "WHEN $1 THEN $2" form — Postgres resolved that CASE to text and
+  // rejected every reorder against the integer position column. Rendering
+  // with the real Postgres dialect is as close as this suite can get
+  // without a live database (see importGuard.test.ts).
+  it("casts every position so Postgres types the CASE as an integer", () => {
+    const { sql, params } = new PgDialect().sqlToQuery(positionCases(pgSchema.courses.id as never, [3, 1, 2]));
+    expect(sql).toBe(
+      'CASE "courses"."id" WHEN $1 THEN CAST($2 AS INTEGER) WHEN $3 THEN CAST($4 AS INTEGER) WHEN $5 THEN CAST($6 AS INTEGER) END'
+    );
+    expect(params).toEqual([3, 0, 1, 1, 2, 2]);
   });
 });
 

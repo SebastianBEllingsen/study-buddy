@@ -6,6 +6,7 @@ import {
   setShowModelBadge,
   setAutoOpenGeneratedItems,
   setAiGradingEnabled,
+  setUnlimitedUploads,
   setDocumentBadgesEnabled,
   setDocumentBadgeDetail,
   setAiEfficiencyMode,
@@ -105,6 +106,12 @@ export async function POST(request: Request) {
     await setAutoOpenGeneratedItems(body.autoOpenGeneratedItems);
   }
 
+  if (body?.unlimitedUploads !== undefined) {
+    if (typeof body.unlimitedUploads !== "boolean") {
+      return Response.json({ error: "unlimitedUploads must be a boolean" }, { status: 400 });
+    }
+    await setUnlimitedUploads(body.unlimitedUploads);
+  }
   if (body?.aiGradingEnabled !== undefined) {
     if (typeof body.aiGradingEnabled !== "boolean") {
       return Response.json({ error: "aiGradingEnabled must be a boolean" }, { status: 400 });

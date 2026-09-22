@@ -85,6 +85,8 @@ export const app_settings = sqliteTable("app_settings", {
   dashboard_lock_background_crop: integer("dashboard_lock_background_crop", { mode: "boolean" })
     .notNull()
     .default(false),
+  // See AppSettings.unlimitedUploads's doc comment in models.ts.
+  unlimited_uploads: integer("unlimited_uploads", { mode: "boolean" }).notNull().default(false),
   // See AppSettings.dashboardBackdropFullPage's doc comment in models.ts.
   dashboard_backdrop_full_page: integer("dashboard_backdrop_full_page", { mode: "boolean" })
     .notNull()

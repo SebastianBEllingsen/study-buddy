@@ -22,7 +22,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
 import { HelpTooltip } from "@/components/HelpTooltip";
-import { uploadImage } from "@/lib/uploadImage";
+import { describeUploadError, uploadImage } from "@/lib/uploadImage";
 import { ICON_ASPECT, ICON_OUTPUT, BACKGROUND_ASPECT, BACKGROUND_OUTPUT_WIDTH, BACKGROUND_OUTPUT_HEIGHT } from "@/lib/imageCropPresets";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -739,6 +739,56 @@ function CalendarFeedsSection() {
   );
 }
 
+// "Full-resolution uploads" — lifts the per-kind image size caps (see
+// lib/uploadLimits.ts) and the downscaling/compression that keeps uploads
+// under them. Lives under Storage since what it trades away is storage
+// space and bandwidth.
+function UploadLimitToggle() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  const [saving, setSaving] = useState(false);
+  if (!settings) return null;
+
+  async function handleToggle(next: boolean) {
+    mutate((prev) => (prev ? { ...prev, unlimitedUploads: next } : prev), { revalidate: false });
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unlimitedUploads: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.error("Couldn't save upload settings");
+      mutate((prev) => (prev ? { ...prev, unlimitedUploads: !next } : prev), { revalidate: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
+      <span className="flex items-center gap-1.5">
+        Full-resolution uploads
+        <HelpTooltip>
+          Off (default): images are kept to a sensible size — backdrops and note images up to 8 MB, covers 4
+          MB, icons 3 MB — scaled to how large they&apos;re shown, with animations compressed to fit. On: no
+          size limit and no downscaling, so pictures and animations are stored at full resolution. That uses
+          more storage and makes large backdrops slower to load. Your storage provider&apos;s own per-file
+          limit still applies (Supabase&apos;s default is 50 MB).
+        </HelpTooltip>
+      </span>
+      <input
+        type="checkbox"
+        className="size-4 shrink-0 accent-primary"
+        checked={settings.unlimitedUploads}
+        disabled={saving}
+        onChange={(e) => handleToggle(e.target.checked)}
+      />
+    </label>
+  );
+}
+
 function StorageSection() {
   const [settings, setSettings] = useState<StorageSettingsState | null>(null);
   const [mode, setMode] = useState<StorageMode>("local");
@@ -984,6 +1034,8 @@ function StorageSection() {
       <Button size="sm" onClick={handleSave} disabled={saving}>
         {saving ? "Saving…" : "Save"}
       </Button>
+
+      <UploadLimitToggle />
 
       <div className="space-y-1.5 border-t pt-3">
         <Label>Backup</Label>
@@ -1394,13 +1446,14 @@ function BrandingSection() {
         outputWidth={ICON_OUTPUT}
         outputHeight={ICON_OUTPUT}
         outputFormat="png"
+        uploadKind="app-icon"
         title="Position app icon"
         onCropped={async (blob) => {
           try {
             const url = await uploadImage(blob, "app-icon");
             saveBranding({ appIconImage: url });
-          } catch {
-            toast.error("Couldn't upload that image");
+          } catch (err) {
+            toast.error(describeUploadError(err, "Couldn't upload that image"));
           }
         }}
       />
@@ -1415,6 +1468,7 @@ function BrandingSection() {
         outputWidth={BACKGROUND_OUTPUT_WIDTH}
         outputHeight={BACKGROUND_OUTPUT_HEIGHT}
         outputFormat="jpeg"
+        uploadKind="dashboard-background"
         title="Position dashboard backdrop"
         onCropped={async (blob) => {
           try {
@@ -1425,8 +1479,8 @@ function BrandingSection() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ kind: "background", url }),
             }).catch(() => {});
-          } catch {
-            toast.error("Couldn't upload that image");
+          } catch (err) {
+            toast.error(describeUploadError(err, "Couldn't upload that image"));
           }
         }}
       />

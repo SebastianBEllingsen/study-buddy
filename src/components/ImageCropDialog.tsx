@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +12,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { isAnimatedImage } from "@/lib/animatedImage";
+import {
+  AnimationTooLargeError,
+  canEncodeAnimations,
+  encodeAnimation,
+  type EncodeProgress,
+} from "@/lib/animationEncoder";
+import { uploadLimitBytes } from "@/lib/uploadLimits";
+import { fetchUnlimitedUploads, type ImageUploadKind } from "@/lib/uploadImage";
 
 const MAX_ZOOM = 3;
 // Falls back to this only before an image has actually loaded (naturalSize
@@ -22,6 +32,18 @@ const MIN_ZOOM_FLOOR = 0.2;
 // output size. Used for both course icon (square) and cover (wide) uploads
 // — previously those force-cropped the image's center via a plain resize,
 // giving no control over which part of a wide/tall source photo survives.
+//
+// An animated upload (GIF, animated WebP, APNG) takes a different path at
+// the bake step: a canvas only ever holds one frame, so baking it the usual
+// way would silently turn it into a still. Instead every frame is cropped
+// the same way and re-encoded as an animation, compressed to fit
+// `uploadKind`'s size cap (see lib/animationEncoder.ts). The preview needs
+// no special handling — it's a plain <img> of the picked file, which
+// animates on its own.
+//
+// With "Full-resolution uploads" on (Settings → Storage), nothing is
+// scaled down to outputWidth/outputHeight: the crop is kept at the source's
+// own resolution, and animations aren't compressed to a size cap.
 export function ImageCropDialog({
   open,
   onOpenChange,
@@ -30,6 +52,7 @@ export function ImageCropDialog({
   outputWidth,
   outputHeight,
   outputFormat = "jpeg",
+  uploadKind,
   title,
   onCropped,
 }: {
@@ -43,6 +66,9 @@ export function ImageCropDialog({
   // over a background image) — "jpeg" (the default) always flattens to an
   // opaque background, which is fine and much smaller for a cover photo.
   outputFormat?: "jpeg" | "png";
+  // Which /api/blobs kind the result will be uploaded as — sets the size
+  // cap an animation is compressed to fit (lib/uploadLimits.ts).
+  uploadKind: ImageUploadKind;
   title: string;
   onCropped: (blob: Blob) => void;
 }) {
@@ -58,6 +84,18 @@ export function ImageCropDialog({
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [baking, setBaking] = useState(false);
+  // Whether the picked file animates, checked from its bytes (see
+  // lib/animatedImage.ts) — null until that check finishes, for the file
+  // it was checked for, so a previous file's answer
+  // never applies to a new one.
+  const [animation, setAnimation] = useState<{ file: File; animated: boolean } | null>(null);
+  const animated = animation?.file === file && animation.animated;
+  const keepsAnimation = animated && canEncodeAnimations();
+  const [progress, setProgress] = useState<EncodeProgress | null>(null);
+  // Only for the note under the frame — the bake itself re-reads the
+  // setting fresh (see handleConfirm), since this cached copy can be stale.
+  const { data: settings } = useSWR<{ unlimitedUploads?: boolean }>("/api/settings");
+  const unlimitedHint = !!settings?.unlimitedUploads;
 
   // Loads the picked file the moment the dialog opens for it, and resets
   // zoom/pan so a previous image's framing never leaks into a new one.
@@ -72,7 +110,17 @@ export function ImageCropDialog({
       setOffset({ x: 0, y: 0 });
     };
     img.src = url;
-    return () => URL.revokeObjectURL(url);
+    let cancelled = false;
+    file
+      .arrayBuffer()
+      .then((buffer) => {
+        if (!cancelled) setAnimation({ file, animated: isAnimatedImage(new Uint8Array(buffer), file.type) });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      URL.revokeObjectURL(url);
+    };
   }, [open, file]);
 
   // The viewport's real CSS size — fixed aspect ratio, but its width
@@ -170,26 +218,52 @@ export function ImageCropDialog({
     if (!imgEl || dispWidth <= 0) return;
     setBaking(true);
     try {
+      const unlimited = await fetchUnlimitedUploads();
       const sx = -displayOffset.x / totalScale;
       const sy = -displayOffset.y / totalScale;
       const sw = viewportSize.width / totalScale;
       const sh = viewportSize.height / totalScale;
+      if (keepsAnimation && file) {
+        setProgress({ fraction: 0, attempt: 1 });
+        const blob = await encodeAnimation(file, {
+          crop: { sx, sy, sw, sh },
+          maxWidth: unlimited ? Infinity : outputWidth,
+          maxHeight: unlimited ? Infinity : outputHeight,
+          maxBytes: uploadLimitBytes(uploadKind, unlimited),
+          transparent: outputFormat === "png",
+          onProgress: setProgress,
+        });
+        onCropped(blob);
+        onOpenChange(false);
+        return;
+      }
+      // Full resolution keeps the crop at the source's own pixel size
+      // (sw × sh) instead of resampling it to the fixed output size.
+      const width = unlimited ? Math.max(1, Math.round(sw)) : outputWidth;
+      const height = unlimited ? Math.max(1, Math.round(sh)) : outputHeight;
       const canvas = document.createElement("canvas");
-      canvas.width = outputWidth;
-      canvas.height = outputHeight;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas not supported");
-      ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
+      ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, width, height);
       const blob = await new Promise<Blob | null>((resolve) =>
-        outputFormat === "png" ? canvas.toBlob(resolve, "image/png") : canvas.toBlob(resolve, "image/jpeg", 0.85)
+        outputFormat === "png"
+          ? canvas.toBlob(resolve, "image/png")
+          : canvas.toBlob(resolve, "image/jpeg", unlimited ? 0.95 : 0.85)
       );
       if (!blob) throw new Error("Canvas produced no image data");
       onCropped(blob);
       onOpenChange(false);
-    } catch {
-      toast.error("Couldn't process that image");
+    } catch (err) {
+      if (err instanceof AnimationTooLargeError) {
+        toast.error(`${err.message}. Try a shorter clip, or turn on Full-resolution uploads in Settings → Storage.`);
+      } else {
+        toast.error(animated ? "Couldn't process that animation" : "Couldn't process that image");
+      }
     } finally {
       setBaking(false);
+      setProgress(null);
     }
   }
 
@@ -248,6 +322,16 @@ export function ImageCropDialog({
             )}
           </div>
 
+          {animated && (
+            <p className="text-xs text-muted-foreground">
+              {keepsAnimation
+                ? unlimitedHint
+                  ? "Animated image — the animation is kept at full resolution."
+                  : "Animated image — the animation is kept, compressed if needed to fit the upload limit."
+                : "This browser can't process animations, so only the first frame will be kept."}
+            </p>
+          )}
+
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Zoom</span>
             <input
@@ -267,7 +351,11 @@ export function ImageCropDialog({
             Cancel
           </Button>
           <Button onClick={handleConfirm} disabled={baking || !imgEl}>
-            {baking ? "Saving…" : "Use this crop"}
+            {baking
+              ? progress !== null
+                ? `${progress.attempt > 1 ? "Compressing to fit" : "Processing animation"}… ${Math.round(progress.fraction * 100)}%`
+                : "Saving…"
+              : "Use this crop"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -164,6 +164,7 @@ interface SettingsRow {
   dashboard_transparent_widgets: boolean;
   dashboard_lock_background_crop: boolean;
   dashboard_backdrop_full_page: boolean;
+  unlimited_uploads: boolean;
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
   ai_efficiency_mode: boolean;
@@ -199,6 +200,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
       dashboard_lock_background_crop: app_settings.dashboard_lock_background_crop,
       dashboard_backdrop_full_page: app_settings.dashboard_backdrop_full_page,
+      unlimited_uploads: app_settings.unlimited_uploads,
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
@@ -362,6 +364,13 @@ export interface AppSettings {
   // Meaningless for dashboardBannerStyle "overlap", which never spans past
   // its own small banner.
   dashboardBackdropFullPage: boolean;
+  // Off (the default): every image upload is held to its kind's size cap
+  // (lib/uploadLimits.ts) — oversized animations are compressed to fit and
+  // still images are downscaled to what they're displayed at. On: no cap
+  // and no downscaling, for anyone who wants originals at full resolution
+  // and is fine with the storage/bandwidth that costs. A storage provider's
+  // own per-file limit (e.g. Supabase's bucket setting) still applies.
+  unlimitedUploads: boolean;
   // Off (the default): a short-answer quiz question is graded locally —
   // word-overlap against the model answer, no API call — instead of asking
   // the AI to judge it. Saves a grading call per quiz on every attempt;
@@ -442,6 +451,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
     dashboardLockBackgroundCrop: row?.dashboard_lock_background_crop ?? false,
     dashboardBackdropFullPage: row?.dashboard_backdrop_full_page ?? false,
+    unlimitedUploads: row?.unlimited_uploads ?? false,
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
@@ -468,6 +478,13 @@ export async function setAutoOpenGeneratedItems(autoOpen: boolean): Promise<void
   await db
     .update(app_settings)
     .set({ auto_open_generated_items: autoOpen, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setUnlimitedUploads(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ unlimited_uploads: enabled, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1073,9 +1090,21 @@ export async function moveNote(id: number, folderId: number | null): Promise<voi
 // batched UPDATE instead of one UPDATE per item being reordered. Standard
 // SQL, so it works unchanged against both the SQLite and Postgres backends
 // (see db/index.ts's note on the shared table typing this relies on).
-function positionCases(idColumn: AnySQLiteColumn, orderedIds: number[]) {
+//
+// The explicit CAST on each THEN value is load-bearing on Postgres:
+// postgres.js binds plain JS numbers as untyped parameters, and a CASE whose
+// every branch is untyped resolves to text — so without it, Postgres
+// rejected every reorder ("column "position" is of type integer but
+// expression is of type text") while SQLite, which the test suite runs on,
+// accepted it. CAST(... AS INTEGER) is the spelling both dialects accept
+// (SQLite has no ::integer).
+export function positionCases(idColumn: AnySQLiteColumn, orderedIds: number[]) {
   return sql.join(
-    [sql`CASE ${idColumn}`, ...orderedIds.map((id, index) => sql`WHEN ${id} THEN ${index}`), sql`END`],
+    [
+      sql`CASE ${idColumn}`,
+      ...orderedIds.map((id, index) => sql`WHEN ${id} THEN CAST(${index} AS INTEGER)`),
+      sql`END`,
+    ],
     sql` `
   );
 }

@@ -16,6 +16,29 @@ export async function uploadImage(blob: Blob, kind: ImageUploadKind): Promise<st
   formData.append("file", blob);
   const res = await fetch("/api/blobs", { method: "POST", body: formData });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? "Upload failed");
+  if (!res.ok) throw new ImageUploadError(body.error ?? "Upload failed");
   return body.url ?? body.dataUrl;
+}
+
+// A rejection /api/blobs explained itself (e.g. "Image is too large (max
+// 8 MB)") — worth showing as-is, unlike a network failure or a crash,
+// where callers' own generic message reads better than whatever the
+// browser's error says.
+export class ImageUploadError extends Error {}
+
+export function describeUploadError(err: unknown, fallback: string): string {
+  return err instanceof ImageUploadError ? err.message : fallback;
+}
+
+// Whether "Full-resolution uploads" is on, read fresh from the server —
+// deliberately not from SWR's cached /api/settings, which can be stale
+// (e.g. toggled in another tab) and would otherwise send a full-size encode
+// the server then rejects, or needlessly shrink one it would accept.
+export async function fetchUnlimitedUploads(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/settings");
+    return res.ok ? !!(await res.json()).unlimitedUploads : false;
+  } catch {
+    return false;
+  }
 }

@@ -988,11 +988,12 @@ function HomePageContent() {
     next.splice(from, 1);
     next.splice(to, 0, draggedCourseId);
 
-    await fetch("/api/courses/reorder", {
+    const res = await fetch("/api/courses/reorder", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ orderedIds: next }),
-    });
+    }).catch(() => null);
+    if (!res?.ok) toast.error("Couldn't reorder courses");
     refresh();
   }
 

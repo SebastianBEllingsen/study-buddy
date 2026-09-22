@@ -81,6 +81,7 @@ import {
   type NoteLinkType,
 } from "@/lib/noteLinks";
 import { fetchNoteImage, NOTE_IMAGE_SCHEME, noteImageCache, uploadNoteImage } from "@/lib/noteImages";
+import { describeUploadError } from "@/lib/uploadImage";
 import NoteMarkdown from "@/components/NoteMarkdown";
 import { toggleTaskMarkerAtLine } from "@/lib/taskList";
 
@@ -492,9 +493,9 @@ async function insertNoteImage(view: EditorView, file: File, insertPos: number):
   try {
     const imageId = await uploadNoteImage(file);
     replacePlaceholder(`![](${NOTE_IMAGE_SCHEME}${imageId})`);
-  } catch {
+  } catch (err) {
     replacePlaceholder("");
-    toast.error("Couldn't add that image");
+    toast.error(describeUploadError(err, "Couldn't add that image"));
   }
 }
 

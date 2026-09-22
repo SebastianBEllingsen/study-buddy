@@ -1,21 +1,8 @@
 import crypto from "node:crypto";
 import { blobStore } from "@/lib/blobStorage";
 import { IMAGE_EXTENSION_BY_MIME } from "@/lib/blobStorage/imageTypes";
-
-// Per-kind raw-byte caps, replacing the base64-char-length caps in
-// src/lib/dataUrlImage.ts for anything that goes through this upload path —
-// those still gate the data-URL fallback response below, but a real byte
-// count is the more honest check for an actual file. A Map, not a plain
-// object — see imageTypes.ts's comment on why a plain object's prototype
-// chain ("__proto__" in obj) is a real bypass here, not just theoretical.
-const KIND_LIMITS = new Map<string, number>([
-  ["icon", 3_000_000],
-  ["cover", 4_000_000],
-  ["background", 8_000_000],
-  ["app-icon", 3_000_000],
-  ["dashboard-background", 8_000_000],
-  ["note", 8_000_000],
-]);
+import { getAppSettings } from "@/lib/models";
+import { formatMegabytes, isUploadKind, UPLOAD_LIMITS } from "@/lib/uploadLimits";
 
 export async function POST(request: Request) {
   const formData = await request.formData().catch(() => null);
@@ -26,15 +13,23 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return Response.json({ error: "No file uploaded" }, { status: 400 });
   }
-  if (typeof kind !== "string" || !KIND_LIMITS.has(kind)) {
+  if (!isUploadKind(kind)) {
     return Response.json({ error: "Invalid kind" }, { status: 400 });
   }
   const extension = IMAGE_EXTENSION_BY_MIME.get(file.type);
   if (!extension) {
     return Response.json({ error: "Unsupported image type" }, { status: 400 });
   }
-  if (file.size > KIND_LIMITS.get(kind)!) {
-    return Response.json({ error: "Image is too large" }, { status: 400 });
+  // Per-kind raw-byte caps (see lib/uploadLimits.ts) — a real byte count
+  // is the honest check for an actual file, unlike the base64-length caps
+  // in lib/dataUrlImage.ts. Skipped entirely with "Full-resolution uploads"
+  // on (AppSettings.unlimitedUploads).
+  const limit = UPLOAD_LIMITS.get(kind)!;
+  const { unlimitedUploads } = await getAppSettings();
+  if (!unlimitedUploads && file.size > limit) {
+    // Says the actual cap — animated images are the uploads most likely to
+    // hit it (the client normally compresses those to fit first).
+    return Response.json({ error: `Image is too large (max ${formatMegabytes(limit)})` }, { status: 400 });
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
@@ -48,6 +43,20 @@ export async function POST(request: Request) {
   // No blob store configured (or the upload failed) — fall back to a plain
   // data URL, exactly what every image field accepted before this feature
   // existed. isValidCoverImage/isValidIconImage/etc. (src/lib/dataUrlImage.ts)
-  // still accept this shape alongside a real URL.
+  // still accept this shape alongside a real URL. Only for files within the
+  // normal cap, though: past it (possible with limits switched off), a
+  // failed store means the file really didn't fit anywhere — most often a
+  // storage provider's own per-file limit (Supabase's bucket setting) —
+  // and inlining it would put megabytes of base64 into a database row.
+  if (file.size > limit) {
+    return Response.json(
+      {
+        error: blobStore
+          ? "Storage rejected that file — your storage provider may have its own per-file size limit"
+          : "No file storage is configured for a file this large",
+      },
+      { status: 502 }
+    );
+  }
   return Response.json({ dataUrl: `data:${file.type};base64,${bytes.toString("base64")}` });
 }

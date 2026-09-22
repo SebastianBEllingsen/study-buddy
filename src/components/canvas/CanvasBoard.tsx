@@ -70,6 +70,7 @@ import {
 } from "@/lib/canvasFlow";
 import type { LinkTargets } from "@/lib/models";
 import { noteImageCache, uploadNoteImage } from "@/lib/noteImages";
+import { describeUploadError } from "@/lib/uploadImage";
 import { CanvasContext, canvasColorValue, type CanvasActions } from "./CanvasContext";
 import { canvasNodeTypes, fileCardHref } from "./CanvasNodes";
 import { canvasEdgeTypes } from "./CanvasEdge";
@@ -379,8 +380,8 @@ function Board({ canvasId, courseId, initialData, targets, onDataChange, navigat
           added.push(
             makeNode("file", { x: center.x + offset, y: center.y + offset }, { width, height }, { file: `image:${imageId}` })
           );
-        } catch {
-          toast.error(`Couldn't add ${file.name || "that image"}`);
+        } catch (err) {
+          toast.error(describeUploadError(err, `Couldn't add ${file.name || "that image"}`));
         }
       }
       if (added.length) addNodes(added);

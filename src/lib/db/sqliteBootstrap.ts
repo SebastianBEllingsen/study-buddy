@@ -474,6 +474,9 @@ export function migrate(database: Database.Database) {
       "ALTER TABLE app_settings ADD COLUMN dashboard_backdrop_full_page INTEGER NOT NULL DEFAULT 0"
     );
   }
+  if (!hasColumn("app_settings", "unlimited_uploads")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN unlimited_uploads INTEGER NOT NULL DEFAULT 0");
+  }
   if (!hasColumn("app_settings", "document_badges_enabled")) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN document_badges_enabled INTEGER NOT NULL DEFAULT 1"

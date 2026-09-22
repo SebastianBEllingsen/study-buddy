@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "unlimited_uploads" boolean DEFAULT false NOT NULL;

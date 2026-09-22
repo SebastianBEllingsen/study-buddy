@@ -18,7 +18,7 @@ import {
 import { ImageCropDialog } from "@/components/ImageCropDialog";
 import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
 import { HelpTooltip } from "@/components/HelpTooltip";
-import { uploadImage } from "@/lib/uploadImage";
+import { describeUploadError, uploadImage } from "@/lib/uploadImage";
 import { ICON_CHOICES, COLOR_CHOICES } from "@/lib/pickerChoices";
 import {
   ICON_ASPECT,
@@ -109,8 +109,8 @@ export function CustomizeCourseDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: target, url }),
       }).catch(() => {});
-    } catch {
-      toast.error("Couldn't upload that image");
+    } catch (err) {
+      toast.error(describeUploadError(err, "Couldn't upload that image"));
     }
   }
 
@@ -463,6 +463,7 @@ export function CustomizeCourseDialog({
         outputWidth={cropTarget === "cover" ? COVER_OUTPUT_WIDTH : cropTarget === "background" ? BACKGROUND_OUTPUT_WIDTH : ICON_OUTPUT}
         outputHeight={cropTarget === "cover" ? COVER_OUTPUT_HEIGHT : cropTarget === "background" ? BACKGROUND_OUTPUT_HEIGHT : ICON_OUTPUT}
         outputFormat={cropTarget === "icon" ? "png" : "jpeg"}
+        uploadKind={cropTarget ?? "icon"}
         title={
           cropTarget === "cover"
             ? "Position cover banner"
