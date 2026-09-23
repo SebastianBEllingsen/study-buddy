@@ -22,7 +22,9 @@ import {
 } from "@/lib/dashboardGrid";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -483,7 +485,7 @@ export function DashboardCustomizeDialog({
           <DialogTitle>Customize dashboard</DialogTitle>
           <DialogDescription>
             Drag a widget by its grip to move it, by its corner to resize it, or onto Hidden to
-            remove it.
+            remove it. Changes save as you go.
           </DialogDescription>
         </DialogHeader>
 
@@ -551,6 +553,9 @@ export function DashboardCustomizeDialog({
           </div>
           </div>
         </div>
+        <DialogFooter className={cn(fullscreen && "rounded-none")}>
+          <DialogClose render={<Button />}>Done</DialogClose>
+        </DialogFooter>
       </DialogContent>
 
       {ghost &&

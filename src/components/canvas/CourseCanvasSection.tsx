@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
+  DialogCancel,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -175,6 +176,7 @@ export function CourseCanvasSection({
                   />
                 </div>
                 <DialogFooter>
+                  <DialogCancel />
                   <Button type="submit" disabled={creating || !title.trim()}>
                     {creating ? "Creating…" : "Create canvas"}
                   </Button>
@@ -186,7 +188,7 @@ export function CourseCanvasSection({
       </div>
 
       {canvases.length === 0 ? (
-        <p className="py-1 text-sm text-muted-foreground/70">No canvases yet.</p>
+        <p className="py-1 text-sm text-muted-foreground">No canvases yet — use + to create or import one.</p>
       ) : (
         <ul className="divide-y divide-border/60">
           {canvases.map((canvas) => (
@@ -201,7 +203,7 @@ export function CourseCanvasSection({
                 onDragStart={(e) => setDragPayload(e, { kind: "canvas", id: canvas.id })}
                 className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
               >
-                <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+                <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-focus-within/row:text-muted-foreground group-hover/row:text-muted-foreground [@media(hover:none)]:hidden" />
                 <GitFork className="size-3.5 shrink-0 text-focus/70" />
                 <Link href={`/canvas/${canvas.id}`} draggable={false} className="truncate hover:underline">
                   {canvas.title}

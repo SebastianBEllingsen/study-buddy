@@ -442,7 +442,7 @@ export function CustomizeCourseDialog({
 
           <div className="space-y-2">
             <Label>Color</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {COLOR_CHOICES.map((choice) => (
                 <button
                   key={choice.value}
@@ -456,13 +456,14 @@ export function CustomizeCourseDialog({
                 />
               ))}
               <label
-                className="flex size-7 cursor-pointer items-center justify-center rounded-full border text-xs text-muted-foreground"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-full border text-xs text-muted-foreground focus-within:ring-2 focus-within:ring-ring"
                 title="Custom color"
               >
                 <input
                   type="color"
                   value={color ?? "#888888"}
                   onChange={(e) => setColor(e.target.value)}
+                  aria-label="Custom color"
                   className="sr-only"
                 />
                 +

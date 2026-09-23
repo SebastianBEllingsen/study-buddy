@@ -806,7 +806,7 @@ function Board({ canvasId, courseId, initialData, targets, onDataChange, navigat
                 >
                   <Keyboard />
                 </PopoverTrigger>
-                <PopoverContent side="left" align="start" className="nodrag nopan w-96 p-3">
+                <PopoverContent side="left" align="start" className="nodrag nopan w-[min(24rem,calc(100vw-1rem))] p-3">
                   <p className="mb-2 text-sm font-medium">Canvas shortcuts</p>
                   <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
                     {SHORTCUTS.map(([keys, what]) => (

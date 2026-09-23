@@ -56,6 +56,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EventInfoTooltip } from "@/components/EventInfoTooltip";
 import {
   Dialog,
+  DialogCancel,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -244,8 +245,8 @@ function StreakWidget({ stats, transparent }: { stats: Stats; transparent: boole
   if (stats.streak === 0) {
     return (
       <Card
-        elevation="flat"
-        className={`h-full items-center justify-center gap-1 overflow-hidden text-center ${transparent ? "" : "border"}`}
+        elevation={transparent ? "flat" : "raised"}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <Flame className="size-5 text-muted-foreground" />
         <p className="text-xs text-muted-foreground">No streak yet — study today to start one.</p>
@@ -255,7 +256,7 @@ function StreakWidget({ stats, transparent }: { stats: Stats; transparent: boole
   return (
     <Card
       elevation={transparent ? "flat" : "raised"}
-      className={`h-full items-center justify-center gap-1 overflow-hidden text-center ${transparent ? "" : "border"}`}
+      className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
     >
       <span className="stat-glow font-heading text-3xl font-semibold text-amber">{stats.streak}</span>
       <span className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -281,8 +282,8 @@ function DueCardsWidget({
   if (dueFlashcards.total === 0) {
     return (
       <Card
-        elevation="flat"
-        className={`h-full items-center justify-center gap-1 overflow-hidden text-center ${transparent ? "" : "border"}`}
+        elevation={transparent ? "flat" : "raised"}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <Layers className="size-5 text-muted-foreground" />
         <p className="text-xs text-muted-foreground">Nothing due — you&apos;re all caught up.</p>
@@ -305,7 +306,7 @@ function DueCardsWidget({
           onClick={() => setDialogOpen(true)}
           onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setDialogOpen(true)}
           elevation={transparent ? "flat" : "raised"}
-          className={`h-full cursor-pointer items-center justify-center gap-1 overflow-hidden text-center transition-colors hover:bg-muted/40 ${transparent ? "" : "border"}`}
+          className="h-full cursor-pointer items-center justify-center gap-1 overflow-hidden p-2 text-center transition-colors hover:bg-muted/40"
         >
           <span className="stat-glow font-heading text-3xl font-semibold text-amber">
             {dueFlashcards.total}
@@ -328,7 +329,7 @@ function DueCardsWidget({
     <>
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className={`h-full space-y-3 overflow-hidden p-4 ${transparent ? "" : "border"}`}
+        className="h-full space-y-3 overflow-hidden p-4"
       >
         <button
           type="button"
@@ -387,7 +388,7 @@ function HeatmapWidget({
   return (
     <Card
       elevation={transparent ? "flat" : "raised"}
-      className={`h-full overflow-hidden p-3 ${transparent ? "" : "border"}`}
+      className="h-full overflow-hidden p-3"
     >
       <StudyHeatmap activity={activity} showLabel={layout.rowSpan >= 2} />
     </Card>
@@ -516,8 +517,8 @@ function UpcomingEventsWidget({
   if (!connected) {
     return (
       <Card
-        elevation="flat"
-        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+        elevation={transparent ? "flat" : "raised"}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <CalendarDays className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
         <p className="text-xs text-muted-foreground">
@@ -534,7 +535,7 @@ function UpcomingEventsWidget({
     return (
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <CalendarDays className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
@@ -556,9 +557,9 @@ function UpcomingEventsWidget({
   }
 
   return (
-    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "border"}`}>
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "bg-card ring-1 ring-foreground/10"}`}>
       <div
-        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b bg-card"}`}
+        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b"}`}
       >
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <CalendarDays className="size-4 text-focus" />
@@ -672,8 +673,8 @@ function AssignmentsWidget({
   if (feeds && feeds.length === 0) {
     return (
       <Card
-        elevation="flat"
-        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+        elevation={transparent ? "flat" : "raised"}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <ListChecks className={compact ? "size-5 text-muted-foreground" : "size-5 text-focus"} />
         <p className="text-xs text-muted-foreground">
@@ -692,7 +693,7 @@ function AssignmentsWidget({
     return (
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <ListChecks className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
@@ -709,9 +710,9 @@ function AssignmentsWidget({
   }
 
   return (
-    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "border"}`}>
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "bg-card ring-1 ring-foreground/10"}`}>
       <div
-        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b bg-card"}`}
+        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b"}`}
       >
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <ListChecks className="size-4 text-focus" />
@@ -837,7 +838,7 @@ function RecentActivityWidget({
     return (
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className={`h-full items-center justify-center gap-1 overflow-hidden p-2 text-center ${transparent ? "" : "border"}`}
+        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
       >
         <Clock className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
@@ -854,9 +855,9 @@ function RecentActivityWidget({
   }
 
   return (
-    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "border"}`}>
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "bg-card ring-1 ring-foreground/10"}`}>
       <div
-        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b bg-card"}`}
+        className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b"}`}
       >
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <Clock className="size-4 text-focus" />
@@ -1044,6 +1045,7 @@ function HomePageContent() {
             />
           </div>
           <DialogFooter>
+            <DialogCancel />
             <Button type="submit" disabled={creating || !name.trim()}>
               {creating ? "Creating…" : "Create course"}
             </Button>
@@ -1155,7 +1157,7 @@ function HomePageContent() {
         </Button>
       </div>
       {topWidgets.length === 0 ? (
-        <Card elevation="flat" className={`items-center py-8 text-center ${transparentWidgets ? "" : "border"}`}>
+        <Card elevation={transparentWidgets ? "flat" : "raised"} className="items-center py-8 text-center">
           <p className="text-sm text-muted-foreground">
             Nothing here — add a widget from Customize.
           </p>

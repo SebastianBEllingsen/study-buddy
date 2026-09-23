@@ -2249,15 +2249,16 @@ html[data-wallpaper] [data-slot="detached-page"] {
    course page's header). The picture can be dark in one place and light in
    another, so rather than picking one text color, the theme's own text
    colors get a soft halo in the theme's background color — readable over
-   any part of any picture, in light and dark themes alike. Inherited, so
+   any part of any picture, in light and dark themes alike. The shadow is
+   kept tight — wide glows leave smudges around short text. Inherited, so
    things with their own surface (filled buttons, raised cards) opt out. */
 [data-on-backdrop] {
+  /* Muted text is pulled toward the main text color here: pale grey on a
+     busy picture needs more contrast than it does on a plain surface. */
+  --muted-foreground: color-mix(in oklch, var(--foreground) 80%, var(--background));
   text-shadow:
-    0 0 1px var(--background),
-    0 0 3px var(--background),
-    0 0 8px color-mix(in oklch, var(--background) 85%, transparent),
-    0 0 16px color-mix(in oklch, var(--background) 65%, transparent),
-    0 0 28px color-mix(in oklch, var(--background) 45%, transparent);
+    0 1px 2px color-mix(in oklch, var(--background) 60%, transparent),
+    0 0 6px color-mix(in oklch, var(--background) 40%, transparent);
 }
 [data-on-backdrop] :is(
     [data-slot="button"][data-variant="default"],

@@ -8,6 +8,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, Plus, Trash2 } f
 import { toast } from "sonner";
 import { cn } from "cn";
 import type { AppSettings, CalendarFeed } from "@/lib/models";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EventInfoTooltip } from "@/components/EventInfoTooltip";
 import {
   Dialog,
+  DialogCancel,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -281,9 +283,12 @@ function EventDialog({
                 )}
               </div>
             )}
-            <Button type="submit" disabled={saving}>
-              {saving ? "Saving…" : event ? "Save changes" : "Add event"}
-            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <DialogCancel />
+              <Button type="submit" disabled={saving}>
+                {saving ? "Saving…" : event ? "Save changes" : "Add event"}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -647,8 +652,8 @@ function CalendarPageContent() {
       <div className="flex items-center justify-between gap-2">
         <h1 className="font-heading text-2xl font-semibold">Calendar</h1>
         {view === "personal" && settings.googleCalendarConnected && (
-          <Button size="sm" onClick={() => openNewEvent()}>
-            <Plus className="size-3.5" />
+          <Button onClick={() => openNewEvent()}>
+            <Plus />
             New event
           </Button>
         )}
@@ -659,6 +664,7 @@ function CalendarPageContent() {
           <button
             type="button"
             onClick={() => setView("personal")}
+            aria-pressed={view === "personal"}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               view === "personal" ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -669,6 +675,7 @@ function CalendarPageContent() {
           <button
             type="button"
             onClick={() => setView("assignments")}
+            aria-pressed={view === "assignments"}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               view === "assignments" ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -680,9 +687,9 @@ function CalendarPageContent() {
       )}
 
       {loadError && (
-        <Card elevation="flat" className="border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-          {loadError}
-        </Card>
+        <Alert variant="destructive">
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
       )}
 
       {visibleEvents === null && !loadError && <Skeleton className="h-[500px] rounded-xl" />}

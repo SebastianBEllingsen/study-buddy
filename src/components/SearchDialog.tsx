@@ -159,11 +159,12 @@ export default function SearchDialog() {
       <Button
         variant="outline"
         size="sm"
-        className="gap-1.5 px-3 text-xs"
+        className="gap-1.5 px-2 text-xs sm:px-3"
+        aria-label="Search"
         onClick={() => setOpen(true)}
       >
         <Search className="size-3.5" />
-        Search
+        <span className="hidden sm:inline">Search</span>
         <kbd className="ml-1 hidden rounded border border-border bg-muted px-1 font-sans text-[0.65rem] text-muted-foreground sm:inline">
           /
         </kbd>

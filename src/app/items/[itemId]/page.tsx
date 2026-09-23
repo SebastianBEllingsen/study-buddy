@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { Bell, BellOff, Download, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ask-ai/CropToAskUI";
 import { captureElementRegion } from "@/lib/cropCapture";
 import ModelBadge from "@/components/ModelBadge";
+import { RowActionsMenu } from "@/components/RowActionsMenu";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +46,21 @@ interface ItemDetail {
   dueCardIndices: number[];
 }
 
+// Starts a file download from one of the item's export routes (they reply
+// as attachments), from a menu action rather than a link.
+function downloadFrom(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "";
+  a.click();
+}
+
+const ITEM_NOUN: Record<GeneratedItem["mode"], string> = {
+  notes: "notes",
+  quiz: "quiz",
+  flashcards: "flashcards",
+};
+
 const MODE_UNIT: Record<GeneratedItem["mode"], string> = {
   quiz: "questions",
   flashcards: "cards",
@@ -58,6 +74,7 @@ const AUTOSAVE_DELAY_MS = 800;
 
 export default function ItemPage() {
   const params = useParams<{ itemId: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   // A search-result snippet to scroll to and flash — see
   // SearchDialog.tsx and lib/scrollToHighlight.ts. Only notes/quiz content
@@ -178,6 +195,16 @@ export default function ItemPage() {
   // The deck's due-date reminders on/off (see FlashcardsContent.reminders) —
   // its own PATCH + message rather than saveContent()'s generic "Saved".
   // Stored only as `false`; turning them back on drops the key.
+  async function handleDeleteItem() {
+    if (!detail) return;
+    const res = await fetch(`/api/items/${detail.item.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error("Couldn't delete it");
+      return;
+    }
+    router.push(`/courses/${detail.item.course_id}`);
+  }
+
   async function toggleDeckReminders() {
     if (!detail) return;
     const current = JSON.parse(detail.item.content_json) as FlashcardsContent;
@@ -302,22 +329,70 @@ export default function ItemPage() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <h1 className="flex flex-wrap items-center gap-2 font-heading text-2xl font-semibold">
-          {item.title}
-          {modelBadge.show && <ModelBadge info={item} detail={modelBadge.detail} />}
-          {item.mode === "quiz" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-xs font-normal text-muted-foreground"
-              nativeButton={false}
-              render={<a href={`/api/items/${item.id}/download`} />}
+        {/* Title on the left; on the right one toolbar, the same shape for
+            every kind of item: the item's own main action (if any), then
+            "⋯" for export/download, settings and delete. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="flex min-w-0 flex-wrap items-center gap-2 font-heading text-2xl font-semibold break-words">
+            {item.title}
+            {modelBadge.show && <ModelBadge info={item} detail={modelBadge.detail} />}
+          </h1>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {item.mode === "notes" && (
+              <>
+                <span className="text-xs text-muted-foreground">
+                  {noteSaveState === "saving" ? "Saving…" : noteSaveState === "saved" ? "Saved" : ""}
+                </span>
+                <CropToAskButton active={notesCropMode} onClick={toggleNotesCropMode} />
+              </>
+            )}
+            {item.mode === "flashcards" && (
+              <Button variant="outline" size="sm" onClick={() => setEditingCards(true)}>
+                <Pencil className="size-3.5" />
+                Edit cards
+              </Button>
+            )}
+            <RowActionsMenu
+              ariaLabel={`Actions for ${item.title}`}
+              actions={[
+                ...(item.mode === "quiz"
+                  ? [{ label: "Download", icon: Download, onSelect: () => downloadFrom(`/api/items/${item.id}/download`) }]
+                  : []),
+                ...(item.mode === "flashcards"
+                  ? [
+                      {
+                        label: "Export to Anki",
+                        icon: Download,
+                        onSelect: () => downloadFrom(`/api/items/${item.id}/anki-export`),
+                      },
+                    ]
+                  : []),
+              ]}
+              deleteLabel={`Delete ${ITEM_NOUN[item.mode]}`}
+              deleteDescription="This can't be undone."
+              onDelete={handleDeleteItem}
             >
-              <Download className="size-3.5" />
-              Download
-            </Button>
-          )}
-        </h1>
+              {item.mode === "flashcards" && (
+                <label className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+                  <span className="flex items-center gap-2">
+                    {remindersOn ? (
+                      <Bell className="size-3.5 text-muted-foreground" />
+                    ) : (
+                      <BellOff className="size-3.5 text-muted-foreground" />
+                    )}
+                    Review reminders
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="size-4 shrink-0 accent-primary"
+                    checked={remindersOn}
+                    onChange={toggleDeckReminders}
+                  />
+                </label>
+              )}
+            </RowActionsMenu>
+          </div>
+        </div>
       </div>
 
       {aiEnabled && detail.availableNewDocuments.length > 0 && (
@@ -339,12 +414,6 @@ export default function ItemPage() {
 
       {item.mode === "notes" && (
         <>
-          <div className="flex items-center justify-end gap-2">
-            <span className="text-xs text-muted-foreground">
-              {noteSaveState === "saving" ? "Saving…" : noteSaveState === "saved" ? "Saved" : ""}
-            </span>
-            <CropToAskButton active={notesCropMode} onClick={toggleNotesCropMode} />
-          </div>
           <Card
             ref={notesRef}
             className={`h-[70vh] overflow-hidden ${notesCropMode ? "cursor-crosshair select-none" : ""}`}
@@ -418,35 +487,6 @@ export default function ItemPage() {
 
       {item.mode === "flashcards" && (
         <>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<a href={`/api/items/${item.id}/anki-export`} />}
-            >
-              <Download className="size-3.5" />
-              Export to Anki
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={remindersOn}
-              onClick={toggleDeckReminders}
-              title={
-                remindersOn
-                  ? "Cards in this set come due for review — click to turn off"
-                  : "Cards in this set never come due — click to turn on"
-              }
-            >
-              {remindersOn ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
-              {remindersOn ? "Reminders on" : "Reminders off"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setEditingCards(true)}>
-              <Pencil className="size-3.5" />
-              Edit cards
-            </Button>
-          </div>
           <FlashcardViewer
             itemId={item.id}
             cards={(content as FlashcardsContent).cards}

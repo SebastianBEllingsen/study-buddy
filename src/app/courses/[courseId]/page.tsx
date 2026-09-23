@@ -6,6 +6,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ClipboardPaste,
   ExternalLink,
   EyeOff,
@@ -59,6 +61,7 @@ import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
 import { RowActionsMenu, type RowAction } from "@/components/RowActionsMenu";
+import { FOLDER_TOGGLED_EVENT, areAllFoldersOpen, collapseKey } from "@/lib/folderCollapse";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -89,6 +92,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import {
   Dialog,
+  DialogCancel,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -169,9 +173,6 @@ const COURSE_PAGE_SENTINEL = "__course__";
 // page, or "+ Create new folder" below overrides it.
 const AUTO_DESTINATION_SENTINEL = "__auto__";
 
-// Folder-level key format is unchanged from before, so existing stored
-// preferences keep working; a section suffix (e.g. "documents", "generated")
-// namespaces the two sub-sections independently under the same folder.
 // Pops a note into its own browser window — e.g. so it can sit next to this
 // course page while browsing other material. Reuses the same window name
 // per note rather than a fresh one each click, so clicking twice focuses the
@@ -179,12 +180,6 @@ const AUTO_DESTINATION_SENTINEL = "__auto__";
 // DocumentViewer's own Detach.
 function detachNote(noteId: number) {
   window.open(`/vault/${noteId}/detached`, `study-buddy-note-${noteId}`, "noopener,width=900,height=1000");
-}
-
-function collapseKey(folderId: number, section?: string) {
-  return section
-    ? `studybuddy:folder:${folderId}:${section}:collapsed`
-    : `studybuddy:folder:${folderId}:collapsed`;
 }
 
 function useCollapsed(key: string, defaultOpen = true) {
@@ -205,6 +200,7 @@ function useCollapsed(key: string, defaultOpen = true) {
     } catch {
       // localStorage unavailable (private browsing, etc.) — harmless degradation.
     }
+    window.dispatchEvent(new Event(FOLDER_TOGGLED_EVENT));
   }
 
   return [open, onOpenChange] as const;
@@ -446,7 +442,7 @@ function DocumentList({
               onDragStart={(e) => setDragPayload(e, { kind: "document", id: doc.id })}
               className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
             >
-              <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+              <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-focus-within/row:text-muted-foreground group-hover/row:text-muted-foreground [@media(hover:none)]:hidden" />
               {isImageExtension(extensionOf(doc.filename)) ? (
                 <ImageIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
               ) : (
@@ -591,7 +587,7 @@ function GeneratedItemList({
               onDragStart={(e) => setDragPayload(e, { kind: "item", id: item.id })}
               className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
             >
-              <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+              <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-focus-within/row:text-muted-foreground group-hover/row:text-muted-foreground [@media(hover:none)]:hidden" />
               <ModeIcon className={`size-3.5 shrink-0 ${MODE_META[item.mode].textClass}`} />
               <Link
                 href={`/items/${item.id}`}
@@ -700,7 +696,7 @@ function NoteList({
             onDragStart={(e) => setDragPayload(e, { kind: "note", id: note.id })}
             className="flex min-w-0 cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
           >
-            <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover/row:text-muted-foreground" />
+            <GripVertical className="size-3.5 shrink-0 text-muted-foreground/30 transition-colors group-focus-within/row:text-muted-foreground group-hover/row:text-muted-foreground [@media(hover:none)]:hidden" />
             {note.icon ? (
               <span className="shrink-0 text-sm leading-none">{note.icon}</span>
             ) : (
@@ -941,7 +937,7 @@ function FolderCard({
                   the handle stays discoverable without competing with the
                   folder name for attention every time you just glance at
                   the list. */}
-              <GripVertical className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-muted-foreground" />
+              <GripVertical className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-focus-within:text-muted-foreground group-hover:text-muted-foreground [@media(hover:none)]:hidden" />
               <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
                 <ChevronRight
                   className={`size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-90" : ""}`}
@@ -1072,8 +1068,8 @@ function FolderCard({
         <CollapsibleContent>
           <div className="space-y-2 py-1 pl-[1.625rem]">
             {documents.length + items.length + notes.length + subfolders.length === 0 ? (
-              <p className="py-0.5 text-sm text-muted-foreground/70">
-                Nothing here yet — upload a document, generate something, or add a note.
+              <p className="py-1 text-sm text-muted-foreground">
+                Nothing here yet — use + to upload, paste text or add a note.
               </p>
             ) : (
               // One merged list instead of three always-expanded Documents/
@@ -1965,6 +1961,14 @@ export default function CoursePage() {
   // per-folder state stays exactly where it already lived, this just
   // seeds all of them in bulk.
   const [collapseGeneration, setCollapseGeneration] = useState(0);
+  // Re-render on any single folder's toggle, so the Expand all / Collapse
+  // all button below reads the current state.
+  const [, setFolderToggles] = useState(0);
+  useEffect(() => {
+    const bump = () => setFolderToggles((n) => n + 1);
+    window.addEventListener(FOLDER_TOGGLED_EVENT, bump);
+    return () => window.removeEventListener(FOLDER_TOGGLED_EVENT, bump);
+  }, []);
   // Visual cue for the "drag a subfolder out" drop zone around the folder
   // cards — see handleUnnestFolder.
   const [folderListDragOver, setFolderListDragOver] = useState(false);
@@ -1982,6 +1986,20 @@ export default function CoursePage() {
     }
     setCollapseGeneration((g) => g + 1);
   }
+  // Read fresh each render — the page re-renders on every folder toggle
+  // (FOLDER_TOGGLED_EVENT) and on setAllFoldersOpen's own counter bump.
+  let allFoldersOpen = true;
+  if (typeof window !== "undefined" && detail) {
+    try {
+      allFoldersOpen = areAllFoldersOpen(
+        detail.folders.map((f) => f.id),
+        (key) => localStorage.getItem(key)
+      );
+    } catch {
+      // localStorage unavailable — every folder is open by default.
+    }
+  }
+
 
   async function handleGenerate(mode: GenerationMode, quizSettings?: QuizGenerationSettings) {
     if (generationDestination === NEW_FOLDER_SENTINEL && !generationNewFolderName.trim()) return;
@@ -2234,7 +2252,7 @@ export default function CoursePage() {
                     <span className="text-2xl drop-shadow-sm">{shownCourse.icon}</span>
                   )
                 )}
-                <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                <h1 className="min-w-0 font-heading text-2xl font-semibold tracking-tight break-words text-foreground sm:text-3xl">
                   {detail.course.name}
                 </h1>
                 <Button
@@ -2258,15 +2276,6 @@ export default function CoursePage() {
             className="relative mb-2 h-32 overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-black/5 sm:h-40"
             style={{ backgroundImage: `url(${shownCourse.cover_image})` }}
           >
-            <Button
-              variant="secondary"
-              size="sm"
-              className="absolute top-2 right-2"
-              onClick={() => setCustomizeOpen(true)}
-            >
-              <Palette className="size-3.5" />
-              Customize
-            </Button>
             {shownCourse.icon_image ? (
               <div
                 className={`absolute bottom-2 left-2 size-11 bg-center ${
@@ -2308,17 +2317,16 @@ export default function CoursePage() {
             ) : (
               shownCourse.icon && <span className="text-2xl">{shownCourse.icon}</span>
             ))}
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">{detail.course.name}</h1>
-          {!shownCourse.cover_image && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setCustomizeOpen(true)}
-              aria-label="Customize course"
-            >
-              <Palette className="size-3.5 text-muted-foreground" />
-            </Button>
-          )}
+          <h1 className="min-w-0 font-heading text-2xl font-semibold tracking-tight break-words">{detail.course.name}</h1>
+          {/* Same place and look as on a backdrop header, cover or not. */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setCustomizeOpen(true)}
+            aria-label="Customize course"
+          >
+            <Palette className="size-3.5 text-muted-foreground" />
+          </Button>
         </div>
       </div>
       )}
@@ -2395,11 +2403,16 @@ export default function CoursePage() {
             {/* View/selection controls — a quiet segmented cluster, visually
                 distinct from the "add" menu to its right. */}
             <div className="flex items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5">
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setAllFoldersOpen(true)}>
-                Expand all
-              </Button>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setAllFoldersOpen(false)}>
-                Collapse all
+              {/* One button that does whichever makes sense now: collapse
+                  when every folder is open, otherwise open them all. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setAllFoldersOpen(!allFoldersOpen)}
+              >
+                {allFoldersOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
+                {allFoldersOpen ? "Collapse all" : "Expand all"}
               </Button>
               <Button
                 variant={editMode ? "secondary" : "ghost"}
@@ -2448,6 +2461,7 @@ export default function CoursePage() {
                     />
                   </div>
                   <DialogFooter>
+                    <DialogCancel />
                     <Button type="submit" disabled={creatingFolder || !newFolderName.trim()}>
                       {creatingFolder ? "Creating…" : "Create folder"}
                     </Button>
@@ -2515,6 +2529,7 @@ export default function CoursePage() {
                     )}
                   </div>
                   <DialogFooter>
+                    <DialogCancel />
                     <Button
                       type="submit"
                       disabled={
@@ -2536,13 +2551,12 @@ export default function CoursePage() {
                   <DialogHeader>
                     <DialogTitle>Upload files</DialogTitle>
                     <DialogDescription>
-                      Choose documents (PDF, DOCX, ODT, PPTX), images (PNG, JPG, GIF, WEBP), or Anki decks (.apkg)
-                      and where they should go. Anki decks become flashcard sets; their review history isn&apos;t imported.
+                      Choose files and where they should go.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="upload-files">Documents</Label>
+                      <Label htmlFor="upload-files">Files</Label>
                       <Input
                         id="upload-files"
                         ref={uploadFileInputRef}
@@ -2551,6 +2565,10 @@ export default function CoursePage() {
                         multiple
                         className="text-xs"
                       />
+                      <p className="text-xs text-muted-foreground">
+                        PDF, Word, ODT, PowerPoint or images. Anki decks (.apkg) become flashcard sets, without
+                        their review history.
+                      </p>
                     </div>
                     <div className="grid gap-2">
                       <Label>Destination folder</Label>
@@ -2591,6 +2609,7 @@ export default function CoursePage() {
                     )}
                   </div>
                   <DialogFooter>
+                    <DialogCancel />
                     <Button
                       type="submit"
                       disabled={
@@ -2746,6 +2765,7 @@ export default function CoursePage() {
                     )}
                   </div>
                   <DialogFooter>
+                    <DialogCancel />
                     <Button
                       type="submit"
                       disabled={
@@ -2825,7 +2845,7 @@ export default function CoursePage() {
           </div>
           {topLevelDocuments.length + topLevelItems.length + topLevelNotes.length === 0 ? (
             detail.folders.length > 0 && (
-              <p className="py-0.5 text-sm text-muted-foreground/70">
+              <p className="py-1 text-sm text-muted-foreground">
                 Nothing filed directly on the course page yet.
               </p>
             )
@@ -2893,8 +2913,8 @@ export default function CoursePage() {
             topLevelDocuments.length === 0 &&
             topLevelItems.length === 0 &&
             topLevelNotes.length === 0 && (
-              <p className="py-1 text-sm text-muted-foreground/70">
-                Nothing here yet — upload a document, paste some text, or create a folder to get started.
+              <p className="py-1 text-sm text-muted-foreground">
+                Nothing here yet — use + to upload files, paste text or create a folder.
               </p>
             )}
           {detail.folders

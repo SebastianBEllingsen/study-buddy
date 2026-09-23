@@ -159,7 +159,7 @@ export default function LinksWidget({
     return (
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className={cn("h-full flex-row items-center gap-1 overflow-hidden px-3", transparent ? "" : "border")}
+        className="h-full flex-row items-center gap-1 overflow-hidden px-3"
       >
         <div className="scrollbar-hover flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {links.length === 0 && (
@@ -184,8 +184,8 @@ export default function LinksWidget({
   }
 
   return (
-    <div className={cn("flex h-full flex-col overflow-hidden rounded-xl", transparent ? "" : "border")}>
-      <div className={cn("flex shrink-0 items-center justify-between gap-2 px-4 py-2", transparent ? "" : "border-b bg-card")}>
+    <div className={cn("flex h-full flex-col overflow-hidden rounded-xl", !transparent && "bg-card ring-1 ring-foreground/10")}>
+      <div className={cn("flex shrink-0 items-center justify-between gap-2 px-4 py-2.5", !transparent && "border-b")}>
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <Link2 className="size-4 text-focus" />
           {label ?? "Links"}
@@ -404,7 +404,7 @@ function IconPicker({ value, url, onChange }: { value: string; url: string; onCh
       >
         <LinkIcon icon={value} url={normalized} className="size-7 text-3xl" />
       </PopoverTrigger>
-      <PopoverContent className="w-80 space-y-2 p-2" align="start">
+      <PopoverContent className="w-[min(20rem,calc(100vw-1rem))] space-y-2 p-2" align="start">
         <div className="flex items-center gap-1">
           <Button
             variant={value === "auto" ? "secondary" : "ghost"}

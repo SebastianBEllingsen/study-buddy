@@ -63,10 +63,16 @@ export default function DocumentViewer({
                 </DialogDescription>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <Button variant="outline" size="sm" onClick={handleDetach}>
-                  <ExternalLink className="size-3.5" />
-                  Detach
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Open in new window"
+                  title="Open in new window"
+                  onClick={handleDetach}
+                >
+                  <ExternalLink className="size-3.5 text-muted-foreground" />
                 </Button>
+                <div className="mx-0.5 h-5 w-px shrink-0 bg-border" />
                 <Button
                   variant="ghost"
                   size="icon-sm"

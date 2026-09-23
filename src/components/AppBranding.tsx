@@ -24,7 +24,11 @@ export default function AppBranding({ initial }: { initial: AppSettings }) {
   const icon = data?.appIcon;
 
   return (
-    <Link href="/" data-slot="app-brand" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
+    <Link
+      href="/"
+      data-slot="app-brand"
+      className="flex min-w-0 items-center gap-2 font-heading text-lg font-semibold text-primary"
+    >
       {iconImage ? (
         <span
           className="size-5 shrink-0 rounded bg-cover bg-center"
@@ -35,7 +39,9 @@ export default function AppBranding({ initial }: { initial: AppSettings }) {
       ) : (
         <BookOpen className="size-5" />
       )}
-      {name}
+      {/* Truncates rather than pushing the header's buttons off a narrow
+          screen. */}
+      <span className="truncate">{name}</span>
     </Link>
   );
 }

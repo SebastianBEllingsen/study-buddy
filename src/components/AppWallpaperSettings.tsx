@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { HelpTooltip } from "@/components/HelpTooltip";
+import { SettingGroup, SettingSlider, SettingToggle } from "@/components/SettingToggle";
 import type { AppSettings } from "@/lib/models";
 import {
   MAX_WALLPAPER_BLUR,
@@ -45,26 +45,20 @@ export function AppWallpaperSettings() {
   }
 
   return (
-    <div className="space-y-2 pt-2">
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Use as app wallpaper
-          <HelpTooltip>
-            Shows the dashboard backdrop behind other pages too, fixed in place while they scroll.
-            A course&apos;s own backdrop stays on top as its header, fading into the wallpaper.
-          </HelpTooltip>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={hasImage && wallpaper.enabled}
-          disabled={!hasImage}
-          onChange={(e) => update({ enabled: e.target.checked })}
-        />
-      </label>
-      {!hasImage && <p className="text-xs text-muted-foreground">Add a dashboard backdrop above to use it.</p>}
+    <div className="space-y-2">
+      <SettingToggle
+        label="Use backdrop as app wallpaper"
+        help={
+          hasImage
+            ? "Shows the dashboard backdrop behind other pages too, fixed in place while they scroll."
+            : "Add a dashboard backdrop above to use it."
+        }
+        checked={hasImage && wallpaper.enabled}
+        disabled={!hasImage}
+        onChange={(checked) => update({ enabled: checked })}
+      />
       {hasImage && wallpaper.enabled && (
-        <div className="space-y-3 rounded-md border p-2.5">
+        <SettingGroup>
           <fieldset className="space-y-1.5">
             <legend className="mb-1 text-xs text-muted-foreground">Show on</legend>
             {WALLPAPER_AREAS.map((area) => (
@@ -85,39 +79,29 @@ export function AppWallpaperSettings() {
               </label>
             ))}
           </fieldset>
-          <label className="block space-y-1 text-xs">
-            <span className="flex justify-between text-muted-foreground">
-              Dim <span className="tabular-nums">{wallpaper.dim}%</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={wallpaper.dim}
-              onChange={(e) => update({ dim: Number(e.target.value) })}
-              className="w-full accent-primary"
-            />
-          </label>
-          <label className="block space-y-1 text-xs">
-            <span className="flex justify-between text-muted-foreground">
-              Blur <span className="tabular-nums">{wallpaper.blur}px</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={MAX_WALLPAPER_BLUR}
-              value={wallpaper.blur}
-              onChange={(e) => update({ blur: Number(e.target.value) })}
-              className="w-full accent-primary"
-            />
-          </label>
-        </div>
+          <SettingSlider
+            label="Dim"
+            valueLabel={`${wallpaper.dim}%`}
+            min={0}
+            max={100}
+            value={wallpaper.dim}
+            onChange={(dim) => update({ dim })}
+          />
+          <SettingSlider
+            label="Blur"
+            valueLabel={`${wallpaper.blur}px`}
+            min={0}
+            max={MAX_WALLPAPER_BLUR}
+            value={wallpaper.blur}
+            onChange={(blur) => update({ blur })}
+          />
+        </SettingGroup>
       )}
     </div>
   );
 }
 
-// Settings → Appearance: hide every course's own backdrop/cover banner or
+// Settings → Courses: hide every course's own backdrop/cover banner or
 // icon on its page — e.g. so the app wallpaper is the only background
 // inside courses. Works with the wallpaper on or off; the courses keep
 // their images (see lib/coursePageDisplay.ts).
@@ -141,34 +125,19 @@ export function CoursePageAppearanceSettings() {
   }
 
   return (
-    <div className="space-y-2 pt-2">
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Hide course backdrops
-          <HelpTooltip>
-            Inside courses, hides each course&apos;s backdrop and cover banner, so the app wallpaper
-            (if on) is the only background. The images stay saved.
-          </HelpTooltip>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.hideCourseBackdrops}
-          onChange={(e) => save("hideCourseBackdrops", e.target.checked)}
-        />
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Hide course icons
-          <HelpTooltip>Inside courses, hides the icon next to the course name. Course cards keep theirs.</HelpTooltip>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.hideCourseIcons}
-          onChange={(e) => save("hideCourseIcons", e.target.checked)}
-        />
-      </label>
-    </div>
+    <>
+      <SettingToggle
+        label="Hide course backdrops"
+        help="Hides each course's backdrop and cover banner on its page, so only the app wallpaper (if on) shows. The images stay saved."
+        checked={settings.hideCourseBackdrops}
+        onChange={(checked) => save("hideCourseBackdrops", checked)}
+      />
+      <SettingToggle
+        label="Hide course icons"
+        help="Hides the icon next to the course name on its page. Course cards keep theirs."
+        checked={settings.hideCourseIcons}
+        onChange={(checked) => save("hideCourseIcons", checked)}
+      />
+    </>
   );
 }

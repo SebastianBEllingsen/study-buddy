@@ -148,7 +148,7 @@ export function ImageLibraryDialog({
                     size="icon-sm"
                     onClick={(e) => handleDelete(img.id, e)}
                     aria-label="Remove from library"
-                    className="absolute top-1 right-1 size-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                    className="absolute top-1 right-1 size-6 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                   >
                     <X className="size-3" />
                   </Button>

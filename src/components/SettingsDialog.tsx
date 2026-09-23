@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FolderChipsPicker } from "@/components/FolderChipsPicker";
 import { HEADER_TINT_LABELS, HEADER_TINT_MODES, type HeaderTintMode } from "@/lib/headerTint";
 import { AppWallpaperSettings, CoursePageAppearanceSettings } from "@/components/AppWallpaperSettings";
+import { SettingGroup, SettingSlider, SettingToggle } from "@/components/SettingToggle";
 import { MAX_BACKDROP_BLUR } from "@/lib/backdropBlur";
 import type { FolderChipSettings } from "@/lib/folderChips";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
@@ -12,6 +13,7 @@ import {
   AlertTriangle,
   Calendar,
   Database,
+  BookOpen,
   Download,
   Image as ImageIcon,
   MoreHorizontal,
@@ -119,7 +121,7 @@ function AiSection() {
   const [aiEnabledSaving, setAiEnabledSaving] = useState(false);
   const [imageBackendSaving, setImageBackendSaving] = useState(false);
 
-  // Render-phase sync, not an effect — same pattern as BrandingSection's
+  // Render-phase sync, not an effect — same pattern as IdentitySection's
   // seededFor. `backend` needs its own local copy (the <Select> below edits
   // it before Save is pressed) seeded once from the shared settings cache.
   if (settings && seededFor !== "settings") {
@@ -407,8 +409,8 @@ function AiSection() {
         <span className="flex items-center gap-1.5">
           AI grading for quiz short-answer questions
           <HelpTooltip>
-            Off (default): graded locally by keyword match against the model answer — no API
-            call, no partial credit. On: the AI judges each answer and gives written feedback.
+            Off: graded by keyword match against the model answer, with no AI call. On: the AI
+            judges each answer and gives written feedback.
           </HelpTooltip>
         </span>
         <input
@@ -764,11 +766,9 @@ function UploadLimitToggle() {
       <span className="flex items-center gap-1.5">
         Full-resolution uploads
         <HelpTooltip>
-          Off (default): images are kept to a sensible size — backdrops and note images up to 8 MB, covers 4
-          MB, icons 3 MB — scaled to how large they&apos;re shown, with animations compressed to fit. On: no
-          size limit and no downscaling, so pictures and animations are stored at full resolution. That uses
-          more storage and makes large backdrops slower to load. Your storage provider&apos;s own per-file
-          limit still applies.
+          Off: images are scaled to how large they&apos;re shown and kept under a size cap. On: stored
+          at full resolution, which uses more storage and loads slower. Your storage provider&apos;s own
+          per-file limit still applies.
         </HelpTooltip>
       </span>
       <input
@@ -1098,9 +1098,8 @@ function NavBarColorSetting() {
       <Label className="flex items-center gap-1.5">
         Nav bar color
         <HelpTooltip>
-          Over a backdrop or the app wallpaper, the nav bar can take its color from whatever part of
-          the picture is under it as you scroll, and switch its text between light and dark to stay
-          readable.
+          Over a backdrop or the wallpaper, the nav bar can take its color from the picture under
+          it as you scroll.
         </HelpTooltip>
       </Label>
       <Select value={settings.headerTint} onValueChange={(v) => v && save(v as HeaderTintMode)}>
@@ -1126,15 +1125,10 @@ function AppearanceSection() {
     <div className="space-y-3">
       <h3 className="flex items-center gap-1.5 text-sm font-medium">
         <Palette className="size-3.5" />
-        Appearance
+        Theme
       </h3>
       <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Light / dark mode
-          <HelpTooltip>
-            Switches the theme between its light and dark versions.
-          </HelpTooltip>
-        </span>
+        Light / dark mode
         <ThemeToggle />
       </label>
       <div className="space-y-1.5">
@@ -1151,18 +1145,12 @@ function AppearanceSection() {
             ))}
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
-          Changes the app&apos;s color palette and headings.
-        </p>
       </div>
-      <NavBarColorSetting />
       <div className="space-y-1.5">
         <Label>Heading font</Label>
         <FontPicker />
-        <p className="text-xs text-muted-foreground">
-          Overrides the theme&apos;s heading font. &quot;Theme default&quot; lets the theme choose.
-        </p>
       </div>
+      <NavBarColorSetting />
     </div>
   );
 }
@@ -1226,17 +1214,45 @@ function FontPicker() {
   );
 }
 
-function BrandingSection() {
+type BrandingFields = {
+  appName?: string | null;
+  appIcon?: string | null;
+  appIconImage?: string | null;
+  dashboardBackgroundImage?: string | null;
+  dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
+  dashboardTransparentWidgets?: boolean;
+  dashboardLockBackgroundCrop?: boolean;
+  dashboardBackdropFullPage?: boolean;
+  dashboardBackdropBlur?: number;
+};
+
+// Shared by the Identity and Backgrounds sections: saves, then takes the
+// server's settings as the new cache.
+function useSaveBranding() {
   const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  async function saveBranding(fields: BrandingFields) {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) {
+      toast.error("Couldn't save that setting");
+      return;
+    }
+    const body: AppSettings = await res.json();
+    mutate(body, { revalidate: false });
+  }
+  return { settings, saveBranding };
+}
+
+function IdentitySection() {
+  const { settings, saveBranding } = useSaveBranding();
   const [nameDraft, setNameDraft] = useState("");
   const [seededFor, setSeededFor] = useState<string | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [cropOpen, setCropOpen] = useState(false);
   const iconInputRef = useRef<HTMLInputElement>(null);
-  const [backgroundCropFile, setBackgroundCropFile] = useState<File | null>(null);
-  const [backgroundCropOpen, setBackgroundCropOpen] = useState(false);
-  const [backgroundLibraryOpen, setBackgroundLibraryOpen] = useState(false);
-  const backgroundInputRef = useRef<HTMLInputElement>(null);
 
   // Render-phase sync, not an effect — see CustomizeCourseDialog's
   // seededFor for the same pattern. "settings" itself is a stable enough
@@ -1244,40 +1260,6 @@ function BrandingSection() {
   if (settings && seededFor !== "settings") {
     setNameDraft(settings.appName ?? "");
     setSeededFor("settings");
-  }
-
-  async function saveBranding(fields: {
-    appName?: string | null;
-    appIcon?: string | null;
-    appIconImage?: string | null;
-    dashboardBackgroundImage?: string | null;
-    dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
-    dashboardTransparentWidgets?: boolean;
-    dashboardLockBackgroundCrop?: boolean;
-    dashboardBackdropFullPage?: boolean;
-    dashboardBackdropBlur?: number;
-  }) {
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
-    });
-    if (!res.ok) {
-      toast.error("Couldn't save branding");
-      return;
-    }
-    const body: AppSettings = await res.json();
-    mutate(body, { revalidate: false });
-  }
-
-  // The slider moves a local draft; the value is saved once it's let go,
-  // not on every step of the drag.
-  const [blurDraft, setBlurDraft] = useState<number | null>(null);
-  async function commitBlur() {
-    if (blurDraft === null || !settings) return;
-    const next = blurDraft;
-    if (next !== settings.dashboardBackdropBlur) await saveBranding({ dashboardBackdropBlur: next });
-    setBlurDraft((current) => (current === next ? null : current));
   }
 
   function commitName() {
@@ -1293,7 +1275,7 @@ function BrandingSection() {
     <div className="space-y-3">
       <h3 className="flex items-center gap-1.5 text-sm font-medium">
         <Sparkles className="size-3.5" />
-        Branding
+        Identity
       </h3>
       <div className="space-y-1.5">
         <Label htmlFor="app-name">App name</Label>
@@ -1355,168 +1337,9 @@ function BrandingSection() {
             aria-label="App icon emoji"
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          An uploaded image (shown in the header and as the browser tab icon) takes priority over
-          the emoji when both are set.
-        </p>
-      </div>
-      <div className="space-y-1.5">
-        <Label>Dashboard backdrop</Label>
-        <p className="text-xs text-muted-foreground">
-          A large picture behind the top of the home dashboard.
-        </p>
-        <input
-          ref={backgroundInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              setBackgroundCropFile(file);
-              setBackgroundCropOpen(true);
-            }
-            e.target.value = "";
-          }}
-        />
-        {settings.dashboardBackgroundImage ? (
-          <div
-            className={
-              settings.dashboardLockBackgroundCrop
-                ? "relative w-full rounded-lg border bg-center"
-                : "relative h-24 rounded-lg border bg-cover bg-center"
-            }
-            style={{
-              backgroundImage: `url(${settings.dashboardBackgroundImage})`,
-              ...(settings.dashboardLockBackgroundCrop
-                ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" }
-                : {}),
-            }}
-          >
-            <Button
-              variant="secondary"
-              size="icon-sm"
-              className="absolute top-1.5 left-1.5"
-              onClick={() => setBackgroundLibraryOpen(true)}
-              aria-label="Change backdrop"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon-sm"
-              className="absolute top-1.5 right-1.5"
-              onClick={() => saveBranding({ dashboardBackgroundImage: null })}
-              aria-label="Remove dashboard backdrop"
-            >
-              <X className="size-3.5" />
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => backgroundInputRef.current?.click()}>
-              <ImageIcon className="size-3.5" />
-              Upload image
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setBackgroundLibraryOpen(true)}
-              aria-label="Choose a backdrop from previous uploads"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </Button>
-          </div>
+        {settings.appIconImage && settings.appIcon && (
+          <p className="text-xs text-muted-foreground">The image is shown; the emoji is the fallback.</p>
         )}
-        {settings.dashboardBackgroundImage && (
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <span className="text-xs text-muted-foreground">Banner style</span>
-            <Select
-              value={settings.dashboardBannerStyle}
-              onValueChange={(value: AppSettings["dashboardBannerStyle"] | null) =>
-                value && saveBranding({ dashboardBannerStyle: value })
-              }
-            >
-              <SelectTrigger className="h-8 w-40 text-xs">
-                <SelectValue>{(v: AppSettings["dashboardBannerStyle"]) => BANNER_STYLE_LABELS[v] ?? v}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(BANNER_STYLE_LABELS) as AppSettings["dashboardBannerStyle"][]).map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {BANNER_STYLE_LABELS[value]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        <label className="flex items-center justify-between gap-3 pt-1 text-xs">
-          <span className="flex items-center gap-1.5 text-muted-foreground">
-            Transparent widgets
-            <HelpTooltip>Widgets drop their card background and sit directly on the dashboard.</HelpTooltip>
-          </span>
-          <input
-            type="checkbox"
-            className="size-4 shrink-0 accent-primary"
-            checked={settings.dashboardTransparentWidgets}
-            onChange={(e) => saveBranding({ dashboardTransparentWidgets: e.target.checked })}
-          />
-        </label>
-        {settings.dashboardBackgroundImage && (
-          <label className="flex items-center justify-between gap-3 pt-1 text-xs">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              Lock exact crop
-              <HelpTooltip>
-                Keeps the backdrop exactly as you cropped it, instead of reframing as the window
-                resizes or zooms.
-              </HelpTooltip>
-            </span>
-            <input
-              type="checkbox"
-              className="size-4 shrink-0 accent-primary"
-              checked={settings.dashboardLockBackgroundCrop}
-              onChange={(e) => saveBranding({ dashboardLockBackgroundCrop: e.target.checked })}
-            />
-          </label>
-        )}
-        {settings.dashboardBackgroundImage && settings.dashboardBannerStyle === "backdrop" && (
-          <label className="flex items-center justify-between gap-3 pt-1 text-xs">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              Full-page backdrop
-              <HelpTooltip>
-                Extends the backdrop behind the second widget zone below your courses too, instead
-                of fading out once it reaches it.
-              </HelpTooltip>
-            </span>
-            <input
-              type="checkbox"
-              className="size-4 shrink-0 accent-primary"
-              checked={settings.dashboardBackdropFullPage}
-              onChange={(e) => saveBranding({ dashboardBackdropFullPage: e.target.checked })}
-            />
-          </label>
-        )}
-        {settings.dashboardBackgroundImage && (
-          <label className="block space-y-1 pt-1 text-xs">
-            <span className="flex justify-between text-muted-foreground">
-              Backdrop blur{" "}
-              <span className="tabular-nums">{blurDraft ?? settings.dashboardBackdropBlur}px</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={MAX_BACKDROP_BLUR}
-              value={blurDraft ?? settings.dashboardBackdropBlur}
-              onChange={(e) => setBlurDraft(Number(e.target.value))}
-              onPointerUp={commitBlur}
-              onKeyUp={commitBlur}
-              onBlur={commitBlur}
-              className="w-full accent-primary"
-            />
-          </label>
-        )}
-        <AppWallpaperSettings />
-        <CoursePageAppearanceSettings />
       </div>
       <ImageCropDialog
         open={cropOpen}
@@ -1540,13 +1363,163 @@ function BrandingSection() {
           }
         }}
       />
+    </div>
+  );
+}
+
+function BackgroundsSection() {
+  const { settings, saveBranding } = useSaveBranding();
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // The slider moves a local draft; the value is saved once it's let go,
+  // not on every step of the drag.
+  const [blurDraft, setBlurDraft] = useState<number | null>(null);
+  async function commitBlur() {
+    if (blurDraft === null || !settings) return;
+    const next = blurDraft;
+    if (next !== settings.dashboardBackdropBlur) await saveBranding({ dashboardBackdropBlur: next });
+    setBlurDraft((current) => (current === next ? null : current));
+  }
+
+  if (!settings) return null;
+  const image = settings.dashboardBackgroundImage;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+        <ImageIcon className="size-3.5" />
+        Backgrounds
+      </h3>
+      <div className="space-y-1.5">
+        <Label>Dashboard backdrop</Label>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              setCropFile(file);
+              setCropOpen(true);
+            }
+            e.target.value = "";
+          }}
+        />
+        {image ? (
+          <div
+            className={
+              settings.dashboardLockBackgroundCrop
+                ? "relative w-full rounded-lg border bg-center"
+                : "relative h-24 rounded-lg border bg-cover bg-center"
+            }
+            style={{
+              backgroundImage: `url(${image})`,
+              ...(settings.dashboardLockBackgroundCrop
+                ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" }
+                : {}),
+            }}
+          >
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              className="absolute top-1.5 left-1.5"
+              onClick={() => setLibraryOpen(true)}
+              aria-label="Change backdrop"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              className="absolute top-1.5 right-1.5"
+              onClick={() => saveBranding({ dashboardBackgroundImage: null })}
+              aria-label="Remove dashboard backdrop"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+              <ImageIcon className="size-3.5" />
+              Upload image
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setLibraryOpen(true)}
+              aria-label="Choose a backdrop from previous uploads"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
+      {image && (
+        <SettingGroup>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span>Banner style</span>
+            <Select
+              value={settings.dashboardBannerStyle}
+              onValueChange={(value: AppSettings["dashboardBannerStyle"] | null) =>
+                value && saveBranding({ dashboardBannerStyle: value })
+              }
+            >
+              <SelectTrigger className="h-8 w-36 text-xs">
+                <SelectValue>{(v: AppSettings["dashboardBannerStyle"]) => BANNER_STYLE_LABELS[v] ?? v}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(BANNER_STYLE_LABELS) as AppSettings["dashboardBannerStyle"][]).map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {BANNER_STYLE_LABELS[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <SettingSlider
+            label="Blur"
+            valueLabel={`${blurDraft ?? settings.dashboardBackdropBlur}px`}
+            min={0}
+            max={MAX_BACKDROP_BLUR}
+            value={blurDraft ?? settings.dashboardBackdropBlur}
+            onChange={setBlurDraft}
+            onCommit={commitBlur}
+          />
+          <SettingToggle
+            label="Lock exact crop"
+            help="Keeps the backdrop exactly as you cropped it as the window resizes."
+            checked={settings.dashboardLockBackgroundCrop}
+            onChange={(checked) => saveBranding({ dashboardLockBackgroundCrop: checked })}
+          />
+          {settings.dashboardBannerStyle === "backdrop" && (
+            <SettingToggle
+              label="Full-page backdrop"
+              help="Runs the backdrop behind the widgets below your courses too."
+              checked={settings.dashboardBackdropFullPage}
+              onChange={(checked) => saveBranding({ dashboardBackdropFullPage: checked })}
+            />
+          )}
+        </SettingGroup>
+      )}
+      <SettingToggle
+        label="Transparent widgets"
+        help="Widgets drop their card background and sit directly on the dashboard."
+        checked={settings.dashboardTransparentWidgets}
+        onChange={(checked) => saveBranding({ dashboardTransparentWidgets: checked })}
+      />
+      <AppWallpaperSettings />
       <ImageCropDialog
-        open={backgroundCropOpen}
+        open={cropOpen}
         onOpenChange={(next) => {
-          setBackgroundCropOpen(next);
-          if (!next) setBackgroundCropFile(null);
+          setCropOpen(next);
+          if (!next) setCropFile(null);
         }}
-        file={backgroundCropFile}
+        file={cropFile}
         aspect={BACKGROUND_ASPECT}
         outputWidth={BACKGROUND_OUTPUT_WIDTH}
         outputHeight={BACKGROUND_OUTPUT_HEIGHT}
@@ -1568,11 +1541,11 @@ function BrandingSection() {
         }}
       />
       <ImageLibraryDialog
-        open={backgroundLibraryOpen}
-        onOpenChange={setBackgroundLibraryOpen}
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
         kind="background"
         onSelect={(url) => saveBranding({ dashboardBackgroundImage: url })}
-        onUpload={() => backgroundInputRef.current?.click()}
+        onUpload={() => inputRef.current?.click()}
       />
     </div>
   );
@@ -1674,40 +1647,26 @@ function DisplaySection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-medium">Display</h3>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Jump to newly generated content automatically
-          <HelpTooltip>
-            Off: stay put and get a dismissible notification instead — it also shows up on the
-            course until you open it or dismiss it.
-          </HelpTooltip>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.autoOpenGeneratedItems}
-          disabled={saving}
-          onChange={(e) => handleToggle("autoOpenGeneratedItems", e.target.checked)}
-        />
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Show document status badges
-          <HelpTooltip>
-            The &quot;extracted, Np&quot; / &quot;processing…&quot; / &quot;image&quot; pill next to each document.
-          </HelpTooltip>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.documentBadgesEnabled}
-          disabled={saving}
-          onChange={(e) => handleToggle("documentBadgesEnabled", e.target.checked)}
-        />
-      </label>
+      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+        <BookOpen className="size-3.5" />
+        Course pages
+      </h3>
+      <SettingToggle
+        label="Open generated content when it's ready"
+        help="Off: you get a notification instead, and a dot on the course until you open it."
+        checked={settings.autoOpenGeneratedItems}
+        disabled={saving}
+        onChange={(checked) => handleToggle("autoOpenGeneratedItems", checked)}
+      />
+      <SettingToggle
+        label="Show document status badges"
+        help="The pill next to each document: pages extracted, still processing, or image."
+        checked={settings.documentBadgesEnabled}
+        disabled={saving}
+        onChange={(checked) => handleToggle("documentBadgesEnabled", checked)}
+      />
       {settings.documentBadgesEnabled && (
-        <div className="flex items-center justify-between gap-3 pl-1 text-xs">
+        <div className="flex items-center justify-between gap-3 pl-4 text-sm">
           <span className="text-muted-foreground">Detail level</span>
           <Select
             value={settings.documentBadgeDetail}
@@ -1715,7 +1674,7 @@ function DisplaySection() {
               value && saveDocumentBadgeDetail(value)
             }
           >
-            <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectTrigger className="h-8 w-36 text-xs">
               <SelectValue>
                 {(v: AppSettings["documentBadgeDetail"]) => DOCUMENT_BADGE_DETAIL_LABELS[v] ?? v}
               </SelectValue>
@@ -1742,21 +1701,15 @@ function DisplaySection() {
         </span>
         <FolderChipsPicker value={settings.folderChips} onChange={saveFolderChips} />
       </div>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-1.5">
-          Show which model generated each item
-          <HelpTooltip>A small badge next to notes, quizzes, and flashcards.</HelpTooltip>
-        </span>
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-primary"
-          checked={settings.showModelBadge}
-          disabled={saving}
-          onChange={(e) => handleToggle("showModelBadge", e.target.checked)}
-        />
-      </label>
+      <SettingToggle
+        label="Show which model generated each item"
+        help="A small badge next to notes, quizzes, and flashcards."
+        checked={settings.showModelBadge}
+        disabled={saving}
+        onChange={(checked) => handleToggle("showModelBadge", checked)}
+      />
       {settings.showModelBadge && (
-        <div className="flex items-center justify-between gap-3 pl-1 text-xs">
+        <div className="flex items-center justify-between gap-3 pl-4 text-sm">
           <span className="text-muted-foreground">Detail level</span>
           <Select
             value={settings.modelBadgeDetail}
@@ -1764,7 +1717,7 @@ function DisplaySection() {
               value && saveModelBadgeDetail(value)
             }
           >
-            <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectTrigger className="h-8 w-36 text-xs">
               <SelectValue>
                 {(v: AppSettings["modelBadgeDetail"]) => MODEL_BADGE_DETAIL_LABELS[v] ?? v}
               </SelectValue>
@@ -1871,12 +1824,15 @@ export default function SettingsDialog() {
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={handleTabChange}>
+          {/* Tighter tabs on a phone so all five fit without a hidden
+              horizontal scroll. "display" keeps its id so a remembered tab
+              (lib/settingsView.ts) still opens the right one. */}
           <TabsList>
-            <TabsTab value="ai">AI</TabsTab>
-            <TabsTab value="calendar">Calendar</TabsTab>
-            <TabsTab value="storage">Storage</TabsTab>
-            <TabsTab value="appearance">Appearance</TabsTab>
-            <TabsTab value="display">Display</TabsTab>
+            <TabsTab value="ai" className="px-1.5 sm:px-2.5">AI</TabsTab>
+            <TabsTab value="calendar" className="px-1.5 sm:px-2.5">Calendar</TabsTab>
+            <TabsTab value="storage" className="px-1.5 sm:px-2.5">Storage</TabsTab>
+            <TabsTab value="appearance" className="px-1.5 sm:px-2.5">Appearance</TabsTab>
+            <TabsTab value="display" className="px-1.5 sm:px-2.5">Courses</TabsTab>
             <TabsIndicator />
           </TabsList>
           <TabsPanel value="ai">
@@ -1893,10 +1849,13 @@ export default function SettingsDialog() {
           <TabsPanel value="appearance">
             <AppearanceSection />
             <Separator />
-            <BrandingSection />
+            <IdentitySection />
+            <Separator />
+            <BackgroundsSection />
           </TabsPanel>
           <TabsPanel value="display">
             <DisplaySection />
+            <CoursePageAppearanceSettings />
           </TabsPanel>
         </Tabs>
       </DialogContent>

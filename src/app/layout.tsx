@@ -181,7 +181,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <header data-slot="app-header" className="sticky top-0 z-40 shrink-0 border-b bg-card">
                 <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
                   <AppBranding initial={settings} />
-                  <div className="flex items-center gap-2">
+                  {/* On a phone the named buttons drop to icons and the
+                      spacing tightens, so the whole row fits at 375px. */}
+                  <div className="flex shrink-0 items-center gap-1 sm:gap-2">
                     {/* Two visual groups instead of five buttons in a row with
                         mismatched labeled/icon-only/variant styling: named
                         destinations first (Calendar, Search), then a divider,
@@ -190,14 +192,21 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                         reads as two decisions instead of six. The timer turns
                         into a live countdown chip while a session runs. */}
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1.5 px-2 text-xs sm:px-3"
+                        aria-label="Calendar"
+                        nativeButton={false}
+                        render={<Link href="/calendar" />}
+                      >
                         <Calendar className="size-3.5" />
-                        Calendar
+                        <span className="hidden sm:inline">Calendar</span>
                       </Button>
                       <SearchDialog />
                     </div>
                     <div className="h-5 w-px shrink-0 bg-border" />
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5 sm:gap-1">
                       <PomodoroButton />
                       <ChatDialog />
                       <SettingsDialog />

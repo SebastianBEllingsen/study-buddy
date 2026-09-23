@@ -23,7 +23,6 @@ export default function PomodoroWidget({
   transparent: boolean;
 }) {
   const { hydrated, state, settings, now, start, pause, openFocusMode } = usePomodoro();
-  const border = transparent ? "" : "border";
 
   if (!hydrated) {
     return <Skeleton className="h-full rounded-xl" />;
@@ -38,7 +37,7 @@ export default function PomodoroWidget({
     return (
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className={cn("h-full flex-row items-center justify-between gap-2 overflow-hidden px-4", border)}
+        className="h-full flex-row items-center justify-between gap-2 overflow-hidden px-4"
       >
         <div className="min-w-0">
           <span className={cn("flex items-center gap-1.5 text-xs font-medium", phaseTextClass(state.phase))}>
@@ -74,8 +73,8 @@ export default function PomodoroWidget({
   const c = 2 * Math.PI * r;
 
   return (
-    <div className={cn("flex h-full flex-col overflow-hidden rounded-xl", border, !transparent && "bg-card")}>
-      <div className={cn("flex shrink-0 items-center justify-between gap-2 px-4 py-2", !transparent && "border-b")}>
+    <div className={cn("flex h-full flex-col overflow-hidden rounded-xl", !transparent && "bg-card ring-1 ring-foreground/10")}>
+      <div className={cn("flex shrink-0 items-center justify-between gap-2 px-4 py-2.5", !transparent && "border-b")}>
         <span className="flex items-center gap-1.5 font-heading text-sm font-semibold">
           <Timer className="size-4 text-clay" />
           {label ?? "Pomodoro"}

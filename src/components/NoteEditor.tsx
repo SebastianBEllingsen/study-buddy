@@ -72,7 +72,7 @@ import {
   ComboboxList,
   ComboboxPopup,
 } from "@/components/ui/combobox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogCancel, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LinkTargets } from "@/lib/models";
 import { openExternal } from "@/lib/externalLinks";
 import { YOUTUBE_IFRAME_ALLOW, YOUTUBE_IFRAME_REFERRER_POLICY, youTubeEmbedUrl } from "@/lib/youtube";
@@ -2531,6 +2531,7 @@ function InsertLinkDialog({
         )}
 
         <DialogFooter>
+          <DialogCancel />
           <Button onClick={handleInsert} disabled={!canInsert}>
             Insert
           </Button>
