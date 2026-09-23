@@ -326,6 +326,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("courses", "show_practice")) {
     database.exec("ALTER TABLE courses ADD COLUMN show_practice INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("courses", "lock_background_crop")) {
+    database.exec("ALTER TABLE courses ADD COLUMN lock_background_crop INTEGER NOT NULL DEFAULT 0");
+  }
   if (!hasColumn("courses", "folder_chips")) {
     database.exec("ALTER TABLE courses ADD COLUMN folder_chips TEXT");
   }
@@ -496,6 +499,9 @@ export function migrate(database: Database.Database) {
   }
   if (!hasColumn("app_settings", "app_wallpaper")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN app_wallpaper TEXT");
+  }
+  if (!hasColumn("app_settings", "header_tint")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN header_tint TEXT");
   }
   if (!hasColumn("app_settings", "ai_efficiency_mode")) {
     database.exec(

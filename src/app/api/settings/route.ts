@@ -11,6 +11,7 @@ import {
   setDocumentBadgeDetail,
   setFolderChips,
   setAppWallpaper,
+  setHeaderTint,
   setAiEfficiencyMode,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/models";
 import { normalizeFolderChipSettings } from "@/lib/folderChips";
 import { normalizeAppWallpaper } from "@/lib/appWallpaper";
+import { HEADER_TINT_MODES, parseHeaderTintMode } from "@/lib/headerTint";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
 import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
@@ -149,6 +151,13 @@ export async function POST(request: Request) {
       );
     }
     await setFolderChips(chips);
+  }
+
+  if (body?.headerTint !== undefined) {
+    if (!(HEADER_TINT_MODES as readonly unknown[]).includes(body.headerTint)) {
+      return Response.json({ error: `headerTint must be one of ${HEADER_TINT_MODES.join(", ")}` }, { status: 400 });
+    }
+    await setHeaderTint(parseHeaderTintMode(body.headerTint));
   }
 
   if (body?.appWallpaper !== undefined) {

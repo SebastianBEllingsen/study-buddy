@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FolderChipsPicker } from "@/components/FolderChipsPicker";
+import { HEADER_TINT_LABELS, HEADER_TINT_MODES, type HeaderTintMode } from "@/lib/headerTint";
 import { AppWallpaperSettings } from "@/components/AppWallpaperSettings";
 import type { FolderChipSettings } from "@/lib/folderChips";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
@@ -283,10 +284,7 @@ function AiSection() {
         <span className="flex items-center gap-1.5">
           Enable AI features
           <HelpTooltip>
-            On (default): generation, AI chat, grading, and &quot;tidy with AI&quot; all work as normal.
-            Off: use Study Buddy as a plain document/notes/flashcards organizer — every AI control
-            hides and no AI call is ever made. Uploading, viewing, and manually organizing
-            documents, notes, and flashcards all keep working exactly the same either way.
+            Off hides every AI control and makes no AI calls. Everything else works the same.
           </HelpTooltip>
         </span>
         <input
@@ -338,12 +336,9 @@ function AiSection() {
             <span className="flex items-center gap-1.5">
               Full tool access for this CLI backend
               <HelpTooltip>
-                Off (default): {AI_LABELS[backend]} runs hardened — no Bash, file, or network
-                tools, in a throwaway temp directory. On: it runs with its normal full
-                permissions (it can run shell commands, write files, and reach the network),
-                confined to a dedicated Study Buddy workspace folder instead of your temp
-                directory — never your app&apos;s own project files or database. This also lets
-                it see images (Crop &amp; Ask, chat image attachments) instead of refusing them.
+                Off (default): {AI_LABELS[backend]} runs without shell, file or network access. On:
+                it gets its normal tools, limited to a dedicated Study Buddy workspace folder, and
+                can read images (Crop &amp; Ask, chat attachments).
               </HelpTooltip>
             </span>
             <span className="text-xs text-amber-600 dark:text-amber-400">
@@ -382,9 +377,8 @@ function AiSection() {
         <Label className="flex items-center gap-1.5">
           Image model (for Crop &amp; Ask)
           <HelpTooltip>
-            Claude Code and Codex CLI can&apos;t take image input at all (unless full tool access
-            is on above) — pick a different model just for image-bearing requests (Crop &amp; Ask
-            on a PDF/image) without switching your main model away from a CLI subscription.
+            A separate model for requests that include an image. Useful when your main model
+            can&apos;t read images, like a CLI backend without full tool access.
           </HelpTooltip>
         </Label>
         <Select
@@ -429,10 +423,8 @@ function AiSection() {
         <span className="flex items-center gap-1.5">
           Efficiency mode
           <HelpTooltip>
-            Off (default): normal generation quality. On: lower reasoning effort and a shorter
-            response cap everywhere, plus a cheaper, faster model where the provider offers one
-            (Claude backends switch to Haiku) — trades some quality for lower cost/token usage.
-            Never changes what source text is sent to the model.
+            Uses less effort, shorter answers and a cheaper model where available. Costs less,
+            with somewhat lower quality.
           </HelpTooltip>
         </span>
         <input
@@ -666,14 +658,10 @@ function CalendarFeedsSection() {
         Calendar feeds
       </h3>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        Add a read-only ICS feed URL (e.g. a Canvas or Google Calendar link) to show its events
-        alongside Google Calendar.
+        Add a read-only calendar (ICS) link to show its events here.
         <HelpTooltip>
-          Any standard iCalendar link works: a university portal&apos;s timetable, an LMS&apos;s
-          assignment-due-dates export, a Google Calendar &quot;secret address in iCal
-          format&quot;, an Outlook/Office 365 published calendar. Uncheck &quot;Enabled&quot; to
-          pause a feed without losing it; the two checkboxes below control where an enabled feed
-          shows up.
+          Works with any iCalendar link: a school timetable, an LMS&apos;s due dates, a Google or
+          Outlook calendar&apos;s iCal address. Untick Enabled to pause a feed without removing it.
         </HelpTooltip>
       </p>
 
@@ -779,7 +767,7 @@ function UploadLimitToggle() {
           MB, icons 3 MB — scaled to how large they&apos;re shown, with animations compressed to fit. On: no
           size limit and no downscaling, so pictures and animations are stored at full resolution. That uses
           more storage and makes large backdrops slower to load. Your storage provider&apos;s own per-file
-          limit still applies (Supabase&apos;s default is 50 MB).
+          limit still applies.
         </HelpTooltip>
       </span>
       <input
@@ -989,9 +977,8 @@ function StorageSection() {
             <Label className="flex items-center gap-1.5">
               Image storage (optional)
               <HelpTooltip>
-                Left blank, course covers/icons and other images keep syncing as part of your
-                database rows like everything else — this just moves them to a Supabase Storage
-                bucket instead, which is lighter on your project&apos;s database bandwidth.
+                Stores images in a Supabase Storage bucket instead of the database, which uses less
+                database bandwidth. Left blank, images stay in the database.
               </HelpTooltip>
             </Label>
             <p className="text-xs text-muted-foreground">
@@ -1017,8 +1004,7 @@ function StorageSection() {
             {settings.hasStorageServiceKey && (
               <>
                 <p className="text-xs text-muted-foreground">
-                  Moves existing course/app images into this bucket — a one-time bandwidth cost,
-                  so run it whenever that&apos;s convenient rather than right now.
+                  Moves existing images into this bucket. A one-time transfer you can run any time.
                 </p>
                 <Button
                   type="button"
@@ -1084,6 +1070,54 @@ const APP_THEME_LABELS: Record<AppTheme, string> = {
   comic: "Comic — halftone, ink panels, speech balloons",
 };
 
+// How the nav bar is colored over the dashboard/course backdrops and the
+// app wallpaper — see lib/headerTint.ts and components/AdaptiveHeader.tsx.
+function NavBarColorSetting() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  if (!settings) return null;
+
+  async function save(mode: HeaderTintMode) {
+    const prev = settings?.headerTint;
+    mutate((s) => (s ? { ...s, headerTint: mode } : s), { revalidate: false });
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ headerTint: mode }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.error("Couldn't save the nav bar setting");
+      mutate((s) => (s && prev ? { ...s, headerTint: prev } : s), { revalidate: false });
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="flex items-center gap-1.5">
+        Nav bar color
+        <HelpTooltip>
+          Over a backdrop or the app wallpaper, the nav bar can take its color from whatever part of
+          the picture is under it as you scroll, and switch its text between light and dark to stay
+          readable.
+        </HelpTooltip>
+      </Label>
+      <Select value={settings.headerTint} onValueChange={(v) => v && save(v as HeaderTintMode)}>
+        <SelectTrigger className="w-full">
+          <SelectValue>{(v: string) => HEADER_TINT_LABELS[v as HeaderTintMode] ?? v}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {HEADER_TINT_MODES.map((mode) => (
+            <SelectItem key={mode} value={mode}>
+              {HEADER_TINT_LABELS[mode]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme } = useAppTheme();
 
@@ -1097,8 +1131,7 @@ function AppearanceSection() {
         <span className="flex items-center gap-1.5">
           Light / dark mode
           <HelpTooltip>
-            Independent of the theme below — switches which of its light or dark variant is
-            shown.
+            Switches the theme between its light and dark versions.
           </HelpTooltip>
         </span>
         <ThemeToggle />
@@ -1121,12 +1154,12 @@ function AppearanceSection() {
           Changes the app&apos;s color palette and headings.
         </p>
       </div>
+      <NavBarColorSetting />
       <div className="space-y-1.5">
         <Label>Heading font</Label>
         <FontPicker />
         <p className="text-xs text-muted-foreground">
-          Independent of the theme above — picks which face headings use, whichever theme
-          you&apos;re on. Leave on &quot;Theme default&quot; to let the theme choose.
+          Overrides the theme&apos;s heading font. &quot;Theme default&quot; lets the theme choose.
         </p>
       </div>
     </div>
@@ -1318,7 +1351,7 @@ function BrandingSection() {
       <div className="space-y-1.5">
         <Label>Dashboard backdrop</Label>
         <p className="text-xs text-muted-foreground">
-          A large atmospheric background behind the home dashboard, like a game&apos;s library page.
+          A large picture behind the top of the home dashboard.
         </p>
         <input
           ref={backgroundInputRef}
@@ -1485,7 +1518,7 @@ function BrandingSection() {
         aspect={BACKGROUND_ASPECT}
         outputWidth={BACKGROUND_OUTPUT_WIDTH}
         outputHeight={BACKGROUND_OUTPUT_HEIGHT}
-        outputFormat="jpeg"
+        outputFormat="auto"
         uploadKind="dashboard-background"
         title="Position dashboard backdrop"
         onCropped={async (blob) => {
@@ -1801,10 +1834,8 @@ export default function SettingsDialog() {
       <DialogContent ref={setScroller} onScroll={handleScroll} className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            AI model, Google Calendar, calendar feeds, storage, appearance, and display
-            preferences.
-          </DialogDescription>
+          {/* Screen-reader only: the tabs below already say what's here. */}
+          <DialogDescription className="sr-only">Study Buddy settings</DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={handleTabChange}>

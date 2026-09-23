@@ -64,6 +64,10 @@ export const courses = pgTable("courses", {
   // False hides the course page's Practice card, for courses that aren't
   // studied with quizzes/flashcards. Defaults true (today's behavior).
   show_practice: boolean("show_practice").notNull().default(true),
+  // The course-page counterpart of app_settings.dashboard_lock_background_crop:
+  // true draws page_background_image at exactly the aspect ratio it was
+  // cropped to, instead of a fixed-height banner that reframes on resize.
+  lock_background_crop: boolean("lock_background_crop").notNull().default(false),
   // This course's own choice of folder count tags, as JSON — see
   // lib/folderChips.ts. Null follows app_settings.folder_chips.
   folder_chips: text("folder_chips"),
@@ -141,6 +145,9 @@ export const app_settings = pgTable("app_settings", {
   // The dashboard backdrop as a wallpaper behind other pages, as JSON — see
   // lib/appWallpaper.ts. Null == off, with the default areas/dim/blur.
   app_wallpaper: text("app_wallpaper"),
+  // How the nav bar is colored over backdrops — see lib/headerTint.ts.
+  // Null == "static".
+  header_tint: text("header_tint"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: boolean("ai_efficiency_mode").notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

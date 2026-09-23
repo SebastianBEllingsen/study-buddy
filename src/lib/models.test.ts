@@ -69,6 +69,7 @@ const {
   getAppSettings,
   setFolderChips,
   setAppWallpaper,
+  setHeaderTint,
 } = await import("./models");
 
 beforeEach(() => {
@@ -649,16 +650,19 @@ describe("course page display settings", () => {
     const stored = await getCourse(course.id);
     expect(stored?.show_practice).toBe(true);
     expect(stored?.folder_chips).toBeNull();
+    expect(stored?.lock_background_crop).toBe(false);
   });
 
   it("stores a course's own Practice and folder tag choices, also in the dashboard summary", async () => {
     const course = await createCourse("Course");
     await updateCourseCustomization(course.id, {
       show_practice: false,
+      lock_background_crop: true,
       folder_chips: JSON.stringify({ enabled: true, hidden: ["notes"] }),
     });
     const summary = (await listCourseSummaries()).find((c) => c.id === course.id);
     expect(summary?.show_practice).toBe(false);
+    expect(summary?.lock_background_crop).toBe(true);
     expect(summary?.folder_chips).toBe('{"enabled":true,"hidden":["notes"]}');
   });
 
@@ -675,6 +679,14 @@ describe("course page display settings", () => {
     await setAppWallpaper(wallpaper);
     expect((await getAppSettings()).appWallpaper).toEqual(wallpaper);
     await setAppWallpaper({ ...wallpaper, enabled: false });
+  });
+
+  it("round-trips the nav bar color mode, static by default", async () => {
+    expect((await getAppSettings()).headerTint).toBe("static");
+    await setHeaderTint("adaptive-text");
+    expect((await getAppSettings()).headerTint).toBe("adaptive-text");
+    await setHeaderTint("static");
+    expect((await getAppSettings()).headerTint).toBe("static");
   });
 });
 

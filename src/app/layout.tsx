@@ -31,6 +31,7 @@ import AppThemeProvider from "@/components/AppThemeProvider";
 import SWRProvider from "@/components/SWRProvider";
 import AppBranding from "@/components/AppBranding";
 import AppWallpaper from "@/components/AppWallpaper";
+import AdaptiveHeader from "@/components/AdaptiveHeader";
 import ExternalLinkHandler from "@/components/ExternalLinkHandler";
 import PomodoroProvider from "@/components/pomodoro/PomodoroProvider";
 import PomodoroButton from "@/components/pomodoro/PomodoroButton";
@@ -210,6 +211,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               </main>
               <Toaster />
               <AppWallpaper />
+              <AdaptiveHeader />
               <ExternalLinkHandler />
               </PomodoroProvider>
             </SWRProvider>

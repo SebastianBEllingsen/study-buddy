@@ -1,10 +1,10 @@
 // External (http/https) links are opened by the server in the system's
-// default browser instead of by the page itself. Study Buddy usually runs
-// in a kiosk window with its own Brave profile (see the studybuddy-kiosk
-// launcher), so a plain target="_blank"/window.open lands in a fresh window
-// of that isolated browser process rather than as a tab in the browser the
-// user actually browses with. `xdg-open` hands the URL to the default
-// browser, which opens it as a tab in its most recently focused window.
+// default browser instead of by the page itself. When the app runs in its
+// own app/kiosk-style browser window (a separate profile), a plain
+// target="_blank"/window.open would open a new window of that isolated
+// browser instead of a tab in the browser the user normally uses. The
+// system's default-browser handler (see browserOpenCommand) opens it as a
+// tab in that browser's most recently focused window.
 
 export function isExternalHttpUrl(href: string, currentOrigin?: string): boolean {
   let url: URL;
@@ -15,6 +15,15 @@ export function isExternalHttpUrl(href: string, currentOrigin?: string): boolean
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
   return currentOrigin === undefined || url.origin !== currentOrigin;
+}
+
+// The command that opens `url` in the default browser on each platform.
+// None of them go through a shell, so the URL is never interpreted as a
+// command line (e.g. an "&" in a query string on Windows).
+export function browserOpenCommand(platform: string, url: string): { command: string; args: string[] } {
+  if (platform === "darwin") return { command: "open", args: [url] };
+  if (platform === "win32") return { command: "explorer.exe", args: [url] };
+  return { command: "xdg-open", args: [url] };
 }
 
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);

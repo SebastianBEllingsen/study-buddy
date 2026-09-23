@@ -39,6 +39,7 @@ export const courses = sqliteTable("courses", {
   show_icon_frame: integer("show_icon_frame", { mode: "boolean" }).notNull().default(true),
   // See the matching columns in schema.pg.ts.
   show_practice: integer("show_practice", { mode: "boolean" }).notNull().default(true),
+  lock_background_crop: integer("lock_background_crop", { mode: "boolean" }).notNull().default(false),
   folder_chips: text("folder_chips"),
   page_background_image: text("page_background_image"),
   created_at: text("created_at").notNull(),
@@ -105,6 +106,7 @@ export const app_settings = sqliteTable("app_settings", {
   // See the matching columns in schema.pg.ts.
   folder_chips: text("folder_chips"),
   app_wallpaper: text("app_wallpaper"),
+  header_tint: text("header_tint"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: integer("ai_efficiency_mode", { mode: "boolean" }).notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

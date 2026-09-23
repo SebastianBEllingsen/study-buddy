@@ -159,7 +159,7 @@ export function CourseCanvasSection({
               <form onSubmit={handleCreate}>
                 <DialogHeader>
                   <DialogTitle>New canvas</DialogTitle>
-                  <DialogDescription>Give it a name — e.g. &quot;Exam 1 overview&quot; or &quot;Memory hierarchy&quot;.</DialogDescription>
+                  <DialogDescription>Give it a name, e.g. &quot;Exam 1 overview&quot;.</DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-2 py-4">
                   <Label htmlFor="canvas-title">Name</Label>

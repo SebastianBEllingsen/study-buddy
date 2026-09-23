@@ -51,7 +51,7 @@ export function AppWallpaperSettings() {
           Use as app wallpaper
           <HelpTooltip>
             Shows the dashboard backdrop behind other pages too, fixed in place while they scroll.
-            A course with its own page backdrop keeps that instead.
+            A course&apos;s own backdrop stays on top as its header, fading into the wallpaper.
           </HelpTooltip>
         </span>
         <input

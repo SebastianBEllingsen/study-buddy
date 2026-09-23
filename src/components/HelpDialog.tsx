@@ -60,7 +60,8 @@ export default function HelpDialog() {
           </HelpSection>
           <HelpSection title="Pomodoro timer">
             The timer icon in the header starts a focus session that keeps running on every page;
-            the gear sets your lengths, and the expand button opens a fullscreen focus view.
+            the gear sets your lengths, and its buttons open a fullscreen focus view or pop the timer
+            out into its own window.
           </HelpSection>
           <HelpSection title="The Vault">
             Your own Obsidian-style notes, separate from generated material. Type{" "}

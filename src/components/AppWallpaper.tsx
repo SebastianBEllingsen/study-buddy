@@ -10,15 +10,14 @@ import { DEFAULT_APP_WALLPAPER, isDetachedWindowPath, shouldShowWallpaper } from
 // see lib/appWallpaper.ts for where it shows. Pages scroll over it; the dim
 // layer washes it toward the theme's background so text on the page itself
 // stays readable. While it shows, <html data-wallpaper> lets globals.css
-// make the header and detached windows see-through. A course with its own
-// page backdrop sets <html data-page-backdrop>, which hides this again (CSS
-// in globals.css), so that course keeps its own look.
+// make the header and detached windows see-through. A course's own page
+// backdrop sits on top of it as the course's header.
 export default function AppWallpaper() {
   const pathname = usePathname();
   const { data: settings } = useSWR<AppSettings>("/api/settings");
   const image = settings?.dashboardBackgroundImage ?? null;
   const wallpaper = settings?.appWallpaper ?? DEFAULT_APP_WALLPAPER;
-  const show = shouldShowWallpaper(wallpaper, image, pathname, false);
+  const show = shouldShowWallpaper(wallpaper, image, pathname);
 
   useEffect(() => {
     const root = document.documentElement;

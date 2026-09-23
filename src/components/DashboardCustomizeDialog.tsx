@@ -404,8 +404,8 @@ export function DashboardCustomizeDialog({
         <DialogHeader>
           <DialogTitle>Customize dashboard</DialogTitle>
           <DialogDescription>
-            Drag the grip to move a widget anywhere on either grid — the one above your courses or
-            the one below them — drag the corner to resize it, or drop it on Hidden to remove it.
+            Drag a widget by its grip to move it, by its corner to resize it, or onto Hidden to
+            remove it.
           </DialogDescription>
         </DialogHeader>
 

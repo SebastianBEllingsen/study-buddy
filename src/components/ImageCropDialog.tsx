@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { isAnimatedImage } from "@/lib/animatedImage";
+import { hasTransparentPixels, mayHaveTransparency } from "@/lib/imageTransparency";
 import {
   AnimationTooLargeError,
   canEncodeAnimations,
@@ -65,7 +66,10 @@ export function ImageCropDialog({
   // "png" preserves transparency (needed for a badge/sticker-style icon
   // over a background image) — "jpeg" (the default) always flattens to an
   // opaque background, which is fine and much smaller for a cover photo.
-  outputFormat?: "jpeg" | "png";
+  // "auto": PNG when the crop has any see-through pixels (a transparent
+  // picture, or one zoomed out past the frame's edges), otherwise JPEG — so
+  // stickers keep their transparency while photos stay compact.
+  outputFormat?: "jpeg" | "png" | "auto";
   // Which /api/blobs kind the result will be uploaded as — sets the size
   // cap an animation is compressed to fit (lib/uploadLimits.ts).
   uploadKind: ImageUploadKind;
@@ -230,7 +234,7 @@ export function ImageCropDialog({
           maxWidth: unlimited ? Infinity : outputWidth,
           maxHeight: unlimited ? Infinity : outputHeight,
           maxBytes: uploadLimitBytes(uploadKind, unlimited),
-          transparent: outputFormat === "png",
+          transparent: outputFormat === "png" || (outputFormat === "auto" && mayHaveTransparency(file.type)),
           onProgress: setProgress,
         });
         onCropped(blob);
@@ -247,8 +251,11 @@ export function ImageCropDialog({
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas not supported");
       ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, width, height);
+      const asPng =
+        outputFormat === "png" ||
+        (outputFormat === "auto" && hasTransparentPixels(ctx.getImageData(0, 0, width, height).data));
       const blob = await new Promise<Blob | null>((resolve) =>
-        outputFormat === "png"
+        asPng
           ? canvas.toBlob(resolve, "image/png")
           : canvas.toBlob(resolve, "image/jpeg", unlimited ? 0.95 : 0.85)
       );
@@ -273,8 +280,7 @@ export function ImageCropDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Drag to reposition, and zoom (scroll, or the slider below) to fit what you want in frame —
-            zoom out to shrink the whole picture inside it.
+            Drag to reposition. Scroll or use the slider to zoom.
           </DialogDescription>
         </DialogHeader>
 
@@ -289,12 +295,12 @@ export function ImageCropDialog({
             ref={setViewportEl}
             className="relative touch-none overflow-hidden rounded-lg border bg-muted select-none"
             style={
-              // A checkerboard (only for PNG — JPEG output is always
-              // opaque, so it would misleadingly suggest transparency that
-              // isn't there) so it's obvious how much of the frame a
-              // zoomed-out sticker actually leaves see-through, the same
-              // convention Photoshop/Figma use.
-              outputFormat === "png"
+              // A checkerboard (not for JPEG — its output is always opaque,
+              // so it would misleadingly suggest transparency that isn't
+              // there) so it's obvious how much of the frame a zoomed-out
+              // sticker actually leaves see-through, the same convention
+              // Photoshop/Figma use.
+              outputFormat !== "jpeg"
                 ? {
                     aspectRatio: aspect,
                     backgroundImage:

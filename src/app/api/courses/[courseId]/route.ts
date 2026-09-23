@@ -66,6 +66,7 @@ export async function PATCH(request: Request, { params }: Params) {
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
     show_practice?: boolean;
+    lock_background_crop?: boolean;
     folder_chips?: string | null;
   } = {};
   if ("icon" in body) {
@@ -111,6 +112,12 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid show_icon_frame" }, { status: 400 });
     }
     customization.show_icon_frame = body.show_icon_frame;
+  }
+  if ("lock_background_crop" in body) {
+    if (typeof body.lock_background_crop !== "boolean") {
+      return Response.json({ error: "Invalid lock_background_crop" }, { status: 400 });
+    }
+    customization.lock_background_crop = body.lock_background_crop;
   }
   if ("show_practice" in body) {
     if (typeof body.show_practice !== "boolean") {

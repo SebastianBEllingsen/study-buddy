@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { isExternalHttpUrl, isLocalSameOriginRequest } from "@/lib/externalLinks";
+import { browserOpenCommand, isExternalHttpUrl, isLocalSameOriginRequest } from "@/lib/externalLinks";
 
 // Opens a link in the system's default browser — see src/lib/externalLinks.ts
 // for why links don't just open from the page.
@@ -15,7 +15,8 @@ export async function POST(request: Request) {
   }
 
   const opened = await new Promise<boolean>((resolve) => {
-    const child = spawn("xdg-open", [url], { stdio: "ignore", detached: true });
+    const { command, args } = browserOpenCommand(process.platform, url);
+    const child = spawn(command, args, { stdio: "ignore", detached: true });
     child.on("error", () => resolve(false));
     child.on("spawn", () => {
       child.unref();

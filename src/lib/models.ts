@@ -35,6 +35,7 @@ import {
   type FolderChipSettings,
 } from "./folderChips";
 import { parseAppWallpaper, type AppWallpaperSettings } from "./appWallpaper";
+import { parseHeaderTintMode, type HeaderTintMode } from "./headerTint";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
@@ -63,6 +64,7 @@ export interface Course {
   // See the matching columns in db/schema.pg.ts. folder_chips is raw JSON —
   // read it through lib/folderChips.ts's parseFolderChipSettings.
   show_practice: boolean;
+  lock_background_crop: boolean;
   folder_chips: string | null;
   created_at: string;
 }
@@ -182,6 +184,7 @@ interface SettingsRow {
   document_badge_detail: string | null;
   folder_chips: string | null;
   app_wallpaper: string | null;
+  header_tint: string | null;
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
   ai_enabled: boolean;
@@ -220,6 +223,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       document_badge_detail: app_settings.document_badge_detail,
       folder_chips: app_settings.folder_chips,
       app_wallpaper: app_settings.app_wallpaper,
+      header_tint: app_settings.header_tint,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
@@ -419,6 +423,9 @@ export interface AppSettings {
   // The dashboard backdrop reused as a fixed wallpaper behind other pages —
   // see lib/appWallpaper.ts. Meaningless with no dashboardBackgroundImage.
   appWallpaper: AppWallpaperSettings;
+  // How the nav bar is colored over the backdrop and wallpaper — see
+  // lib/headerTint.ts.
+  headerTint: HeaderTintMode;
   // Off (the default): generation/chat calls use the main model at their
   // normal effort/maxTokens, same as before this setting existed. On: every
   // AI call in lib/generate.ts and lib/chat.ts asks its backend for a
@@ -480,6 +487,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     folderChips: parseFolderChipSettings(row?.folder_chips) ?? DEFAULT_FOLDER_CHIPS,
     appWallpaper: parseAppWallpaper(row?.app_wallpaper),
+    headerTint: parseHeaderTintMode(row?.header_tint),
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
@@ -539,6 +547,13 @@ export async function setFolderChips(settings: FolderChipSettings): Promise<void
   await db
     .update(app_settings)
     .set({ folder_chips: serializeFolderChipSettings(settings), updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setHeaderTint(mode: HeaderTintMode): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ header_tint: mode === "static" ? null : mode, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1552,6 +1567,7 @@ export async function listCourseSummaries(): Promise<CourseSummary[]> {
       show_cover_on_card: courses.show_cover_on_card,
       show_icon_frame: courses.show_icon_frame,
       show_practice: courses.show_practice,
+      lock_background_crop: courses.lock_background_crop,
       folder_chips: courses.folder_chips,
       created_at: courses.created_at,
     })
@@ -1580,6 +1596,7 @@ export async function updateCourseCustomization(
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
     show_practice?: boolean;
+    lock_background_crop?: boolean;
     folder_chips?: string | null;
   }
 ): Promise<void> {

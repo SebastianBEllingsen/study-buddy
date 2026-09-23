@@ -53,6 +53,7 @@ export function CustomizeCourseDialog({
   const [showCoverOnCard, setShowCoverOnCard] = useState(course.show_cover_on_card);
   const [showIconFrame, setShowIconFrame] = useState(course.show_icon_frame);
   const [showPractice, setShowPractice] = useState(course.show_practice);
+  const [lockBackgroundCrop, setLockBackgroundCrop] = useState(course.lock_background_crop);
   // null == follow the global folder tag setting (Settings → Display).
   const [folderChips, setFolderChips] = useState<FolderChipSettings | null>(() =>
     parseFolderChipSettings(course.folder_chips)
@@ -90,6 +91,7 @@ export function CustomizeCourseDialog({
     setShowCoverOnCard(course.show_cover_on_card);
     setShowIconFrame(course.show_icon_frame);
     setShowPractice(course.show_practice);
+    setLockBackgroundCrop(course.lock_background_crop);
     setFolderChips(parseFolderChipSettings(course.folder_chips));
     setSeededFor(course.id);
   }
@@ -154,6 +156,7 @@ export function CustomizeCourseDialog({
           show_cover_on_card: showCoverOnCard,
           show_icon_frame: showIconFrame,
           show_practice: showPractice,
+          lock_background_crop: lockBackgroundCrop,
           folder_chips: folderChips,
         }),
       });
@@ -178,8 +181,7 @@ export function CustomizeCourseDialog({
         <DialogHeader>
           <DialogTitle>Customize course</DialogTitle>
           <DialogDescription>
-            Pick a badge image or emoji, add a cover banner and page backdrop, and choose a color, to
-            make {course.name} easier to spot at a glance.
+            Make {course.name} easy to spot at a glance.
           </DialogDescription>
         </DialogHeader>
 
@@ -356,8 +358,8 @@ export function CustomizeCourseDialog({
             <Label className="flex items-center gap-1.5">
               Page backdrop
               <HelpTooltip>
-                A large atmospheric background behind the whole course page, like a game&apos;s
-                library page — separate from the cover banner above.
+                A large picture across the top of the course page, shown instead of the cover
+                banner.
               </HelpTooltip>
             </Label>
             <input
@@ -376,8 +378,13 @@ export function CustomizeCourseDialog({
             />
             {backgroundImage ? (
               <div
-                className="relative h-24 rounded-lg border bg-cover bg-center"
-                style={{ backgroundImage: `url(${backgroundImage})` }}
+                className={
+                  lockBackgroundCrop ? "relative w-full rounded-lg border bg-center" : "relative h-24 rounded-lg border bg-cover bg-center"
+                }
+                style={{
+                  backgroundImage: `url(${backgroundImage})`,
+                  ...(lockBackgroundCrop ? { aspectRatio: BACKGROUND_ASPECT, backgroundSize: "100% 100%" } : {}),
+                }}
               >
                 <Button
                   variant="secondary"
@@ -413,6 +420,23 @@ export function CustomizeCourseDialog({
                   <MoreHorizontal className="size-3.5" />
                 </Button>
               </div>
+            )}
+            {backgroundImage && (
+              <label className="flex items-center justify-between gap-3 text-xs">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  Lock exact crop
+                  <HelpTooltip>
+                    Keeps the backdrop exactly as you cropped it, instead of reframing as the window
+                    resizes or zooms.
+                  </HelpTooltip>
+                </span>
+                <input
+                  type="checkbox"
+                  className="size-4 shrink-0 accent-primary"
+                  checked={lockBackgroundCrop}
+                  onChange={(e) => setLockBackgroundCrop(e.target.checked)}
+                />
+              </label>
             )}
           </div>
 
@@ -511,7 +535,7 @@ export function CustomizeCourseDialog({
         aspect={cropTarget === "cover" ? COVER_ASPECT : cropTarget === "background" ? BACKGROUND_ASPECT : ICON_ASPECT}
         outputWidth={cropTarget === "cover" ? COVER_OUTPUT_WIDTH : cropTarget === "background" ? BACKGROUND_OUTPUT_WIDTH : ICON_OUTPUT}
         outputHeight={cropTarget === "cover" ? COVER_OUTPUT_HEIGHT : cropTarget === "background" ? BACKGROUND_OUTPUT_HEIGHT : ICON_OUTPUT}
-        outputFormat={cropTarget === "icon" ? "png" : "jpeg"}
+        outputFormat={cropTarget === "icon" ? "png" : "auto"}
         uploadKind={cropTarget ?? "icon"}
         title={
           cropTarget === "cover"

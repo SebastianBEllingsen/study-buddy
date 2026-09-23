@@ -20,28 +20,26 @@ describe("wallpaperAreaForPath", () => {
     expect(wallpaperAreaForPath("/calendar")).toBe("other");
     expect(wallpaperAreaForPath("/canvas/4")).toBe("other");
     expect(wallpaperAreaForPath("/documents/9/view")).toBe("other");
+    expect(wallpaperAreaForPath("/pomodoro/detached")).toBe("other");
   });
 
-  it("leaves the dashboard and unknown pages out", () => {
-    expect(wallpaperAreaForPath("/")).toBeNull();
+  it("maps the dashboard, and leaves unknown pages out", () => {
+    expect(wallpaperAreaForPath("/")).toBe("dashboard");
     expect(wallpaperAreaForPath("/something-new")).toBeNull();
   });
 });
 
 describe("shouldShowWallpaper", () => {
   it("shows on enabled areas when switched on with an image", () => {
-    expect(shouldShowWallpaper(on, img, "/courses/1", false)).toBe(true);
+    expect(shouldShowWallpaper(on, img, "/courses/1")).toBe(true);
   });
 
   it("needs the switch, an image and the page's area", () => {
-    expect(shouldShowWallpaper(DEFAULT_APP_WALLPAPER, img, "/courses/1", false)).toBe(false);
-    expect(shouldShowWallpaper(on, null, "/courses/1", false)).toBe(false);
-    expect(shouldShowWallpaper({ ...on, areas: ["notes"] }, img, "/courses/1", false)).toBe(false);
-    expect(shouldShowWallpaper(on, img, "/", false)).toBe(false);
-  });
-
-  it("gives way to a course's own page backdrop", () => {
-    expect(shouldShowWallpaper(on, img, "/courses/1", true)).toBe(false);
+    expect(shouldShowWallpaper(DEFAULT_APP_WALLPAPER, img, "/courses/1")).toBe(false);
+    expect(shouldShowWallpaper(on, null, "/courses/1")).toBe(false);
+    expect(shouldShowWallpaper({ ...on, areas: ["notes"] }, img, "/courses/1")).toBe(false);
+    expect(shouldShowWallpaper({ ...on, areas: ["courses"] }, img, "/")).toBe(false);
+    expect(shouldShowWallpaper(on, img, "/")).toBe(true);
   });
 });
 
@@ -58,9 +56,9 @@ describe("parsing and validation", () => {
   });
 
   it("clamps numbers and drops unknown areas", () => {
-    expect(normalizeAppWallpaper({ enabled: true, areas: ["other", "bogus", "courses"], dim: 140.4, blur: -3 })).toEqual({
+    expect(normalizeAppWallpaper({ enabled: true, areas: ["other", "bogus", "courses", "dashboard"], dim: 140.4, blur: -3 })).toEqual({
       enabled: true,
-      areas: ["courses", "other"],
+      areas: ["dashboard", "courses", "other"],
       dim: 100,
       blur: 0,
     });
@@ -73,6 +71,7 @@ describe("isDetachedWindowPath", () => {
     expect(isDetachedWindowPath("/vault/12/detached")).toBe(true);
     expect(isDetachedWindowPath("/documents/9/view")).toBe(true);
     expect(isDetachedWindowPath("/chat/view")).toBe(true);
+    expect(isDetachedWindowPath("/pomodoro/detached")).toBe(true);
     expect(isDetachedWindowPath("/help/note-syntax")).toBe(true);
   });
 

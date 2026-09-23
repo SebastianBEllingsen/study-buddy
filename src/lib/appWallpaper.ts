@@ -2,10 +2,11 @@
 // (Settings → Appearance → "Use as app wallpaper"). Stored as JSON in
 // app_settings.app_wallpaper; rendered by components/AppWallpaper.tsx.
 
-export const WALLPAPER_AREAS = ["courses", "notes", "items", "other"] as const;
+export const WALLPAPER_AREAS = ["dashboard", "courses", "notes", "items", "other"] as const;
 export type WallpaperArea = (typeof WALLPAPER_AREAS)[number];
 
 export const WALLPAPER_AREA_LABELS: Record<WallpaperArea, string> = {
+  dashboard: "Dashboard",
   courses: "Course pages",
   notes: "Notes",
   items: "Quizzes & flashcards",
@@ -66,11 +67,13 @@ export function parseAppWallpaper(raw: string | null | undefined): AppWallpaperS
   }
 }
 
-// Which area a page belongs to. The dashboard ("/") has its own backdrop
-// styles and never gets the wallpaper.
+// Which area a page belongs to. On the dashboard the wallpaper sits behind
+// its own backdrop banner, which fades into it (see app/page.tsx).
 export function wallpaperAreaForPath(pathname: string): WallpaperArea | null {
   const [, first] = pathname.split("/");
   switch (first) {
+    case "":
+      return "dashboard";
     case "courses":
       return "courses";
     case "vault":
@@ -82,26 +85,28 @@ export function wallpaperAreaForPath(pathname: string): WallpaperArea | null {
     case "documents":
     case "chat":
     case "help":
+    case "pomodoro":
       return "other";
     default:
       return null;
   }
 }
 
-// Whether the wallpaper shows on `pathname`. `pageHasOwnBackdrop` is a
-// course page with its own page backdrop, which wins over the wallpaper.
+// Whether the wallpaper shows on `pathname`. A course's own page backdrop
+// doesn't stop it: that sits on top as the course's header, fading into the
+// wallpaper (see the course page).
 export function shouldShowWallpaper(
   settings: AppWallpaperSettings,
-  image: string | null,
-  pathname: string,
-  pageHasOwnBackdrop: boolean
+  image: string | null | undefined,
+  pathname: string
 ): boolean {
-  if (!settings.enabled || !image || pageHasOwnBackdrop) return false;
+  if (!settings.enabled || !image) return false;
   const area = wallpaperAreaForPath(pathname);
   return area !== null && settings.areas.includes(area);
 }
 
-// Detached windows (a note, document, chat or the syntax guide popped out)
+// Detached windows (a note, document, chat, the timer or the syntax guide
+// popped out)
 // cover the whole layout — header included — with their own full-window
 // page. The wallpaper has to sit above the layout there, just under that
 // page, instead of behind everything.
@@ -110,6 +115,7 @@ export function isDetachedWindowPath(pathname: string): boolean {
     /^\/vault\/[^/]+\/detached\/?$/.test(pathname) ||
     /^\/documents\/[^/]+\/view\/?$/.test(pathname) ||
     /^\/chat\/view\/?$/.test(pathname) ||
+    /^\/pomodoro\/detached\/?$/.test(pathname) ||
     pathname.startsWith("/help/")
   );
 }

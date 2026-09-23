@@ -4,6 +4,9 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
+import { isStickerImageUrl } from "@/lib/imageTransparency";
+import { shouldShowWallpaper } from "@/lib/appWallpaper";
+import { useHeaderReflection } from "@/lib/useHeaderReflection";
 import {
   BookOpen,
   CalendarDays,
@@ -918,6 +921,7 @@ function HomePageContent() {
   const { data: courses, mutate: refresh } = useSWR<CourseSummary[]>("/api/courses");
   const { data: stats } = useSWR<Stats>("/api/stats");
   const { data: settings, mutate: mutateSettings } = useSWR<AppSettings>("/api/settings");
+  useHeaderReflection(settings?.dashboardBackgroundImage);
   const { data: feedsData } = useSWR<{ feeds: CalendarFeed[] }>("/api/calendar-feeds");
   const feeds = feedsData?.feeds ?? null;
   const [dashboardCustomizeOpen, setDashboardCustomizeOpen] = useState(false);
@@ -1044,7 +1048,7 @@ function HomePageContent() {
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Discrete Maths 2"
+              placeholder="e.g. Organic Chemistry"
             />
           </div>
           <DialogFooter>
@@ -1121,6 +1125,18 @@ function HomePageContent() {
   const bottomWidgets = settings?.homeWidgets.filter((w) => w.enabled && w.zone === "bottom") ?? [];
 
   const hasBanner = !!settings?.dashboardBackgroundImage;
+  // A transparent PNG backdrop — see lib/imageTransparency.ts. Skips the
+  // dark top tint, which would show as a grey band through its see-through
+  // areas.
+  const stickerBackdrop = isStickerImageUrl(settings?.dashboardBackgroundImage);
+  // With the app wallpaper behind the dashboard too (its "Dashboard" area),
+  // the banner fades out into it — the image masked away toward the bottom
+  // and no fade into the solid page color — instead of ending on a band of
+  // plain background, same as a course page's header.
+  const overWallpaper =
+    !!settings && shouldShowWallpaper(settings.appWallpaper, settings.dashboardBackgroundImage, "/");
+  const fadeMask = overWallpaper ? "linear-gradient(to bottom, #000 45%, transparent)" : undefined;
+  const fadeTo = overWallpaper ? "to-transparent" : "to-background";
   const bannerStyle = settings?.dashboardBannerStyle ?? "overlap";
   const lockCrop = !!settings?.dashboardLockBackgroundCrop;
   // "Backdrop" (locked or not) is the style where the picture is meant to
@@ -1248,6 +1264,9 @@ function HomePageContent() {
 
   return (
     <>
+      {/* Both banner styles pull themselves up past the page's top padding,
+          so the picture starts right at the header's bottom edge — same as
+          a course page's backdrop. */}
       {hasBanner && bannerStyle === "overlap" && !lockCrop && (
         // Same full-bleed, Steam-library-style treatment as a course page's
         // page_background_image — see courses/[courseId]/page.tsx. The
@@ -1255,8 +1274,14 @@ function HomePageContent() {
         // bottom edge (see the negative margin further down) rather than
         // just sitting underneath it — see Settings' "Banner style".
         <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
-          <div className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64" style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }}>
-            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-black/10" />
+          <div
+            data-page-backdrop={settings.dashboardBackgroundImage}
+            className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
+            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})`, maskImage: fadeMask }}
+          >
+            <div
+              className={`absolute inset-0 bg-gradient-to-t ${overWallpaper ? "from-transparent" : "from-background"} via-background/40 ${stickerBackdrop ? "to-transparent" : "to-black/10"}`}
+            />
           </div>
         </div>
       )}
@@ -1290,15 +1315,17 @@ function HomePageContent() {
           {lockCrop ? (
             <div className="grid overflow-hidden">
               <div
+                data-page-backdrop={settings.dashboardBackgroundImage}
                 className="col-start-1 row-start-1 self-start bg-center"
                 style={{
                   backgroundImage: `url(${settings.dashboardBackgroundImage})`,
                   aspectRatio: BACKGROUND_ASPECT,
                   backgroundSize: "100% 100%",
+                  maskImage: fadeMask,
                 }}
               />
               <div
-                className="col-start-1 row-start-1 self-start bg-gradient-to-b from-black/10 via-background/70 to-background"
+                className={`col-start-1 row-start-1 self-start bg-gradient-to-b ${stickerBackdrop ? "from-transparent" : "from-black/10"} via-background/70 ${fadeTo}`}
                 style={{ aspectRatio: BACKGROUND_ASPECT }}
               />
               <div className="relative col-start-1 row-start-1 mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
@@ -1307,9 +1334,17 @@ function HomePageContent() {
             </div>
           ) : (
             <>
-              <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})` }} />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-background/70 to-background" />
-              <div className="relative mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">{backdropContent}</div>
+              <div
+                data-page-backdrop={settings.dashboardBackgroundImage}
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})`, maskImage: fadeMask }}
+              />
+              <div
+                className={`absolute inset-0 bg-gradient-to-b ${stickerBackdrop ? "from-transparent" : "from-black/10"} via-background/70 ${fadeTo}`}
+              />
+              <div className="relative mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
+                {backdropContent}
+              </div>
             </>
           )}
         </div>

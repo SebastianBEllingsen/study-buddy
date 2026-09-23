@@ -172,8 +172,7 @@ export default function SearchDialog() {
         <DialogHeader>
           <DialogTitle>Search</DialogTitle>
           <DialogDescription>
-            Fuzzy search across your Vault notes, generated notes, quiz questions, flashcards, and
-            uploaded documents in every course.
+            Search notes, documents, quizzes and flashcards in every course.
           </DialogDescription>
         </DialogHeader>
 

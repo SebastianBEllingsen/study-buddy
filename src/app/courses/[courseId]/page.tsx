@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
+  AppSettings,
   CanvasSummary,
   Course,
   DocumentSummaryRow,
@@ -42,7 +43,11 @@ import type {
   Note,
 } from "@/lib/models";
 import type { QuizGenerationSettings } from "@/lib/types";
-import { parseFolderChipSettings, visibleFolderChips, type FolderChip, type FolderChipSettings } from "@/lib/folderChips";
+import { isStickerImageUrl } from "@/lib/imageTransparency";
+import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
+import { shouldShowWallpaper } from "@/lib/appWallpaper";
+import { useHeaderReflection } from "@/lib/useHeaderReflection";
+import { parseFolderChipSettings, visibleFolderChips, type FolderChip } from "@/lib/folderChips";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
@@ -1305,20 +1310,11 @@ export default function CoursePage() {
     () => (statsData?.generationNotifications ?? []).filter((n) => n.courseId === Number(courseId)),
     [statsData, courseId]
   );
-  const { data: settingsData } = useSWR<{ autoOpenGeneratedItems: boolean; folderChips: FolderChipSettings }>(
-    "/api/settings"
-  );
-
-  // A course with its own page backdrop keeps it: flag it on <html> so the
-  // app wallpaper (components/AppWallpaper.tsx) steps aside on this page.
-  const hasOwnBackdrop = !!detail?.course.page_background_image;
-  useEffect(() => {
-    if (!hasOwnBackdrop) return;
-    const root = document.documentElement;
-    root.setAttribute("data-page-backdrop", "");
-    return () => root.removeAttribute("data-page-backdrop");
-  }, [hasOwnBackdrop]);
+  const { data: settingsData } = useSWR<
+    Pick<AppSettings, "autoOpenGeneratedItems" | "folderChips" | "appWallpaper" | "dashboardBackgroundImage">
+  >("/api/settings");
   const autoOpenGeneratedItems = settingsData?.autoOpenGeneratedItems ?? true;
+  useHeaderReflection(detail?.course.page_background_image);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -2094,6 +2090,16 @@ export default function CoursePage() {
     );
   }
 
+  const stickerBackdrop = isStickerImageUrl(detail.course.page_background_image);
+  // With the app wallpaper behind this page, the course's backdrop is its
+  // header: it fades out into the wallpaper instead of into the page color.
+  const backdropOverWallpaper =
+    !!settingsData &&
+    shouldShowWallpaper(settingsData.appWallpaper, settingsData.dashboardBackgroundImage, `/courses/${courseId}`);
+  // Where see-through areas or the wallpaper can end up behind the title,
+  // it uses the theme's text color rather than white-on-image.
+  const themeColoredTitle = stickerBackdrop || backdropOverWallpaper;
+
   const folderChips = visibleFolderChips(
     settingsData?.folderChips ?? null,
     parseFolderChipSettings(detail.course.folder_chips)
@@ -2160,23 +2166,60 @@ export default function CoursePage() {
         // than a banner inside it. Takes over the hero role that the small
         // contained cover_image banner plays below when there's no backdrop,
         // rather than showing both at once.
-        <div className="relative left-1/2 -mx-[50vw] right-1/2 w-screen">
+        // Pulled up past the page's top padding, so the picture starts right
+        // at the header's bottom edge instead of below a band of page color.
+        <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
+          {/* Locked crop: the exact aspect ratio the backdrop was cropped to
+              (like the dashboard's "Lock exact crop"), so it never reframes
+              on resize or zoom; otherwise a fixed-height, cover-cropped
+              banner. */}
           <div
-            className="relative h-64 overflow-hidden bg-cover bg-center sm:h-80"
-            style={{ backgroundImage: `url(${detail.course.page_background_image})` }}
+            className={`relative overflow-hidden ${
+              detail.course.lock_background_crop ? "" : "h-64 sm:h-80"
+            }`}
+            style={detail.course.lock_background_crop ? { aspectRatio: BACKGROUND_ASPECT } : undefined}
           >
-            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-black/10" />
+            {/* Over the app wallpaper the image itself fades out toward the
+                bottom (a mask), so the wallpaper shows through underneath
+                it instead of a band of solid page color. */}
+            <div
+              data-page-backdrop={detail.course.page_background_image}
+              className={`absolute inset-0 bg-center ${detail.course.lock_background_crop ? "" : "bg-cover"}`}
+              style={{
+                backgroundImage: `url(${detail.course.page_background_image})`,
+                backgroundSize: detail.course.lock_background_crop ? "100% 100%" : undefined,
+                maskImage: backdropOverWallpaper ? "linear-gradient(to bottom, #000 40%, transparent)" : undefined,
+              }}
+            />
+            {/* The dark top tint, and the fade into the page color unless
+                the wallpaper is behind. A sticker (transparent PNG) skips
+                the tint, which would show as a grey band through its
+                see-through areas. */}
+            <div
+              className={`absolute inset-0 bg-gradient-to-t ${
+                backdropOverWallpaper ? "from-transparent" : "from-background"
+              } ${
+                stickerBackdrop
+                  ? "via-transparent to-transparent"
+                  : backdropOverWallpaper
+                    ? "to-black/10"
+                    : "via-background/50 to-black/10"
+              }`}
+            />
             <div className="relative mx-auto flex h-full max-w-5xl flex-col justify-end gap-2 px-4 pb-5 sm:px-6">
               <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
-                    <BreadcrumbLink render={<Link href="/" />} className="text-white/70 hover:text-white">
+                    <BreadcrumbLink
+                      render={<Link href="/" />}
+                      className={themeColoredTitle ? "" : "text-white/70 hover:text-white"}
+                    >
                       Study Buddy
                     </BreadcrumbLink>
                   </BreadcrumbItem>
-                  <BreadcrumbSeparator className="text-white/50" />
+                  <BreadcrumbSeparator className={themeColoredTitle ? "" : "text-white/50"} />
                   <BreadcrumbItem>
-                    <BreadcrumbPage className="text-white/90">{detail.course.name}</BreadcrumbPage>
+                    <BreadcrumbPage className={themeColoredTitle ? "" : "text-white/90"}>{detail.course.name}</BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
               </Breadcrumb>
@@ -2195,7 +2238,16 @@ export default function CoursePage() {
                     <span className="text-2xl drop-shadow-sm">{detail.course.icon}</span>
                   )
                 )}
-                <h1 className="font-heading text-2xl font-semibold tracking-tight text-white drop-shadow-sm sm:text-3xl">
+                {/* White-on-image by default; a sticker's see-through areas
+                    show the page color instead, so it uses the theme's own
+                    text color to stay readable on light themes. */}
+                <h1
+                  className={`font-heading text-2xl font-semibold tracking-tight sm:text-3xl ${
+                    themeColoredTitle
+                      ? "text-foreground [text-shadow:0_1px_12px_var(--background)]"
+                      : "text-white drop-shadow-sm"
+                  }`}
+                >
                   {detail.course.name}
                 </h1>
                 <Button
@@ -2581,8 +2633,8 @@ export default function CoursePage() {
                     <DialogTitle>Paste text</DialogTitle>
                     <DialogDescription>
                       {pasteSaveAs === "note"
-                        ? "Opens in the wiki-style note editor — good for your own writing, but won't be picked up as source material when generating notes/quizzes/flashcards."
-                        : "For text-only material with no file — treated just like an uploaded document once added, so it can be used to generate notes/quizzes/flashcards."}
+                        ? "Saved as your own note. Notes aren't used as material for generating."
+                        : "Saved like an uploaded document, so it can be used for generating."}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-4">
@@ -2741,10 +2793,8 @@ export default function CoursePage() {
             <>
               Drag &amp; drop to organize
               <HelpTooltip>
-                Drag documents or generated items onto a folder to move them, drag one folder onto
-                another&apos;s name/icon to nest it as a subfolder (elsewhere on the card to
-                reorder), drag a subfolder into the gaps around the cards to move it back to the
-                top level, or drop documents straight onto a folder to upload.
+                Drop items or files on a folder to move or upload them. Drop a folder on another
+                folder&apos;s name to nest it, or between folders to reorder or un-nest it.
               </HelpTooltip>
             </>
           )}

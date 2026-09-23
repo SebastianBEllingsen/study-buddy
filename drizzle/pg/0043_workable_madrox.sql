@@ -1,0 +1,1 @@
+ALTER TABLE "courses" ADD COLUMN "lock_background_crop" boolean DEFAULT false NOT NULL;

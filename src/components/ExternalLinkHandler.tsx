@@ -5,7 +5,7 @@ import { isExternalHttpUrl, openExternal } from "@/lib/externalLinks";
 
 // Routes every click on an external link through openExternal, so links
 // rendered anywhere (markdown notes, calendar events, ...) open in the
-// user's main browser instead of a new kiosk-browser window. Captured at
+// user's default browser (see lib/externalLinks.ts). Captured at
 // the document level ahead of React's own handlers, so components that
 // stopPropagation() on their links are still covered.
 export default function ExternalLinkHandler() {

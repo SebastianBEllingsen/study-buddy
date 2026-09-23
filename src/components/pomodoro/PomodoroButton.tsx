@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, Maximize2, Settings2, Timer } from "lucide-react";
+import { ArrowLeft, ExternalLink, Maximize2, Settings2, Timer } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -74,6 +74,12 @@ export default function PomodoroButton() {
   );
 }
 
+// Same window name every time, so a second click focuses the open timer
+// window instead of stacking copies — the convention note/document detach use.
+function detachTimer() {
+  window.open("/pomodoro/detached", "study-buddy-pomodoro", "noopener,width=340,height=460");
+}
+
 function TimerView({ onSettings, onFocusMode }: { onSettings: () => void; onFocusMode: () => void }) {
   const { state, settings, now, openFocusMode } = usePomodoro();
   return (
@@ -81,6 +87,17 @@ function TimerView({ onSettings, onFocusMode }: { onSettings: () => void; onFocu
       <div className="flex w-full items-center justify-between">
         <span className={cn("text-sm font-medium", phaseTextClass(state.phase))}>{PHASE_LABELS[state.phase]}</span>
         <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Open timer in its own window"
+            onClick={() => {
+              onFocusMode();
+              detachTimer();
+            }}
+          >
+            <ExternalLink />
+          </Button>
           <Button
             variant="ghost"
             size="icon-xs"

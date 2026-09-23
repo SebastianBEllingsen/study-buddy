@@ -607,8 +607,8 @@ li .katex {
 }
 
 /* --- "Mono" appearance theme -------------------------------------------
-   A precise, undecorated skin for technical coursework (pentesting,
-   machine vision, discrete maths — the actual subjects in this app):
+   A precise, undecorated skin for technical coursework (programming,
+   security, maths):
    monospace headings (reusing the Geist Mono already loaded, no extra
    font), a sharp small radius instead of soft rounding, and hues borrowed
    from diff/syntax coloring (blue keyword, gold warning, green add, red
@@ -727,8 +727,8 @@ li .katex {
 }
 
 /* --- "Blueprint" appearance theme ---------------------------------------
-   A drafting-table/cyanotype skin, grounded in the actual coursework this
-   app is used for (pentesting, machine vision, discrete maths) — the first
+   A drafting-table/cyanotype skin for technical and engineering
+   coursework — the first
    theme where a saturated blue is the SURFACE color, not just an accent.
    Light mode reads as pale drafting vellum with navy ink; dark mode is the
    classic cyanotype blueprint (deep blue ground, pale cyan linework).
@@ -2236,18 +2236,69 @@ li .katex {
 /* --- App wallpaper (components/AppWallpaper.tsx) ------------------------
    While the dashboard backdrop shows as a wallpaper, <html data-wallpaper>
    is set: the header turns to frosted glass so the image runs to the top,
-   and detached windows drop their solid page color to show it. A course
-   page with its own backdrop sets data-page-backdrop, which wins — the
-   wallpaper and these treatments step aside there. */
-html[data-page-backdrop] [data-slot="app-wallpaper"] {
-  display: none;
-}
-html[data-wallpaper]:not([data-page-backdrop]) [data-slot="app-header"] {
+   and detached windows drop their solid page color to show it. */
+html[data-wallpaper] [data-slot="app-header"] {
   background-color: color-mix(in oklch, var(--card) 72%, transparent);
   backdrop-filter: blur(12px) saturate(1.2);
 }
-html[data-wallpaper]:not([data-page-backdrop]) [data-slot="detached-page"] {
+html[data-wallpaper] [data-slot="detached-page"] {
   background-color: transparent;
+}
+
+/* The header tinted by the page's backdrop picture (lib/useHeaderReflection.ts):
+   a blurred, faded copy of it between the header's own background and its
+   content, so the colors carry up into the header without the picture's
+   detail. Oversized (negative inset) so the blur's soft edge stays out of
+   view. */
+html[data-header-reflection] [data-slot="app-header"] {
+  isolation: isolate;
+  overflow: hidden;
+}
+html[data-header-reflection] [data-slot="app-header"]::before {
+  content: "";
+  position: absolute;
+  inset: -48px;
+  z-index: -1;
+  background: var(--header-reflection) center / cover no-repeat;
+  filter: blur(32px) saturate(1.4);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Adaptive nav bar (components/AdaptiveHeader.tsx, Settings → Appearance →
+   Nav bar color): the header takes --header-tint, the color of whatever
+   part of the backdrop/wallpaper is under it, in place of the static
+   blurred reflection above. With "adapts text", data-header-text re-points
+   the header's own color tokens at light or dark ink, so its text, icons
+   and buttons stay readable on that color. */
+html[data-header-adaptive] [data-slot="app-header"] {
+  background-color: color-mix(in srgb, var(--header-tint) 90%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  transition: background-color 0.3s ease;
+}
+html[data-header-adaptive] [data-slot="app-header"]::before {
+  display: none;
+}
+html[data-header-text="light"] [data-slot="app-header"] {
+  --foreground: #ffffff;
+  --muted-foreground: rgb(255 255 255 / 0.75);
+  --muted: rgb(255 255 255 / 0.15);
+  --border: rgb(255 255 255 / 0.2);
+  --input: rgb(255 255 255 / 0.25);
+  --background: rgb(255 255 255 / 0.08);
+}
+html[data-header-text="dark"] [data-slot="app-header"] {
+  --foreground: #111111;
+  --muted-foreground: rgb(17 17 17 / 0.7);
+  --muted: rgb(0 0 0 / 0.07);
+  --border: rgb(0 0 0 / 0.14);
+  --input: rgb(0 0 0 / 0.18);
+  --background: rgb(255 255 255 / 0.35);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-header-adaptive] [data-slot="app-header"] {
+    transition: none;
+  }
 }
 
 @layer base {
