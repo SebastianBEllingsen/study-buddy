@@ -288,6 +288,13 @@
       "when": 1790191993626,
       "tag": "0041_rapid_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790193025229,
+      "tag": "0042_yummy_golden_guardian",
+      "breakpoints": true
     }
   ]
 }

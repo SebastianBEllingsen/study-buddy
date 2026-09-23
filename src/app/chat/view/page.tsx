@@ -34,7 +34,7 @@ function DetachedChatPageContent() {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <div data-slot="detached-page" className="fixed inset-0 z-50 flex flex-col bg-background">
       <ChatContent initialConversationId={initialConversationId} />
     </div>
   );

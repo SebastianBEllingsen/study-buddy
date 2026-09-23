@@ -102,8 +102,9 @@ export const app_settings = sqliteTable("app_settings", {
   // column/comment in schema.pg.ts and the AppSettings.documentBadgeDetail
   // doc comment in models.ts.
   document_badge_detail: text("document_badge_detail"),
-  // See the matching column in schema.pg.ts.
+  // See the matching columns in schema.pg.ts.
   folder_chips: text("folder_chips"),
+  app_wallpaper: text("app_wallpaper"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: integer("ai_efficiency_mode", { mode: "boolean" }).notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

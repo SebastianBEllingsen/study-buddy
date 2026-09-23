@@ -2233,6 +2233,23 @@ li .katex {
   }
 }
 
+/* --- App wallpaper (components/AppWallpaper.tsx) ------------------------
+   While the dashboard backdrop shows as a wallpaper, <html data-wallpaper>
+   is set: the header turns to frosted glass so the image runs to the top,
+   and detached windows drop their solid page color to show it. A course
+   page with its own backdrop sets data-page-backdrop, which wins — the
+   wallpaper and these treatments step aside there. */
+html[data-page-backdrop] [data-slot="app-wallpaper"] {
+  display: none;
+}
+html[data-wallpaper]:not([data-page-backdrop]) [data-slot="app-header"] {
+  background-color: color-mix(in oklch, var(--card) 72%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+html[data-wallpaper]:not([data-page-backdrop]) [data-slot="detached-page"] {
+  background-color: transparent;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

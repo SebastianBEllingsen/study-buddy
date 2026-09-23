@@ -390,6 +390,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "document_badges_enabled",
               "document_badge_detail",
               "folder_chips",
+              "app_wallpaper",
               "ai_efficiency_mode",
               "model_badge_detail",
               "ai_enabled",

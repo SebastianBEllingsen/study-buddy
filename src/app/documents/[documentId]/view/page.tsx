@@ -19,7 +19,7 @@ export default function DetachedDocumentPage() {
 
   if (error) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background text-sm text-muted-foreground">
+      <div data-slot="detached-page" className="fixed inset-0 z-50 flex items-center justify-center bg-background text-sm text-muted-foreground">
         This document doesn&apos;t exist anymore.
       </div>
     );
@@ -27,7 +27,7 @@ export default function DetachedDocumentPage() {
 
   if (!data) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background text-sm text-muted-foreground">
+      <div data-slot="detached-page" className="fixed inset-0 z-50 flex items-center justify-center bg-background text-sm text-muted-foreground">
         Loading…
       </div>
     );

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FolderChipsPicker } from "@/components/FolderChipsPicker";
+import { AppWallpaperSettings } from "@/components/AppWallpaperSettings";
 import type { FolderChipSettings } from "@/lib/folderChips";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
 import useSWR from "swr";
@@ -1450,6 +1451,7 @@ function BrandingSection() {
             />
           </label>
         )}
+        <AppWallpaperSettings />
       </div>
       <ImageCropDialog
         open={cropOpen}

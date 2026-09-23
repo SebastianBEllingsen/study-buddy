@@ -10,6 +10,7 @@ import {
   setDocumentBadgesEnabled,
   setDocumentBadgeDetail,
   setFolderChips,
+  setAppWallpaper,
   setAiEfficiencyMode,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
@@ -21,6 +22,7 @@ import {
   IMAGE_CAPABLE_BACKENDS,
 } from "@/lib/models";
 import { normalizeFolderChipSettings } from "@/lib/folderChips";
+import { normalizeAppWallpaper } from "@/lib/appWallpaper";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
 import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
@@ -147,6 +149,17 @@ export async function POST(request: Request) {
       );
     }
     await setFolderChips(chips);
+  }
+
+  if (body?.appWallpaper !== undefined) {
+    const wallpaper = normalizeAppWallpaper(body.appWallpaper);
+    if (!wallpaper) {
+      return Response.json(
+        { error: "appWallpaper must be { enabled, areas, dim, blur }" },
+        { status: 400 }
+      );
+    }
+    await setAppWallpaper(wallpaper);
   }
 
   if (body?.aiEfficiencyMode !== undefined) {

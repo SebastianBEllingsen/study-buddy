@@ -494,6 +494,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "folder_chips")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN folder_chips TEXT");
   }
+  if (!hasColumn("app_settings", "app_wallpaper")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN app_wallpaper TEXT");
+  }
   if (!hasColumn("app_settings", "ai_efficiency_mode")) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN ai_efficiency_mode INTEGER NOT NULL DEFAULT 0"

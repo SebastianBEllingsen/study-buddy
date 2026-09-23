@@ -68,6 +68,7 @@ const {
   listCourseSummaries,
   getAppSettings,
   setFolderChips,
+  setAppWallpaper,
 } = await import("./models");
 
 beforeEach(() => {
@@ -666,6 +667,14 @@ describe("course page display settings", () => {
     await setFolderChips({ enabled: false, hidden: ["generated"] });
     expect((await getAppSettings()).folderChips).toEqual({ enabled: false, hidden: ["generated"] });
     await setFolderChips({ enabled: true, hidden: [] });
+  });
+
+  it("round-trips the app wallpaper setting, off by default", async () => {
+    expect((await getAppSettings()).appWallpaper.enabled).toBe(false);
+    const wallpaper = { enabled: true, areas: ["notes" as const], dim: 55, blur: 10 };
+    await setAppWallpaper(wallpaper);
+    expect((await getAppSettings()).appWallpaper).toEqual(wallpaper);
+    await setAppWallpaper({ ...wallpaper, enabled: false });
   });
 });
 

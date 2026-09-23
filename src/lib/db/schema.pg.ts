@@ -138,6 +138,9 @@ export const app_settings = pgTable("app_settings", {
   // Which folder count tags course pages show, as JSON — see
   // lib/folderChips.ts. Null == all of them.
   folder_chips: text("folder_chips"),
+  // The dashboard backdrop as a wallpaper behind other pages, as JSON — see
+  // lib/appWallpaper.ts. Null == off, with the default areas/dim/blur.
+  app_wallpaper: text("app_wallpaper"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: boolean("ai_efficiency_mode").notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

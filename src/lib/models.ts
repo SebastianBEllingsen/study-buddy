@@ -34,6 +34,7 @@ import {
   serializeFolderChipSettings,
   type FolderChipSettings,
 } from "./folderChips";
+import { parseAppWallpaper, type AppWallpaperSettings } from "./appWallpaper";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
@@ -180,6 +181,7 @@ interface SettingsRow {
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
   folder_chips: string | null;
+  app_wallpaper: string | null;
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
   ai_enabled: boolean;
@@ -217,6 +219,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
       folder_chips: app_settings.folder_chips,
+      app_wallpaper: app_settings.app_wallpaper,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
@@ -413,6 +416,9 @@ export interface AppSettings {
   // after folder names on course pages — see lib/folderChips.ts. A course
   // can override this with its own courses.folder_chips.
   folderChips: FolderChipSettings;
+  // The dashboard backdrop reused as a fixed wallpaper behind other pages —
+  // see lib/appWallpaper.ts. Meaningless with no dashboardBackgroundImage.
+  appWallpaper: AppWallpaperSettings;
   // Off (the default): generation/chat calls use the main model at their
   // normal effort/maxTokens, same as before this setting existed. On: every
   // AI call in lib/generate.ts and lib/chat.ts asks its backend for a
@@ -473,6 +479,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     folderChips: parseFolderChipSettings(row?.folder_chips) ?? DEFAULT_FOLDER_CHIPS,
+    appWallpaper: parseAppWallpaper(row?.app_wallpaper),
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
@@ -532,6 +539,13 @@ export async function setFolderChips(settings: FolderChipSettings): Promise<void
   await db
     .update(app_settings)
     .set({ folder_chips: serializeFolderChipSettings(settings), updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setAppWallpaper(settings: AppWallpaperSettings): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ app_wallpaper: JSON.stringify(settings), updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 

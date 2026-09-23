@@ -15,7 +15,7 @@ export default function DetachedNotePage() {
   const params = useParams<{ noteId: string }>();
 
   return (
-    <div className="fixed inset-0 z-50 bg-background">
+    <div data-slot="detached-page" className="fixed inset-0 z-50 bg-background">
       <NoteWorkspace noteId={Number(params.noteId)} detached />
     </div>
   );

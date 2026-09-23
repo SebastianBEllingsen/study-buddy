@@ -1308,6 +1308,16 @@ export default function CoursePage() {
   const { data: settingsData } = useSWR<{ autoOpenGeneratedItems: boolean; folderChips: FolderChipSettings }>(
     "/api/settings"
   );
+
+  // A course with its own page backdrop keeps it: flag it on <html> so the
+  // app wallpaper (components/AppWallpaper.tsx) steps aside on this page.
+  const hasOwnBackdrop = !!detail?.course.page_background_image;
+  useEffect(() => {
+    if (!hasOwnBackdrop) return;
+    const root = document.documentElement;
+    root.setAttribute("data-page-backdrop", "");
+    return () => root.removeAttribute("data-page-backdrop");
+  }, [hasOwnBackdrop]);
   const autoOpenGeneratedItems = settingsData?.autoOpenGeneratedItems ?? true;
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
