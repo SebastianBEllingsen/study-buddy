@@ -108,6 +108,9 @@ export const app_settings = sqliteTable("app_settings", {
   app_wallpaper: text("app_wallpaper"),
   header_tint: text("header_tint"),
   dashboard_links: text("dashboard_links"),
+  hide_course_backdrops: integer("hide_course_backdrops", { mode: "boolean" }).notNull().default(false),
+  hide_course_icons: integer("hide_course_icons", { mode: "boolean" }).notNull().default(false),
+  dashboard_backdrop_blur: integer("dashboard_backdrop_blur").notNull().default(0),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: integer("ai_efficiency_mode", { mode: "boolean" }).notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

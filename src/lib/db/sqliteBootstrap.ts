@@ -506,6 +506,15 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "dashboard_links")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN dashboard_links TEXT");
   }
+  if (!hasColumn("app_settings", "hide_course_backdrops")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN hide_course_backdrops INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("app_settings", "hide_course_icons")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN hide_course_icons INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("app_settings", "dashboard_backdrop_blur")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN dashboard_backdrop_blur INTEGER NOT NULL DEFAULT 0");
+  }
   if (!hasColumn("app_settings", "ai_efficiency_mode")) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN ai_efficiency_mode INTEGER NOT NULL DEFAULT 0"

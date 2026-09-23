@@ -39,6 +39,7 @@ import { parseHeaderTintMode, type HeaderTintMode } from "./headerTint";
 import { parseDashboardLinks, type DashboardLink } from "./dashboardLinks";
 import { LINK_BRAND_KEYS } from "./linkIcons";
 import { isValidIconImage } from "./dataUrlImage";
+import { clampBackdropBlur } from "./backdropBlur";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
@@ -182,6 +183,7 @@ interface SettingsRow {
   dashboard_transparent_widgets: boolean;
   dashboard_lock_background_crop: boolean;
   dashboard_backdrop_full_page: boolean;
+  dashboard_backdrop_blur: number;
   unlimited_uploads: boolean;
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
@@ -189,6 +191,8 @@ interface SettingsRow {
   app_wallpaper: string | null;
   header_tint: string | null;
   dashboard_links: string | null;
+  hide_course_backdrops: boolean;
+  hide_course_icons: boolean;
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
   ai_enabled: boolean;
@@ -222,6 +226,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       dashboard_transparent_widgets: app_settings.dashboard_transparent_widgets,
       dashboard_lock_background_crop: app_settings.dashboard_lock_background_crop,
       dashboard_backdrop_full_page: app_settings.dashboard_backdrop_full_page,
+      dashboard_backdrop_blur: app_settings.dashboard_backdrop_blur,
       unlimited_uploads: app_settings.unlimited_uploads,
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
@@ -229,6 +234,8 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       app_wallpaper: app_settings.app_wallpaper,
       header_tint: app_settings.header_tint,
       dashboard_links: app_settings.dashboard_links,
+      hide_course_backdrops: app_settings.hide_course_backdrops,
+      hide_course_icons: app_settings.hide_course_icons,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
@@ -390,6 +397,9 @@ export interface AppSettings {
   // Meaningless for dashboardBannerStyle "overlap", which never spans past
   // its own small banner.
   dashboardBackdropFullPage: boolean;
+  // Blur on the dashboard backdrop in px, 0 (the default) to
+  // MAX_BACKDROP_BLUR — see lib/backdropBlur.ts.
+  dashboardBackdropBlur: number;
   // Off (the default): every image upload is held to its kind's size cap
   // (lib/uploadLimits.ts) — oversized animations are compressed to fit and
   // still images are downscaled to what they're displayed at. On: no cap
@@ -433,6 +443,10 @@ export interface AppSettings {
   headerTint: HeaderTintMode;
   // The dashboard Links widget's shortcuts — see lib/dashboardLinks.ts.
   dashboardLinks: DashboardLink[];
+  // Hide every course's own backdrop/cover banner, and/or its icon, on
+  // course pages — see lib/coursePageDisplay.ts.
+  hideCourseBackdrops: boolean;
+  hideCourseIcons: boolean;
   // Off (the default): generation/chat calls use the main model at their
   // normal effort/maxTokens, same as before this setting existed. On: every
   // AI call in lib/generate.ts and lib/chat.ts asks its backend for a
@@ -489,12 +503,15 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
     dashboardLockBackgroundCrop: row?.dashboard_lock_background_crop ?? false,
     dashboardBackdropFullPage: row?.dashboard_backdrop_full_page ?? false,
+    dashboardBackdropBlur: clampBackdropBlur(row?.dashboard_backdrop_blur ?? 0),
     unlimitedUploads: row?.unlimited_uploads ?? false,
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
     folderChips: parseFolderChipSettings(row?.folder_chips) ?? DEFAULT_FOLDER_CHIPS,
     appWallpaper: parseAppWallpaper(row?.app_wallpaper),
     headerTint: parseHeaderTintMode(row?.header_tint),
+    hideCourseBackdrops: row?.hide_course_backdrops ?? false,
+    hideCourseIcons: row?.hide_course_icons ?? false,
     dashboardLinks: parseDashboardLinks(row?.dashboard_links, {
       brandKeys: LINK_BRAND_KEYS,
       isValidImageUrl: isValidIconImage,
@@ -561,6 +578,20 @@ export async function setFolderChips(settings: FolderChipSettings): Promise<void
     .where(eq(app_settings.id, 1));
 }
 
+export async function setCoursePageDisplay(fields: {
+  hideCourseBackdrops?: boolean;
+  hideCourseIcons?: boolean;
+}): Promise<void> {
+  const set: { hide_course_backdrops?: boolean; hide_course_icons?: boolean } = {};
+  if (fields.hideCourseBackdrops !== undefined) set.hide_course_backdrops = fields.hideCourseBackdrops;
+  if (fields.hideCourseIcons !== undefined) set.hide_course_icons = fields.hideCourseIcons;
+  if (Object.keys(set).length === 0) return;
+  await db
+    .update(app_settings)
+    .set({ ...set, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
 export async function setDashboardLinks(links: DashboardLink[]): Promise<void> {
   await db
     .update(app_settings)
@@ -616,8 +647,9 @@ export async function setAppBranding(fields: {
   dashboardTransparentWidgets?: boolean;
   dashboardLockBackgroundCrop?: boolean;
   dashboardBackdropFullPage?: boolean;
+  dashboardBackdropBlur?: number;
 }): Promise<void> {
-  const values: Record<string, string | boolean | null> = {};
+  const values: Record<string, string | number | boolean | null> = {};
   if ("appName" in fields) values.app_name = fields.appName ?? null;
   if ("appIcon" in fields) values.app_icon = fields.appIcon ?? null;
   if ("appIconImage" in fields) values.app_icon_image = fields.appIconImage ?? null;
@@ -627,6 +659,7 @@ export async function setAppBranding(fields: {
   if ("dashboardTransparentWidgets" in fields) values.dashboard_transparent_widgets = fields.dashboardTransparentWidgets ?? false;
   if ("dashboardLockBackgroundCrop" in fields) values.dashboard_lock_background_crop = fields.dashboardLockBackgroundCrop ?? false;
   if ("dashboardBackdropFullPage" in fields) values.dashboard_backdrop_full_page = fields.dashboardBackdropFullPage ?? false;
+  if ("dashboardBackdropBlur" in fields) values.dashboard_backdrop_blur = clampBackdropBlur(fields.dashboardBackdropBlur ?? 0);
   await db
     .update(app_settings)
     .set({ ...values, updated_at: nowUtc() })

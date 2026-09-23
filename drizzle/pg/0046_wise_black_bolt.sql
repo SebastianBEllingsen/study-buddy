@@ -1,0 +1,2 @@
+ALTER TABLE "app_settings" ADD COLUMN "hide_course_backdrops" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_settings" ADD COLUMN "hide_course_icons" boolean DEFAULT false NOT NULL;

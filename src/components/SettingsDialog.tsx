@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderChipsPicker } from "@/components/FolderChipsPicker";
 import { HEADER_TINT_LABELS, HEADER_TINT_MODES, type HeaderTintMode } from "@/lib/headerTint";
-import { AppWallpaperSettings } from "@/components/AppWallpaperSettings";
+import { AppWallpaperSettings, CoursePageAppearanceSettings } from "@/components/AppWallpaperSettings";
+import { MAX_BACKDROP_BLUR } from "@/lib/backdropBlur";
 import type { FolderChipSettings } from "@/lib/folderChips";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
 import useSWR from "swr";
@@ -1254,6 +1255,7 @@ function BrandingSection() {
     dashboardTransparentWidgets?: boolean;
     dashboardLockBackgroundCrop?: boolean;
     dashboardBackdropFullPage?: boolean;
+    dashboardBackdropBlur?: number;
   }) {
     const res = await fetch("/api/settings", {
       method: "POST",
@@ -1266,6 +1268,16 @@ function BrandingSection() {
     }
     const body: AppSettings = await res.json();
     mutate(body, { revalidate: false });
+  }
+
+  // The slider moves a local draft; the value is saved once it's let go,
+  // not on every step of the drag.
+  const [blurDraft, setBlurDraft] = useState<number | null>(null);
+  async function commitBlur() {
+    if (blurDraft === null || !settings) return;
+    const next = blurDraft;
+    if (next !== settings.dashboardBackdropBlur) await saveBranding({ dashboardBackdropBlur: next });
+    setBlurDraft((current) => (current === next ? null : current));
   }
 
   function commitName() {
@@ -1484,7 +1496,27 @@ function BrandingSection() {
             />
           </label>
         )}
+        {settings.dashboardBackgroundImage && (
+          <label className="block space-y-1 pt-1 text-xs">
+            <span className="flex justify-between text-muted-foreground">
+              Backdrop blur{" "}
+              <span className="tabular-nums">{blurDraft ?? settings.dashboardBackdropBlur}px</span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={MAX_BACKDROP_BLUR}
+              value={blurDraft ?? settings.dashboardBackdropBlur}
+              onChange={(e) => setBlurDraft(Number(e.target.value))}
+              onPointerUp={commitBlur}
+              onKeyUp={commitBlur}
+              onBlur={commitBlur}
+              className="w-full accent-primary"
+            />
+          </label>
+        )}
         <AppWallpaperSettings />
+        <CoursePageAppearanceSettings />
       </div>
       <ImageCropDialog
         open={cropOpen}

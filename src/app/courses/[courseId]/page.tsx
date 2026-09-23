@@ -44,6 +44,7 @@ import type {
 } from "@/lib/models";
 import type { QuizGenerationSettings } from "@/lib/types";
 import { isStickerImageUrl } from "@/lib/imageTransparency";
+import { courseAsDisplayed } from "@/lib/coursePageDisplay";
 import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
 import { shouldShowWallpaper } from "@/lib/appWallpaper";
 import { useHeaderReflection } from "@/lib/useHeaderReflection";
@@ -1311,10 +1312,18 @@ export default function CoursePage() {
     [statsData, courseId]
   );
   const { data: settingsData } = useSWR<
-    Pick<AppSettings, "autoOpenGeneratedItems" | "folderChips" | "appWallpaper" | "dashboardBackgroundImage">
+    Pick<
+      AppSettings,
+      | "autoOpenGeneratedItems"
+      | "folderChips"
+      | "appWallpaper"
+      | "dashboardBackgroundImage"
+      | "hideCourseBackdrops"
+      | "hideCourseIcons"
+    >
   >("/api/settings");
   const autoOpenGeneratedItems = settingsData?.autoOpenGeneratedItems ?? true;
-  useHeaderReflection(detail?.course.page_background_image);
+  useHeaderReflection(settingsData?.hideCourseBackdrops ? null : detail?.course.page_background_image);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -2090,7 +2099,13 @@ export default function CoursePage() {
     );
   }
 
-  const stickerBackdrop = isStickerImageUrl(detail.course.page_background_image);
+  // The course as its page draws it — its backdrop/cover and icon blanked
+  // out when Settings hides them for every course (lib/coursePageDisplay.ts).
+  const shownCourse = courseAsDisplayed(detail.course, {
+    hideBackdrops: !!settingsData?.hideCourseBackdrops,
+    hideIcons: !!settingsData?.hideCourseIcons,
+  });
+  const stickerBackdrop = isStickerImageUrl(shownCourse.page_background_image);
   // With the app wallpaper behind this page, the course's backdrop is its
   // header: it fades out into the wallpaper instead of into the page color.
   const backdropOverWallpaper =
@@ -2159,7 +2174,7 @@ export default function CoursePage() {
 
   return (
     <>
-      {detail.course.page_background_image && (
+      {shownCourse.page_background_image && (
         // Full-bleed, Steam-library-style backdrop — breaks out of the
         // centered max-w-5xl column on purpose (the only element on this
         // page that does) so it reads as atmosphere behind the page rather
@@ -2183,10 +2198,10 @@ export default function CoursePage() {
                 bottom (a mask), so the wallpaper shows through underneath
                 it instead of a band of solid page color. */}
             <div
-              data-page-backdrop={detail.course.page_background_image}
+              data-page-backdrop={shownCourse.page_background_image}
               className={`absolute inset-0 bg-center ${detail.course.lock_background_crop ? "" : "bg-cover"}`}
               style={{
-                backgroundImage: `url(${detail.course.page_background_image})`,
+                backgroundImage: `url(${shownCourse.page_background_image})`,
                 backgroundSize: detail.course.lock_background_crop ? "100% 100%" : undefined,
                 maskImage: backdropOverWallpaper ? "linear-gradient(to bottom, #000 40%, transparent)" : undefined,
               }}
@@ -2224,18 +2239,18 @@ export default function CoursePage() {
                 </BreadcrumbList>
               </Breadcrumb>
               <div className="flex items-center gap-2">
-                {detail.course.icon_image ? (
+                {shownCourse.icon_image ? (
                   <div
                     className={`size-9 shrink-0 bg-center ${
                       detail.course.show_icon_frame
                         ? "rounded-lg border border-white/20 bg-cover bg-white/10"
                         : "bg-contain"
                     }`}
-                    style={{ backgroundImage: `url(${detail.course.icon_image})` }}
+                    style={{ backgroundImage: `url(${shownCourse.icon_image})` }}
                   />
                 ) : (
-                  detail.course.icon && (
-                    <span className="text-2xl drop-shadow-sm">{detail.course.icon}</span>
+                  shownCourse.icon && (
+                    <span className="text-2xl drop-shadow-sm">{shownCourse.icon}</span>
                   )
                 )}
                 {/* White-on-image by default; a sticker's see-through areas
@@ -2251,8 +2266,9 @@ export default function CoursePage() {
                   {detail.course.name}
                 </h1>
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="icon-sm"
+                  className={themeColoredTitle ? "" : "text-white/80 hover:bg-white/15 hover:text-white"}
                   onClick={() => setCustomizeOpen(true)}
                   aria-label="Customize course"
                 >
@@ -2264,12 +2280,12 @@ export default function CoursePage() {
         </div>
       )}
     <div className="space-y-8">
-      {!detail.course.page_background_image && (
+      {!shownCourse.page_background_image && (
       <div className="space-y-1">
-        {detail.course.cover_image && (
+        {shownCourse.cover_image && (
           <div
             className="relative mb-2 h-32 overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-black/5 sm:h-40"
-            style={{ backgroundImage: `url(${detail.course.cover_image})` }}
+            style={{ backgroundImage: `url(${shownCourse.cover_image})` }}
           >
             <Button
               variant="secondary"
@@ -2280,19 +2296,19 @@ export default function CoursePage() {
               <Palette className="size-3.5" />
               Customize
             </Button>
-            {detail.course.icon_image ? (
+            {shownCourse.icon_image ? (
               <div
                 className={`absolute bottom-2 left-2 size-11 bg-center ${
                   detail.course.show_icon_frame
                     ? "rounded-lg border bg-cover bg-background shadow-sm"
                     : "bg-contain"
                 }`}
-                style={{ backgroundImage: `url(${detail.course.icon_image})` }}
+                style={{ backgroundImage: `url(${shownCourse.icon_image})` }}
               />
             ) : (
-              detail.course.icon && (
+              shownCourse.icon && (
                 <span className="absolute bottom-2 left-2 flex size-11 items-center justify-center rounded-lg border bg-background text-2xl shadow-sm">
-                  {detail.course.icon}
+                  {shownCourse.icon}
                 </span>
               )
             )}
@@ -2310,19 +2326,19 @@ export default function CoursePage() {
           </BreadcrumbList>
         </Breadcrumb>
         <div className="flex items-center gap-2">
-          {!detail.course.cover_image &&
-            (detail.course.icon_image ? (
+          {!shownCourse.cover_image &&
+            (shownCourse.icon_image ? (
               <div
                 className={`size-7 shrink-0 bg-center ${
                   detail.course.show_icon_frame ? "rounded-md bg-cover" : "bg-contain"
                 }`}
-                style={{ backgroundImage: `url(${detail.course.icon_image})` }}
+                style={{ backgroundImage: `url(${shownCourse.icon_image})` }}
               />
             ) : (
-              detail.course.icon && <span className="text-2xl">{detail.course.icon}</span>
+              shownCourse.icon && <span className="text-2xl">{shownCourse.icon}</span>
             ))}
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{detail.course.name}</h1>
-          {!detail.course.cover_image && (
+          {!shownCourse.cover_image && (
             <Button
               variant="ghost"
               size="icon-sm"
@@ -2964,17 +2980,15 @@ export default function CoursePage() {
 
       <CourseCanvasSection courseId={Number(courseId)} canvases={detail.canvases ?? []} onChanged={() => refresh()} />
 
-      {/* The page's one primary call-to-action still gets a touch of its own
-          identity — a tinted top edge and a soft background wash in the
-          same accent as the Sparkles icon — but collapsed behind that same
-          icon by default rather than a full card competing for attention
-          alongside the folders above it. Hidden entirely with AI features
-          off (see Settings' "Enable AI features") — this card is nothing
-          but generation controls, so there's nothing left to show. */}
+      {/* Sits directly on the page like the sections above it (no card
+          box), marked by its Sparkles icon, and collapsed by default.
+          Hidden entirely with AI features off (see Settings' "Enable AI
+          features") — it's nothing but generation controls — or when the
+          course hides it (Customize course). */}
       {aiEnabled && detail.course.show_practice && (
-      <Card className="gap-0 overflow-hidden border-t-2 border-t-focus bg-gradient-to-b from-focus/[0.04] to-transparent py-0">
+      <Card elevation="flat" className="gap-0 overflow-visible py-0">
         <Collapsible open={practiceOpen} onOpenChange={setPracticeOpen}>
-          <div className="flex items-center hover:bg-focus/5">
+          <div className="flex items-center rounded-lg hover:bg-muted/40">
             <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 py-3 pl-4 text-left font-heading text-base font-semibold">
               <Sparkles className="size-4 text-focus" />
               Practice

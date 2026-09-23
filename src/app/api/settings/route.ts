@@ -13,6 +13,7 @@ import {
   setAppWallpaper,
   setHeaderTint,
   setDashboardLinks,
+  setCoursePageDisplay,
   setAiEfficiencyMode,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
@@ -154,6 +155,15 @@ export async function POST(request: Request) {
       );
     }
     await setFolderChips(chips);
+  }
+
+  for (const field of ["hideCourseBackdrops", "hideCourseIcons"] as const) {
+    if (body?.[field] !== undefined) {
+      if (typeof body[field] !== "boolean") {
+        return Response.json({ error: `${field} must be a boolean` }, { status: 400 });
+      }
+      await setCoursePageDisplay({ [field]: body[field] });
+    }
   }
 
   if (body?.dashboardLinks !== undefined) {
@@ -319,6 +329,12 @@ export async function POST(request: Request) {
       return Response.json({ error: "dashboardBackdropFullPage must be a boolean" }, { status: 400 });
     }
     branding.dashboardBackdropFullPage = body.dashboardBackdropFullPage;
+  }
+  if ("dashboardBackdropBlur" in body) {
+    if (typeof body.dashboardBackdropBlur !== "number" || !Number.isFinite(body.dashboardBackdropBlur)) {
+      return Response.json({ error: "dashboardBackdropBlur must be a number" }, { status: 400 });
+    }
+    branding.dashboardBackdropBlur = body.dashboardBackdropBlur;
   }
   if (Object.keys(branding).length > 0) {
     // Captured before the write so a replaced/cleared appIconImage or

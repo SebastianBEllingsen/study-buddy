@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "dashboard_backdrop_blur" integer DEFAULT 0 NOT NULL;

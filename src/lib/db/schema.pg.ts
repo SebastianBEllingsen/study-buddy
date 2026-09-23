@@ -150,6 +150,12 @@ export const app_settings = pgTable("app_settings", {
   header_tint: text("header_tint"),
   // The dashboard Links widget's links, as JSON — see lib/dashboardLinks.ts.
   dashboard_links: text("dashboard_links"),
+  // Hide every course's own backdrop/cover banner, and/or its icon, on
+  // course pages — see lib/coursePageDisplay.ts.
+  hide_course_backdrops: boolean("hide_course_backdrops").notNull().default(false),
+  hide_course_icons: boolean("hide_course_icons").notNull().default(false),
+  // Blur on the dashboard backdrop, in px — see lib/backdropBlur.ts.
+  dashboard_backdrop_blur: integer("dashboard_backdrop_blur").notNull().default(0),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: boolean("ai_efficiency_mode").notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

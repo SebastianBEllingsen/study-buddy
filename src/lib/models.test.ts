@@ -73,6 +73,8 @@ const {
   setDashboardLinks,
   setHomeWidgets,
   isImageUrlReferenced,
+  setCoursePageDisplay,
+  setAppBranding,
 } = await import("./models");
 
 beforeEach(() => {
@@ -682,6 +684,27 @@ describe("course page display settings", () => {
     await setAppWallpaper(wallpaper);
     expect((await getAppSettings()).appWallpaper).toEqual(wallpaper);
     await setAppWallpaper({ ...wallpaper, enabled: false });
+  });
+
+  it("round-trips hiding course backdrops and icons, both off by default", async () => {
+    let settings = await getAppSettings();
+    expect([settings.hideCourseBackdrops, settings.hideCourseIcons]).toEqual([false, false]);
+    await setCoursePageDisplay({ hideCourseBackdrops: true });
+    settings = await getAppSettings();
+    expect([settings.hideCourseBackdrops, settings.hideCourseIcons]).toEqual([true, false]);
+    await setCoursePageDisplay({ hideCourseIcons: true, hideCourseBackdrops: false });
+    settings = await getAppSettings();
+    expect([settings.hideCourseBackdrops, settings.hideCourseIcons]).toEqual([false, true]);
+    await setCoursePageDisplay({ hideCourseIcons: false });
+  });
+
+  it("stores the dashboard backdrop blur, clamped", async () => {
+    expect((await getAppSettings()).dashboardBackdropBlur).toBe(0);
+    await setAppBranding({ dashboardBackdropBlur: 9 });
+    expect((await getAppSettings()).dashboardBackdropBlur).toBe(9);
+    await setAppBranding({ dashboardBackdropBlur: 999 });
+    expect((await getAppSettings()).dashboardBackdropBlur).toBe(24);
+    await setAppBranding({ dashboardBackdropBlur: 0 });
   });
 
   it("round-trips dashboard links, empty by default", async () => {

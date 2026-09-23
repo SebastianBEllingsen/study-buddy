@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { isStickerImageUrl } from "@/lib/imageTransparency";
 import { shouldShowWallpaper } from "@/lib/appWallpaper";
+import { backdropBlurStyle } from "@/lib/backdropBlur";
 import { useHeaderReflection } from "@/lib/useHeaderReflection";
 import {
   BookOpen,
@@ -1137,6 +1138,7 @@ function HomePageContent() {
   // top — see the stacking/absolute-fill treatment further down.
   const isBackdropStyle = hasBanner && (bannerStyle === "backdrop" || lockCrop);
   const fullPageBackdrop = isBackdropStyle && !!settings?.dashboardBackdropFullPage;
+  const blurStyle = backdropBlurStyle(settings?.dashboardBackdropBlur ?? 0);
 
   const dashboardSection = settings && (
     <div className="space-y-2">
@@ -1269,9 +1271,13 @@ function HomePageContent() {
         <div className="relative left-1/2 -mx-[50vw] right-1/2 -mt-6 w-screen sm:-mt-8">
           <div
             data-page-backdrop={settings.dashboardBackgroundImage}
-            className="relative h-56 overflow-hidden bg-cover bg-center sm:h-64"
-            style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})`, maskImage: fadeMask }}
+            className="relative h-56 overflow-hidden sm:h-64"
+            style={{ maskImage: fadeMask }}
           >
+            <div
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})`, ...blurStyle }}
+            />
             <div
               className={`absolute inset-0 bg-gradient-to-t ${overWallpaper ? "from-transparent" : "from-background"} via-background/40 ${stickerBackdrop ? "to-transparent" : "to-black/10"}`}
             />
@@ -1315,6 +1321,7 @@ function HomePageContent() {
                   aspectRatio: BACKGROUND_ASPECT,
                   backgroundSize: "100% 100%",
                   maskImage: fadeMask,
+                  ...blurStyle,
                 }}
               />
               <div
@@ -1329,9 +1336,14 @@ function HomePageContent() {
             <>
               <div
                 data-page-backdrop={settings.dashboardBackgroundImage}
-                className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})`, maskImage: fadeMask }}
-              />
+                className="absolute inset-0 overflow-hidden"
+                style={{ maskImage: fadeMask }}
+              >
+                <div
+                  className="absolute inset-0 bg-cover bg-center"
+                  style={{ backgroundImage: `url(${settings.dashboardBackgroundImage})`, ...blurStyle }}
+                />
+              </div>
               <div
                 className={`absolute inset-0 bg-gradient-to-b ${stickerBackdrop ? "from-transparent" : "from-black/10"} via-background/70 ${fadeTo}`}
               />

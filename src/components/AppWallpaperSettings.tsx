@@ -116,3 +116,59 @@ export function AppWallpaperSettings() {
     </div>
   );
 }
+
+// Settings → Appearance: hide every course's own backdrop/cover banner or
+// icon on its page — e.g. so the app wallpaper is the only background
+// inside courses. Works with the wallpaper on or off; the courses keep
+// their images (see lib/coursePageDisplay.ts).
+export function CoursePageAppearanceSettings() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  if (!settings) return null;
+
+  async function save(field: "hideCourseBackdrops" | "hideCourseIcons", value: boolean) {
+    mutate((s) => (s ? { ...s, [field]: value } : s), { revalidate: false });
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.error("Couldn't save that setting");
+      mutate((s) => (s ? { ...s, [field]: !value } : s), { revalidate: false });
+    }
+  }
+
+  return (
+    <div className="space-y-2 pt-2">
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex items-center gap-1.5">
+          Hide course backdrops
+          <HelpTooltip>
+            Inside courses, hides each course&apos;s backdrop and cover banner, so the app wallpaper
+            (if on) is the only background. The images stay saved.
+          </HelpTooltip>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.hideCourseBackdrops}
+          onChange={(e) => save("hideCourseBackdrops", e.target.checked)}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex items-center gap-1.5">
+          Hide course icons
+          <HelpTooltip>Inside courses, hides the icon next to the course name. Course cards keep theirs.</HelpTooltip>
+        </span>
+        <input
+          type="checkbox"
+          className="size-4 shrink-0 accent-primary"
+          checked={settings.hideCourseIcons}
+          onChange={(e) => save("hideCourseIcons", e.target.checked)}
+        />
+      </label>
+    </div>
+  );
+}
