@@ -94,7 +94,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -2422,9 +2421,7 @@ export default function CoursePage() {
           <h2 className="font-heading text-base font-semibold">Folders</h2>
           <div className="flex flex-wrap items-center gap-3">
             {/* View/selection controls — a quiet segmented cluster, visually
-                distinct from the content-adding actions to its right so the
-                row reads as two different kinds of control, not six
-                identical buttons in a row. */}
+                distinct from the "add" menu to its right. */}
             <div className="flex items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5">
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setAllFoldersOpen(true)}>
                 Expand all
@@ -2442,14 +2439,23 @@ export default function CoursePage() {
                 {editMode ? "Done" : "Select"}
               </Button>
             </div>
+            {/* Everything that adds to the course, behind one "+" — same
+                menu shell as each folder's own "+". The dialogs below are
+                opened from here (and from those folder menus) rather than
+                each having its own button in this row. */}
+            <RowActionsMenu
+              ariaLabel="Add to course"
+              triggerIcon={Plus}
+              triggerVariant="default"
+              actions={[
+                { label: "Upload files", icon: Upload, onSelect: () => setUploadOpen(true) },
+                { label: "Import Anki deck", icon: Layers, onSelect: () => setUploadOpen(true) },
+                { label: "Paste text", icon: ClipboardPaste, onSelect: () => setPasteOpen(true) },
+                { label: "New note", icon: StickyNote, onSelect: () => setNoteOpen(true) },
+                { label: "New folder", icon: FolderPlus, onSelect: () => openNewFolderDialog(null) },
+              ]}
+            />
             <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
-              <DialogTrigger
-                render={<Button variant="outline" size="sm" />}
-                onClick={() => openNewFolderDialog(null)}
-              >
-                <Plus />
-                New folder
-              </DialogTrigger>
               <DialogContent>
                 <form onSubmit={handleCreateFolder}>
                   <DialogHeader>
@@ -2482,10 +2488,6 @@ export default function CoursePage() {
             </Dialog>
 
             <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
-              <DialogTrigger render={<Button variant="outline" size="sm" />}>
-                <StickyNote />
-                New note
-              </DialogTrigger>
               <DialogContent>
                 <form onSubmit={handleNoteDialogSubmit}>
                   <DialogHeader>
@@ -2560,10 +2562,6 @@ export default function CoursePage() {
             </Dialog>
 
             <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-              <DialogTrigger render={<Button size="sm" />}>
-                <Upload />
-                Upload files
-              </DialogTrigger>
               <DialogContent>
                 <form onSubmit={handleUploadDialogSubmit}>
                   <DialogHeader>
@@ -2639,10 +2637,6 @@ export default function CoursePage() {
             </Dialog>
 
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-              <DialogTrigger render={<Button size="sm" variant="outline" />}>
-                <ClipboardPaste />
-                Paste text
-              </DialogTrigger>
               <DialogContent>
                 <form onSubmit={handlePasteDialogSubmit}>
                   <DialogHeader>

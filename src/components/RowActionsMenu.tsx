@@ -47,6 +47,10 @@ export interface RowActionsMenuProps {
   // but reads as "+" rather than "more actions", since it opens a menu of
   // things to add rather than edit.
   triggerIcon?: LucideIcon;
+  // "default" makes the trigger a filled primary button — for a page's main
+  // "add" menu, which should read as the primary action rather than a quiet
+  // row affordance.
+  triggerVariant?: "ghost" | "default";
   contentClassName?: string;
 }
 
@@ -59,6 +63,7 @@ export function RowActionsMenu({
   deleteDescription = "This can't be undone.",
   triggerIconClassName = "text-muted-foreground",
   triggerIcon: TriggerIcon = MoreHorizontal,
+  triggerVariant = "ghost",
   contentClassName,
 }: RowActionsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -81,11 +86,17 @@ export function RowActionsMenu({
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          render={<Button variant="ghost" size="icon-sm" />}
+          render={<Button variant={triggerVariant} size={triggerVariant === "default" ? "icon" : "icon-sm"} />}
           aria-label={ariaLabel}
+          title={triggerVariant === "default" ? ariaLabel : undefined}
           onClick={(e: React.MouseEvent) => e.stopPropagation()}
         >
-          <TriggerIcon className={cn("size-3.5", triggerIconClassName)} />
+          <TriggerIcon
+            className={cn(
+              triggerVariant === "default" ? "size-4" : "size-3.5",
+              triggerVariant === "default" ? undefined : triggerIconClassName
+            )}
+          />
         </PopoverTrigger>
         <PopoverContent
           align="end"
