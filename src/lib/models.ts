@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, max, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, max, or, sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import Fuse from "fuse.js";
 import {
@@ -28,6 +28,12 @@ import { appendBelow } from "./dashboardGrid";
 import { nowUtc } from "./time";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
 import { deckDueCardIndices } from "./spacedRepetition";
+import {
+  DEFAULT_FOLDER_CHIPS,
+  parseFolderChipSettings,
+  serializeFolderChipSettings,
+  type FolderChipSettings,
+} from "./folderChips";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
@@ -53,6 +59,10 @@ export interface Course {
   page_background_image: string | null;
   show_cover_on_card: boolean;
   show_icon_frame: boolean;
+  // See the matching columns in db/schema.pg.ts. folder_chips is raw JSON —
+  // read it through lib/folderChips.ts's parseFolderChipSettings.
+  show_practice: boolean;
+  folder_chips: string | null;
   created_at: string;
 }
 
@@ -169,6 +179,7 @@ interface SettingsRow {
   unlimited_uploads: boolean;
   document_badges_enabled: boolean;
   document_badge_detail: string | null;
+  folder_chips: string | null;
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
   ai_enabled: boolean;
@@ -205,6 +216,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       unlimited_uploads: app_settings.unlimited_uploads,
       document_badges_enabled: app_settings.document_badges_enabled,
       document_badge_detail: app_settings.document_badge_detail,
+      folder_chips: app_settings.folder_chips,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
@@ -397,6 +409,10 @@ export interface AppSettings {
   // files — processing/failure text is short enough already and doesn't
   // shrink further. Meaningless with documentBadgesEnabled off.
   documentBadgeDetail: "detailed" | "minimal";
+  // Which count tags (documents / generated / notes / subfolders) show
+  // after folder names on course pages — see lib/folderChips.ts. A course
+  // can override this with its own courses.folder_chips.
+  folderChips: FolderChipSettings;
   // Off (the default): generation/chat calls use the main model at their
   // normal effort/maxTokens, same as before this setting existed. On: every
   // AI call in lib/generate.ts and lib/chat.ts asks its backend for a
@@ -456,6 +472,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     unlimitedUploads: row?.unlimited_uploads ?? false,
     documentBadgesEnabled: row?.document_badges_enabled ?? true,
     documentBadgeDetail: row?.document_badge_detail === "minimal" ? "minimal" : "detailed",
+    folderChips: parseFolderChipSettings(row?.folder_chips) ?? DEFAULT_FOLDER_CHIPS,
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
@@ -508,6 +525,13 @@ export async function setDocumentBadgeDetail(detail: "detailed" | "minimal"): Pr
   await db
     .update(app_settings)
     .set({ document_badge_detail: detail === "minimal" ? "minimal" : null, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setFolderChips(settings: FolderChipSettings): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ folder_chips: serializeFolderChipSettings(settings), updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1513,6 +1537,8 @@ export async function listCourseSummaries(): Promise<CourseSummary[]> {
       icon_image: courses.icon_image,
       show_cover_on_card: courses.show_cover_on_card,
       show_icon_frame: courses.show_icon_frame,
+      show_practice: courses.show_practice,
+      folder_chips: courses.folder_chips,
       created_at: courses.created_at,
     })
     .from(courses)
@@ -1539,6 +1565,8 @@ export async function updateCourseCustomization(
     page_background_image?: string | null;
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
+    show_practice?: boolean;
+    folder_chips?: string | null;
   }
 ): Promise<void> {
   await db.update(courses).set(fields).where(eq(courses.id, id));
@@ -2807,22 +2835,27 @@ export interface DueFlashcardItem {
 // content_json, not a column, so per-item due-ness has to go through
 // deckDueCardIndices the same way the single-item route does.
 export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
-  const [rows, dueSchedule] = await Promise.all([
+  const [rows, schedule] = await Promise.all([
     db
       .select()
       .from(generated_items)
       .innerJoin(courses, eq(courses.id, generated_items.course_id))
       .where(eq(generated_items.mode, "flashcards")),
-    // computeDueCardIndices only ever treats a row as significant when its
-    // due_at has passed (a missing row is already "due" by default, and a
-    // future due_at row is skipped) — so filtering to due_at <= now() here
-    // is equivalent to pulling the whole table and filtering in JS, without
-    // the egress cost of every not-yet-due row across the whole library.
-    db.select().from(flashcard_schedule).where(lte(flashcard_schedule.due_at, nowUtc())),
+    // Every row, not just the ones already due: a card with no row counts
+    // as never reviewed and therefore due, so dropping the not-yet-due rows
+    // here made every card reviewed ahead of time look due again. Only the
+    // three columns deckDueCardIndices needs, to keep the egress down.
+    db
+      .select({
+        generated_item_id: flashcard_schedule.generated_item_id,
+        card_index: flashcard_schedule.card_index,
+        due_at: flashcard_schedule.due_at,
+      })
+      .from(flashcard_schedule),
   ]);
 
-  const scheduleByItem = new Map<number, FlashcardScheduleRow[]>();
-  for (const row of dueSchedule) {
+  const scheduleByItem = new Map<number, { card_index: number; due_at: string }[]>();
+  for (const row of schedule) {
     const list = scheduleByItem.get(row.generated_item_id) ?? [];
     list.push(row);
     scheduleByItem.set(row.generated_item_id, list);

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { normalizeFolderChipSettings, serializeFolderChipSettings } from "@/lib/folderChips";
 import {
   deleteCourse,
   getCourse,
@@ -64,6 +65,8 @@ export async function PATCH(request: Request, { params }: Params) {
     page_background_image?: string | null;
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
+    show_practice?: boolean;
+    folder_chips?: string | null;
   } = {};
   if ("icon" in body) {
     // A handful of grapheme clusters at most — plenty for an emoji, even a
@@ -108,6 +111,21 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid show_icon_frame" }, { status: 400 });
     }
     customization.show_icon_frame = body.show_icon_frame;
+  }
+  if ("show_practice" in body) {
+    if (typeof body.show_practice !== "boolean") {
+      return Response.json({ error: "Invalid show_practice" }, { status: 400 });
+    }
+    customization.show_practice = body.show_practice;
+  }
+  // null == follow the global setting; otherwise { enabled, hidden } — see
+  // lib/folderChips.ts.
+  if ("folder_chips" in body) {
+    const chips = body.folder_chips === null ? null : normalizeFolderChipSettings(body.folder_chips);
+    if (body.folder_chips !== null && !chips) {
+      return Response.json({ error: "Invalid folder_chips" }, { status: 400 });
+    }
+    customization.folder_chips = serializeFolderChipSettings(chips);
   }
   if (Object.keys(customization).length > 0) {
     await updateCourseCustomization(id, customization);

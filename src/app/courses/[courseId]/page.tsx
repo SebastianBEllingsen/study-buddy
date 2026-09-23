@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ClipboardPaste,
   ExternalLink,
+  EyeOff,
   FileText,
   Folder as FolderIcon,
   FolderPlus,
@@ -41,6 +42,7 @@ import type {
   Note,
 } from "@/lib/models";
 import type { QuizGenerationSettings } from "@/lib/types";
+import { parseFolderChipSettings, visibleFolderChips, type FolderChip, type FolderChipSettings } from "@/lib/folderChips";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
@@ -791,6 +793,7 @@ function FolderCard({
   onReorderItems,
   onNest,
   onCreateSubfolder,
+  chips,
   isSubfolder = false,
 }: {
   folder: Folder;
@@ -824,6 +827,8 @@ function FolderCard({
   onReorderItems: (folderId: number | null, orderedIds: number[]) => void;
   onNest: (draggedFolderId: number, parentFolderId: number) => void;
   onCreateSubfolder: (parentFolderId: number) => void;
+  // Which count tags to show after the name — see lib/folderChips.ts.
+  chips: Set<FolderChip>;
   // True for a folder rendered inside its parent's card — hides subfolder-
   // only actions (nesting, "+ Subfolder") since nesting is one level deep.
   isSubfolder?: boolean;
@@ -1015,35 +1020,43 @@ function FolderCard({
                     list below, so the header alone tells you what's
                     actually in here at a glance. Native title attributes
                     keep the full word one hover away. */}
-                <span className="flex shrink-0 items-center gap-2.5 font-normal text-xs">
-                  <span
-                    className="flex items-center gap-1 text-muted-foreground"
-                    title={`${documents.length} document${documents.length === 1 ? "" : "s"}`}
-                  >
-                    <FileText className="size-3 shrink-0" />
-                    {documents.length}
+                {chips.size > 0 && (
+                  <span className="flex shrink-0 items-center gap-2.5 font-normal text-xs">
+                    {chips.has("documents") && (
+                      <span
+                        className="flex items-center gap-1 text-muted-foreground"
+                        title={`${documents.length} document${documents.length === 1 ? "" : "s"}`}
+                      >
+                        <FileText className="size-3 shrink-0" />
+                        {documents.length}
+                      </span>
+                    )}
+                    {chips.has("generated") && (
+                      <span className="flex items-center gap-1 text-focus/80" title={`${items.length} generated`}>
+                        <Sparkles className="size-3 shrink-0" />
+                        {items.length}
+                      </span>
+                    )}
+                    {chips.has("notes") && (
+                      <span
+                        className="flex items-center gap-1 text-sage/80"
+                        title={`${notes.length} note${notes.length === 1 ? "" : "s"}`}
+                      >
+                        <StickyNote className="size-3 shrink-0" />
+                        {notes.length}
+                      </span>
+                    )}
+                    {chips.has("subfolders") && subfolders.length > 0 && (
+                      <span
+                        className="flex items-center gap-1 text-muted-foreground"
+                        title={`${subfolders.length} subfolder${subfolders.length === 1 ? "" : "s"}`}
+                      >
+                        <FolderIcon className="size-3 shrink-0" />
+                        {subfolders.length}
+                      </span>
+                    )}
                   </span>
-                  <span
-                    className="flex items-center gap-1 text-focus/80"
-                    title={`${items.length} generated`}
-                  >
-                    <Sparkles className="size-3 shrink-0" />
-                    {items.length}
-                  </span>
-                  <span
-                    className="flex items-center gap-1 text-sage/80"
-                    title={`${notes.length} note${notes.length === 1 ? "" : "s"}`}
-                  >
-                    <StickyNote className="size-3 shrink-0" />
-                    {notes.length}
-                  </span>
-                  {subfolders.length > 0 && (
-                    <span className="flex items-center gap-1 text-muted-foreground">
-                      <FolderIcon className="size-3 shrink-0" />
-                      {subfolders.length}
-                    </span>
-                  )}
-                </span>
+                )}
               </CollapsibleTrigger>
             </div>
             <div className="flex shrink-0 items-center">
@@ -1166,6 +1179,7 @@ function FolderCard({
                     onReorderItems={onReorderItems}
                     onNest={onNest}
                     onCreateSubfolder={onCreateSubfolder}
+                    chips={chips}
                     isSubfolder
                   />
                 ))}
@@ -1291,7 +1305,9 @@ export default function CoursePage() {
     () => (statsData?.generationNotifications ?? []).filter((n) => n.courseId === Number(courseId)),
     [statsData, courseId]
   );
-  const { data: settingsData } = useSWR<{ autoOpenGeneratedItems: boolean }>("/api/settings");
+  const { data: settingsData } = useSWR<{ autoOpenGeneratedItems: boolean; folderChips: FolderChipSettings }>(
+    "/api/settings"
+  );
   const autoOpenGeneratedItems = settingsData?.autoOpenGeneratedItems ?? true;
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -2066,6 +2082,32 @@ export default function CoursePage() {
         <Skeleton className="h-40 rounded-xl" />
       </div>
     );
+  }
+
+  const folderChips = visibleFolderChips(
+    settingsData?.folderChips ?? null,
+    parseFolderChipSettings(detail.course.folder_chips)
+  );
+
+  // Hiding Practice is one click away on the card itself; bringing it back
+  // lives in Customize course (and the toast's Undo, right after hiding).
+  async function setShowPractice(show: boolean) {
+    const res = await fetch(`/api/courses/${courseId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ show_practice: show }),
+    });
+    if (!res.ok) {
+      toast.error(show ? "Couldn't show Practice" : "Couldn't hide Practice");
+      return;
+    }
+    await refresh();
+    if (!show) {
+      toast("Practice hidden for this course", {
+        description: "Turn it back on any time in Customize course.",
+        action: { label: "Undo", onClick: () => setShowPractice(true) },
+      });
+    }
   }
 
   // Exact match — a folder card only ever shows what's filed directly in
@@ -2854,6 +2896,7 @@ export default function CoursePage() {
                 onReorderItems={handleReorderItems}
                 onNest={handleNestFolder}
                 onCreateSubfolder={openNewFolderDialog}
+                chips={folderChips}
               />
             ))}
         </div>
@@ -2868,16 +2911,28 @@ export default function CoursePage() {
           alongside the folders above it. Hidden entirely with AI features
           off (see Settings' "Enable AI features") — this card is nothing
           but generation controls, so there's nothing left to show. */}
-      {aiEnabled && (
+      {aiEnabled && detail.course.show_practice && (
       <Card className="gap-0 overflow-hidden border-t-2 border-t-focus bg-gradient-to-b from-focus/[0.04] to-transparent py-0">
         <Collapsible open={practiceOpen} onOpenChange={setPracticeOpen}>
-          <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left font-heading text-base font-semibold hover:bg-focus/5">
-            <Sparkles className="size-4 text-focus" />
-            Practice
-            <ChevronRight
-              className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${practiceOpen ? "rotate-90" : ""}`}
-            />
-          </CollapsibleTrigger>
+          <div className="flex items-center hover:bg-focus/5">
+            <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 py-3 pl-4 text-left font-heading text-base font-semibold">
+              <Sparkles className="size-4 text-focus" />
+              Practice
+              <ChevronRight
+                className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${practiceOpen ? "rotate-90" : ""}`}
+              />
+            </CollapsibleTrigger>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="mr-2 ml-1"
+              aria-label="Hide Practice for this course"
+              title="Hide Practice for this course"
+              onClick={() => setShowPractice(false)}
+            >
+              <EyeOff className="size-3.5 text-muted-foreground" />
+            </Button>
+          </div>
           <CollapsibleContent>
         <CardContent className="space-y-3 pb-4">
           <div className="flex flex-wrap items-center gap-2">

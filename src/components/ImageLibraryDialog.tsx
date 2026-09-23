@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ImageIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -18,19 +18,23 @@ import type { UploadedImage, UploadedImageKind } from "@/lib/models";
 // A reusable "pick from what you've already uploaded" gallery — scoped to
 // one image kind (icon vs. cover vs. background; see UploadedImageKind),
 // since each has a different crop aspect ratio and picking one for the
-// wrong slot would look wrong. Currently opened from CustomizeCourseDialog's
-// "…" buttons; any future per-thing image customization can reuse this
-// unchanged by just pointing it at the same kind.
+// wrong slot would look wrong. Opened from the "…" buttons in
+// CustomizeCourseDialog and Settings → Appearance. `onUpload`, when given,
+// adds an "Upload new image" button that hands off to the caller's own
+// upload-and-crop flow — the "…" is then the one place to change an image,
+// whether it's new or reused.
 export function ImageLibraryDialog({
   open,
   onOpenChange,
   kind,
   onSelect,
+  onUpload,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   kind: UploadedImageKind;
   onSelect: (url: string) => void;
+  onUpload?: () => void;
 }) {
   const [images, setImages] = useState<UploadedImage[] | null>(null);
 
@@ -70,6 +74,13 @@ export function ImageLibraryDialog({
     onOpenChange(false);
   }
 
+  // Called straight from the click (not after the close) — the caller opens
+  // a file picker, which browsers only allow during the click itself.
+  function handleUpload() {
+    onUpload?.();
+    onOpenChange(false);
+  }
+
   const aspectClass = kind === "cover" ? "aspect-[3.2/1]" : kind === "background" ? "aspect-[2.1/1]" : "aspect-square";
   const gridClass = kind === "icon" ? "grid-cols-4 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-3";
   const kindLabel = kind === "cover" ? "banner" : kind === "background" ? "backdrop" : "badge";
@@ -78,12 +89,19 @@ export function ImageLibraryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Choose from previous uploads</DialogTitle>
+          <DialogTitle>{onUpload ? `Change ${kindLabel} image` : "Choose from previous uploads"}</DialogTitle>
           <DialogDescription>
-            Reuse a {kindLabel} image you&apos;ve already uploaded
-            elsewhere, or close this and upload a new one instead.
+            {onUpload
+              ? `Upload a new image, or reuse a ${kindLabel} image you've uploaded before.`
+              : `Reuse a ${kindLabel} image you've already uploaded elsewhere, or close this and upload a new one instead.`}
           </DialogDescription>
         </DialogHeader>
+        {onUpload && (
+          <Button variant="outline" size="sm" className="self-start" onClick={handleUpload}>
+            <ImageIcon className="size-3.5" />
+            Upload new image
+          </Button>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {images === null && (
@@ -95,7 +113,9 @@ export function ImageLibraryDialog({
           )}
           {images && images.length === 0 && (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              Nothing here yet — images you upload and crop will show up here for reuse.
+              {onUpload
+                ? "No previous uploads yet. Images you upload will show up here for reuse."
+                : "Nothing here yet — images you upload and crop will show up here for reuse."}
             </p>
           )}
           {images && images.length > 0 && (

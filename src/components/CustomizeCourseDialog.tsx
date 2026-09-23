@@ -30,7 +30,9 @@ import {
   BACKGROUND_OUTPUT_WIDTH,
   BACKGROUND_OUTPUT_HEIGHT,
 } from "@/lib/imageCropPresets";
-import type { CourseSummary, UploadedImageKind } from "@/lib/models";
+import type { AppSettings, CourseSummary, UploadedImageKind } from "@/lib/models";
+import { FolderChipsPicker } from "@/components/FolderChipsPicker";
+import { DEFAULT_FOLDER_CHIPS, parseFolderChipSettings, type FolderChipSettings } from "@/lib/folderChips";
 
 export function CustomizeCourseDialog({
   course,
@@ -50,6 +52,12 @@ export function CustomizeCourseDialog({
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [showCoverOnCard, setShowCoverOnCard] = useState(course.show_cover_on_card);
   const [showIconFrame, setShowIconFrame] = useState(course.show_icon_frame);
+  const [showPractice, setShowPractice] = useState(course.show_practice);
+  // null == follow the global folder tag setting (Settings → Display).
+  const [folderChips, setFolderChips] = useState<FolderChipSettings | null>(() =>
+    parseFolderChipSettings(course.folder_chips)
+  );
+  const { data: globalSettings } = useSWR<AppSettings>("/api/settings");
   const [saving, setSaving] = useState(false);
   const [cropTarget, setCropTarget] = useState<"icon" | "cover" | "background" | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
@@ -81,6 +89,8 @@ export function CustomizeCourseDialog({
     setIconImage(course.icon_image);
     setShowCoverOnCard(course.show_cover_on_card);
     setShowIconFrame(course.show_icon_frame);
+    setShowPractice(course.show_practice);
+    setFolderChips(parseFolderChipSettings(course.folder_chips));
     setSeededFor(course.id);
   }
 
@@ -143,6 +153,8 @@ export function CustomizeCourseDialog({
           page_background_image: backgroundImage,
           show_cover_on_card: showCoverOnCard,
           show_icon_frame: showIconFrame,
+          show_practice: showPractice,
+          folder_chips: folderChips,
         }),
       });
       if (!res.ok) {
@@ -299,7 +311,7 @@ export function CustomizeCourseDialog({
                   size="icon-sm"
                   className="absolute top-1.5 left-1.5"
                   onClick={() => setLibraryTarget("cover")}
-                  aria-label="Choose a different cover from previous uploads"
+                  aria-label="Change cover"
                 >
                   <MoreHorizontal className="size-3.5" />
                 </Button>
@@ -372,7 +384,7 @@ export function CustomizeCourseDialog({
                   size="icon-sm"
                   className="absolute top-1.5 left-1.5"
                   onClick={() => setLibraryTarget("background")}
-                  aria-label="Choose a different backdrop from previous uploads"
+                  aria-label="Change backdrop"
                 >
                   <MoreHorizontal className="size-3.5" />
                 </Button>
@@ -438,6 +450,43 @@ export function CustomizeCourseDialog({
               )}
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label>Course page</Label>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span className="flex items-center gap-1.5">
+                Show Practice
+                <HelpTooltip>The card for generating quizzes, flashcards and notes. Hide it for courses you don&apos;t practice with.</HelpTooltip>
+              </span>
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-primary"
+                checked={showPractice}
+                onChange={(e) => setShowPractice(e.target.checked)}
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span className="flex items-center gap-1.5">
+                Folder tags for this course
+                <HelpTooltip>The counts after each folder&apos;s name. Off follows Settings → Display.</HelpTooltip>
+              </span>
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-primary"
+                checked={folderChips !== null}
+                onChange={(e) =>
+                  setFolderChips(e.target.checked ? (globalSettings?.folderChips ?? DEFAULT_FOLDER_CHIPS) : null)
+                }
+              />
+            </label>
+            {folderChips ? (
+              <div className="rounded-md border p-2.5">
+                <FolderChipsPicker value={folderChips} onChange={setFolderChips} />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Using the global setting from Settings → Display.</p>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -480,6 +529,11 @@ export function CustomizeCourseDialog({
         }}
         kind={libraryTarget ?? "icon"}
         onSelect={handlePickFromLibrary}
+        onUpload={() => {
+          const input =
+            libraryTarget === "cover" ? coverInputRef : libraryTarget === "background" ? backgroundInputRef : iconInputRef;
+          input.current?.click();
+        }}
       />
     </>
   );

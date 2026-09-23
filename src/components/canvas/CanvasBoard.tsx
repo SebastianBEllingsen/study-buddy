@@ -76,6 +76,8 @@ import { canvasNodeTypes, fileCardHref } from "./CanvasNodes";
 import { canvasEdgeTypes } from "./CanvasEdge";
 import { CANVAS_TOOL_MIME, CanvasDock, type CanvasTool } from "./CanvasDock";
 import { ColorPicker, ToolbarButton, ToolbarDivider, ToolbarShell } from "./CanvasToolbarParts";
+import { openExternal } from "@/lib/externalLinks";
+import { youTubeEmbedUrl } from "@/lib/youtube";
 
 interface CanvasBoardProps {
   canvasId: number;
@@ -540,7 +542,7 @@ function Board({ canvasId, courseId, initialData, targets, onDataChange, navigat
         const href = ref ? fileCardHref(ref, node.data.subpath, targets) : null;
         if (href) navigate(href);
       } else if (node.type === "link" && /^https?:\/\//i.test(node.data.url ?? "")) {
-        window.open(node.data.url, "_blank", "noopener,noreferrer");
+        void openExternal(node.data.url!);
       }
     },
     [targets, navigate]
@@ -598,7 +600,10 @@ function Board({ canvasId, courseId, initialData, targets, onDataChange, navigat
       if (!text) return;
       e.preventDefault();
       if (/^https?:\/\/\S+$/i.test(text)) {
-        addNodes([makeNode("link", pastePoint(), { width: 320, height: 110 }, { url: text })]);
+        // A video gets a player-sized (16:9 + header) card instead of the
+        // compact link card.
+        const size = youTubeEmbedUrl(text) ? { width: 480, height: 306 } : { width: 320, height: 110 };
+        addNodes([makeNode("link", pastePoint(), size, { url: text })]);
       } else {
         addTextAt(pastePoint(), text, false);
       }

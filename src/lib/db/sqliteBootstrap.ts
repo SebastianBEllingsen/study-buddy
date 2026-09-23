@@ -323,6 +323,12 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("courses", "show_icon_frame")) {
     database.exec("ALTER TABLE courses ADD COLUMN show_icon_frame INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("courses", "show_practice")) {
+    database.exec("ALTER TABLE courses ADD COLUMN show_practice INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!hasColumn("courses", "folder_chips")) {
+    database.exec("ALTER TABLE courses ADD COLUMN folder_chips TEXT");
+  }
   // A big, Steam-library-style backdrop behind the whole course page —
   // deliberately a separate field from cover_image (the small header
   // banner): a good banner crop (wide, short) and a good full-page
@@ -484,6 +490,9 @@ export function migrate(database: Database.Database) {
   }
   if (!hasColumn("app_settings", "document_badge_detail")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN document_badge_detail TEXT");
+  }
+  if (!hasColumn("app_settings", "folder_chips")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN folder_chips TEXT");
   }
   if (!hasColumn("app_settings", "ai_efficiency_mode")) {
     database.exec(

@@ -34,6 +34,8 @@ import { fetchNoteImage, NOTE_IMAGE_SCHEME, noteImageCache } from "@/lib/noteIma
 import { headingSlug, newNoteHref, parseWikiLinks, resolveWikiLink, titleFromNewNoteHref } from "@/lib/obsidianLinks";
 import { blankFrontmatter, formatPropertyValue, type NoteProperties } from "@/lib/frontmatter";
 import remarkCallouts, { type CalloutType } from "@/lib/callouts";
+import { youTubeEmbedUrl } from "@/lib/youtube";
+import YouTubeEmbed from "@/components/YouTubeEmbed";
 
 // A note's rendered (Reading-view) markdown — shared by NoteEditor's
 // Preview mode and canvas cards (text cards and embedded notes), so the
@@ -373,7 +375,11 @@ export default function NoteMarkdown({
               {children}
             </summary>
           ),
-          img: ({ src, alt }) => <NoteMarkdownImage src={src} alt={alt} />,
+          // ![](youtube url) embeds the video, Obsidian-style — see lib/youtube.ts.
+          img: ({ src, alt }) => {
+            const embed = typeof src === "string" ? youTubeEmbedUrl(src) : null;
+            return embed ? <YouTubeEmbed src={embed} title={alt} /> : <NoteMarkdownImage src={src} alt={alt} />;
+          },
           // A wide table shouldn't force the whole note wider (or scroll
           // horizontally itself, per the artifact-design "wrap wide content
           // in its own overflow-x container" rule) — the table scrolls

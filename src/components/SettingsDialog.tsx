@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FolderChipsPicker } from "@/components/FolderChipsPicker";
+import type { FolderChipSettings } from "@/lib/folderChips";
+import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
 import useSWR from "swr";
 import {
   AlertTriangle,
@@ -1065,6 +1068,19 @@ const APP_THEME_LABELS: Record<AppTheme, string> = {
   sepia: "Sepia — warm, literary",
   blueprint: "Blueprint — cyanotype, schematic",
   canvas: "Canvas — crimson, courseware",
+  solarized: "Solarized — the classic dev palette",
+  nord: "Nord — arctic, low-glare",
+  terminal: "Terminal — green phosphor, printout",
+  sakura: "Sakura — blossom pink, soft",
+  chalkboard: "Chalkboard — chalk and whiteboard, hand-drawn",
+  highlighter: "Highlighter — exam paper, highlighter swipes",
+  "index-card": "Index card — corkboard, card stacks, stamps",
+  brutal: "Brutal — thick outlines, buttons that press",
+  win98: "Win98 — bevels, title bars, teal desktop",
+  synthwave: "Synthwave — neon sunset, rolling grid",
+  illuminated: "Illuminated — manuscript, gilded initials",
+  holo: "Holo — iridescent foil",
+  comic: "Comic — halftone, ink panels, speech balloons",
 };
 
 function AppearanceSection() {
@@ -1336,7 +1352,7 @@ function BrandingSection() {
               size="icon-sm"
               className="absolute top-1.5 left-1.5"
               onClick={() => setBackgroundLibraryOpen(true)}
-              aria-label="Choose a different backdrop from previous uploads"
+              aria-label="Change backdrop"
             >
               <MoreHorizontal className="size-3.5" />
             </Button>
@@ -1489,6 +1505,7 @@ function BrandingSection() {
         onOpenChange={setBackgroundLibraryOpen}
         kind="background"
         onSelect={(url) => saveBranding({ dashboardBackgroundImage: url })}
+        onUpload={() => backgroundInputRef.current?.click()}
       />
     </div>
   );
@@ -1520,6 +1537,23 @@ function DisplaySection() {
       mutate((prev) => (prev ? { ...prev, [field]: !next } : prev), { revalidate: false });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveFolderChips(next: FolderChipSettings) {
+    if (!settings) return;
+    const prev = settings.folderChips;
+    mutate({ ...settings, folderChips: next }, { revalidate: false });
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderChips: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.error("Couldn't save display settings");
+      mutate((s) => (s ? { ...s, folderChips: prev } : s), { revalidate: false });
     }
   }
 
@@ -1631,6 +1665,16 @@ function DisplaySection() {
           </Select>
         </div>
       )}
+      <div className="space-y-1.5">
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          Folder tags
+          <HelpTooltip>
+            The counts after each folder&apos;s name on course pages. A course can choose its own in
+            Customize course.
+          </HelpTooltip>
+        </span>
+        <FolderChipsPicker value={settings.folderChips} onChange={saveFolderChips} />
+      </div>
       <label className="flex items-center justify-between gap-3 text-sm">
         <span className="flex items-center gap-1.5">
           Show which model generated each item
@@ -1674,15 +1718,85 @@ function DisplaySection() {
   );
 }
 
+// Scrolls `el` to `target`, retrying each frame for a moment: a tab's
+// sections load their settings asynchronously, so the dialog may not be
+// tall enough to reach the saved position on the first try. Gives up the
+// moment the user scrolls, clicks or types themselves. Returns a cancel.
+function restoreScroll(el: HTMLElement, target: number, restoring: { current: boolean }): () => void {
+  let frame = 0;
+  let done = false;
+  const started = performance.now();
+  const stop = () => {
+    if (done) return;
+    done = true;
+    restoring.current = false;
+    cancelAnimationFrame(frame);
+    for (const type of USER_SCROLL_EVENTS) el.removeEventListener(type, stop);
+  };
+  const step = () => {
+    if (done) return;
+    el.scrollTop = target;
+    if (Math.abs(el.scrollTop - target) <= 1 || performance.now() - started > 1500) stop();
+    else frame = requestAnimationFrame(step);
+  };
+  restoring.current = true;
+  for (const type of USER_SCROLL_EVENTS) el.addEventListener(type, stop, { passive: true });
+  step();
+  return stop;
+}
+
+const USER_SCROLL_EVENTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+// Reopens on whichever tab was open last, scrolled to where that tab was
+// left — see lib/settingsView.ts for what's remembered and where.
 export default function SettingsDialog() {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<SettingsTab>("ai");
+  // The dialog's scroll container, as state rather than a ref so the
+  // restore effect below runs once it has actually mounted.
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const view = useRef<SettingsView>({ tab: "ai", scroll: {} });
+  const restoring = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    if (!open || !scroller) return;
+    return restoreScroll(scroller, view.current.scroll[tab] ?? 0, restoring);
+  }, [open, scroller, tab]);
+
+  function handleOpenChange(next: boolean) {
+    if (next) {
+      view.current = loadSettingsView();
+      setTab(view.current.tab);
+    } else {
+      clearTimeout(saveTimer.current);
+      saveSettingsView(view.current);
+    }
+    setOpen(next);
+  }
+
+  function handleTabChange(value: unknown) {
+    if (!isSettingsTab(value)) return;
+    view.current = { ...view.current, tab: value };
+    setTab(value);
+    saveSettingsView(view.current);
+  }
+
+  // Positions the restore sets are skipped — mid-restore, before the
+  // content has loaded, they're still short of the real target.
+  function handleScroll(event: React.UIEvent<HTMLDivElement>) {
+    if (restoring.current) return;
+    view.current = { ...view.current, scroll: { ...view.current.scroll, [tab]: event.currentTarget.scrollTop } };
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveSettingsView(view.current), 200);
+  }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Button variant="ghost" size="icon-sm" aria-label="Settings" onClick={() => setOpen(true)}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <Button variant="ghost" size="icon-sm" aria-label="Settings" onClick={() => handleOpenChange(true)}>
         <SettingsIcon className="size-4 text-muted-foreground" />
       </Button>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+      <DialogContent ref={setScroller} onScroll={handleScroll} className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
@@ -1691,7 +1805,7 @@ export default function SettingsDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="ai">
+        <Tabs value={tab} onValueChange={handleTabChange}>
           <TabsList>
             <TabsTab value="ai">AI</TabsTab>
             <TabsTab value="calendar">Calendar</TabsTab>

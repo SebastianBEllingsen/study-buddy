@@ -1,6 +1,26 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Geist, Geist_Mono, Source_Serif_4, Space_Grotesk, Spectral, IBM_Plex_Sans, Lato } from "next/font/google";
+import {
+  Geist,
+  Geist_Mono,
+  Source_Serif_4,
+  Space_Grotesk,
+  Spectral,
+  IBM_Plex_Sans,
+  Lato,
+  JetBrains_Mono,
+  Nunito,
+  Kalam,
+  Bricolage_Grotesque,
+  Courier_Prime,
+  Archivo_Black,
+  Pixelify_Sans,
+  Orbitron,
+  Cinzel,
+  Cinzel_Decorative,
+  Syne,
+  Bangers,
+} from "next/font/google";
 import { Calendar } from "lucide-react";
 import SearchDialog from "@/components/SearchDialog";
 import SettingsDialog from "@/components/SettingsDialog";
@@ -10,11 +30,13 @@ import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
 import SWRProvider from "@/components/SWRProvider";
 import AppBranding from "@/components/AppBranding";
+import ExternalLinkHandler from "@/components/ExternalLinkHandler";
 import PomodoroProvider from "@/components/pomodoro/PomodoroProvider";
 import PomodoroButton from "@/components/pomodoro/PomodoroButton";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { getAppSettings } from "@/lib/models";
+import { appThemeBootScript } from "@/lib/appThemes";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -66,11 +88,60 @@ const lato = Lato({
   weight: ["400", "700"],
 });
 
-// Sets data-app-theme before first paint (same reasoning as next-themes'
-// own blocking script for the class attribute) so a viewer who picked a
-// non-default theme doesn't see a flash of "calm" on load — see
-// AppThemeProvider.tsx, which keeps this list of valid values in sync.
-const APP_THEME_SCRIPT = `try{var t=localStorage.getItem('studybuddy-app-theme');if(t==='gamified'||t==='mono'||t==='sepia'||t==='blueprint'||t==='canvas')document.documentElement.setAttribute('data-app-theme',t)}catch(e){}`;
+// Heading faces for the "Terminal" and "Sakura" appearance themes. Not
+// preloaded: unlike the UI fonts they're only needed when that theme is
+// picked, so every other viewer skips the download. See globals.css.
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  preload: false,
+});
+
+const nunito = Nunito({
+  variable: "--font-nunito",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  preload: false,
+});
+
+// Heading faces for the study-desk themes (Chalkboard, Highlighter, Index
+// card, Brutal) — not preloaded, same reasoning as the two above.
+const kalam = Kalam({ variable: "--font-kalam", subsets: ["latin"], weight: ["400", "700"], preload: false });
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  preload: false,
+});
+const courierPrime = Courier_Prime({
+  variable: "--font-courier-prime",
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  preload: false,
+});
+const archivoBlack = Archivo_Black({
+  variable: "--font-archivo-black",
+  subsets: ["latin"],
+  weight: "400",
+  preload: false,
+});
+
+// Heading faces for the maximal themes (Win98, Synthwave, Illuminated,
+// Holo, Comic) — not preloaded either. Cinzel Decorative is only the
+// Illuminated drop cap.
+const pixelify = Pixelify_Sans({ variable: "--font-pixelify", subsets: ["latin"], weight: ["500", "700"], preload: false });
+const orbitron = Orbitron({ variable: "--font-orbitron", subsets: ["latin"], weight: ["600", "800"], preload: false });
+const cinzel = Cinzel({ variable: "--font-cinzel", subsets: ["latin"], weight: ["600", "700"], preload: false });
+const cinzelDecorative = Cinzel_Decorative({
+  variable: "--font-cinzel-decorative",
+  subsets: ["latin"],
+  weight: "700",
+  preload: false,
+});
+const syne = Syne({ variable: "--font-syne", subsets: ["latin"], weight: ["700", "800"], preload: false });
+const bangers = Bangers({ variable: "--font-bangers", subsets: ["latin"], weight: "400", preload: false });
+
 
 // Server-rendered (not just a client fetch) so a renamed/rebranded app
 // shows its real title and favicon on the very first response — see
@@ -90,11 +161,11 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       data-app-font={settings.appFont ?? undefined}
-      className={`${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable} ${spaceGrotesk.variable} ${spectral.variable} ${ibmPlexSans.variable} ${lato.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable} ${spaceGrotesk.variable} ${spectral.variable} ${ibmPlexSans.variable} ${lato.variable} ${jetbrainsMono.variable} ${nunito.variable} ${kalam.variable} ${bricolage.variable} ${courierPrime.variable} ${archivoBlack.variable} ${pixelify.variable} ${orbitron.variable} ${cinzel.variable} ${cinzelDecorative.variable} ${syne.variable} ${bangers.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: APP_THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: appThemeBootScript() }} />
       </head>
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -105,7 +176,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   below it (see vault/[noteId]/page.tsx's full-bleed note view)
                   still always has the header in view, without restructuring
                   the whole app into a fixed-height/nested-scroll shell. */}
-              <header className="sticky top-0 z-40 shrink-0 border-b bg-card">
+              <header data-slot="app-header" className="sticky top-0 z-40 shrink-0 border-b bg-card">
                 <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
                   <AppBranding initial={settings} />
                   <div className="flex items-center gap-2">
@@ -137,6 +208,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 {children}
               </main>
               <Toaster />
+              <ExternalLinkHandler />
               </PomodoroProvider>
             </SWRProvider>
           </AppThemeProvider>

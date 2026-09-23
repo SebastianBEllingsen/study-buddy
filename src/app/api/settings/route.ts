@@ -9,6 +9,7 @@ import {
   setUnlimitedUploads,
   setDocumentBadgesEnabled,
   setDocumentBadgeDetail,
+  setFolderChips,
   setAiEfficiencyMode,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
@@ -19,6 +20,7 @@ import {
   HOME_WIDGET_IDS,
   IMAGE_CAPABLE_BACKENDS,
 } from "@/lib/models";
+import { normalizeFolderChipSettings } from "@/lib/folderChips";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
 import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
@@ -134,6 +136,17 @@ export async function POST(request: Request) {
       );
     }
     await setDocumentBadgeDetail(body.documentBadgeDetail);
+  }
+
+  if (body?.folderChips !== undefined) {
+    const chips = normalizeFolderChipSettings(body.folderChips);
+    if (!chips) {
+      return Response.json(
+        { error: "folderChips must be { enabled: boolean, hidden: string[] }" },
+        { status: 400 }
+      );
+    }
+    await setFolderChips(chips);
   }
 
   if (body?.aiEfficiencyMode !== undefined) {

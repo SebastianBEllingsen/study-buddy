@@ -32,7 +32,7 @@ export const CALLOUT_TYPES = [
 export type CalloutType = (typeof CALLOUT_TYPES)[number];
 
 // Obsidian's documented aliases — each shares its canonical type's styling.
-const ALIASES: Record<string, CalloutType> = {
+export const CALLOUT_ALIASES: Record<string, CalloutType> = {
   summary: "abstract",
   tldr: "abstract",
   hint: "tip",
@@ -54,7 +54,7 @@ const ALIASES: Record<string, CalloutType> = {
 export function canonicalCalloutType(raw: string): CalloutType {
   const t = raw.toLowerCase();
   if ((CALLOUT_TYPES as readonly string[]).includes(t)) return t as CalloutType;
-  return ALIASES[t] ?? "note";
+  return CALLOUT_ALIASES[t] ?? "note";
 }
 
 const HEADER_RE = /^\[!([^\]\s]+)\]([+-])?[ \t]*/;

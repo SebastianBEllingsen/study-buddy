@@ -21,6 +21,8 @@ import { CANVAS_SIDES, MIN_NODE_SIZE, parseFileRef, type CanvasFileRef, type Can
 import type { CanvasFlowNode } from "@/lib/canvasFlow";
 import type { GenerationMode, LinkTargets, Note } from "@/lib/models";
 import { buildNoteLinkHref } from "@/lib/noteLinks";
+import { youTubeEmbedUrl } from "@/lib/youtube";
+import YouTubeEmbed from "@/components/YouTubeEmbed";
 import { cardAccentStyle, useCanvasActions } from "./CanvasContext";
 
 const SIDE_POSITION: Record<CanvasSide, Position> = {
@@ -292,6 +294,25 @@ function hostnameOf(url: string): string {
 export const LinkNode = memo(function LinkNode({ data, selected }: NodeProps<CanvasFlowNode>) {
   const url = data.url ?? "";
   const safe = /^https?:\/\//i.test(url);
+  const embed = youTubeEmbedUrl(url);
+  if (embed) {
+    // A video link plays right on the card; drag it by the header, since
+    // the player itself (nodrag) takes the pointer.
+    return (
+      <>
+        <NodeChrome selected={selected} />
+        <div className="canvas-card" style={cardAccentStyle(data.color)}>
+          <div className="canvas-card-header">
+            <Globe className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">{hostnameOf(url)}</span>
+          </div>
+          <div className="nodrag min-h-0 flex-1">
+            <YouTubeEmbed src={embed} fill />
+          </div>
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <NodeChrome selected={selected} />

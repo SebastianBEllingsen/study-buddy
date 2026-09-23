@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import type { CanvasBacklink, Note, NoteBacklink } from "@/lib/models";
 import { stripNoteLinkSyntax } from "@/lib/noteLinks";
 import NoteEditor, { type NoteEditorHandle } from "@/components/NoteEditor";
+import NoteSyntaxHelp from "@/components/NoteSyntaxHelp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -284,10 +285,14 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
             {courseName ?? "Course"}
           </Link>
         )}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
+        {/* Save status, then the note's actions as one tight run of
+            identical ghost icon buttons, then — past a divider, like the app
+            header's — close, which leaves the note rather than acting on it. */}
+        <div className="flex items-center gap-1">
+          <span className="mr-2 text-xs text-muted-foreground">
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
           </span>
+          <NoteSyntaxHelp />
           {!detached && (
             <Button variant="ghost" size="icon-sm" aria-label="Detach note" onClick={handleDetach}>
               <ExternalLink className="size-3.5 text-muted-foreground" />
@@ -319,6 +324,7 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
               regardless of how you arrived here (search, a link from
               another note, recent activity, ...). Not offered when detached
               — a standalone window's OS close button already does this. */}
+          {!detached && <div className="mx-1 h-5 w-px shrink-0 bg-border" />}
           {!detached && (
             <Button
               variant="ghost"

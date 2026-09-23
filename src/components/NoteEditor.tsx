@@ -74,6 +74,8 @@ import {
 } from "@/components/ui/combobox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { LinkTargets } from "@/lib/models";
+import { openExternal } from "@/lib/externalLinks";
+import { YOUTUBE_IFRAME_ALLOW, YOUTUBE_IFRAME_REFERRER_POLICY, youTubeEmbedUrl } from "@/lib/youtube";
 import {
   buildNoteLinkHref,
   buildNoteLinkSyntax,
@@ -83,6 +85,7 @@ import {
   type NoteLinkType,
 } from "@/lib/noteLinks";
 import { fetchNoteImage, NOTE_IMAGE_SCHEME, noteImageCache, uploadNoteImage } from "@/lib/noteImages";
+import { noteImageMoveChanges } from "@/lib/noteImageMove";
 import { describeUploadError } from "@/lib/uploadImage";
 import NoteMarkdown, {
   createNoteFromLink,
@@ -291,7 +294,7 @@ class MarkdownLinkWidget extends WidgetType {
     span.addEventListener("mousedown", (e) => {
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault();
-        window.open(this.url, "_blank", "noopener,noreferrer");
+        void openExternal(this.url);
       }
     });
     return span;
@@ -438,7 +441,7 @@ function taskCheckboxes(): Extension {
 }
 
 // Custom drag payload type for reordering an already-embedded image within
-// the note (see the widget's dragstart and moveNoteImageLine below) — an OS
+// the note (see the widget's dragstart and moveNoteImage below) — an OS
 // file drag (Finder/Explorer) never sets this, so the drop handler can tell
 // the two apart before deciding what to do with a drop.
 const NOTE_IMAGE_MOVE_MIME = "application/x-studybuddy-note-image";
@@ -452,7 +455,7 @@ class NoteImageWidget extends WidgetType {
     return other.imageId === this.imageId;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement("div");
     wrapper.className = "cm-note-image";
     wrapper.title = "Drag to reposition — click to edit";
@@ -478,12 +481,52 @@ class NoteImageWidget extends WidgetType {
       e.dataTransfer?.setData(NOTE_IMAGE_MOVE_MIME, String(this.imageId));
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
     });
+    // A click (a press that didn't turn into a drag) reveals the raw
+    // ![](...) for editing — done here rather than by CodeMirror, see
+    // ignoreEvent below.
+    wrapper.addEventListener("click", () => {
+      view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrapper)) });
+      view.focus();
+    });
 
     return wrapper;
   }
 
+  // The picture handles its own mouse events. Left to CodeMirror, pressing
+  // on it moved the cursor onto it — which swaps the picture for its raw
+  // ![](...) text (see noteImagePills) before a drag could ever start.
+  // Drops still go to the editor, so a picture can land on top of another.
+  ignoreEvent(event: Event): boolean {
+    return event.type !== "drop" && event.type !== "dragover" && event.type !== "dragenter";
+  }
+}
+
+// The Edit-mode counterpart to Preview's YouTubeEmbed, for a
+// ![](youtube url) line — see noteImagePills below.
+class YouTubeWidget extends WidgetType {
+  constructor(readonly embedUrl: string) {
+    super();
+  }
+
+  eq(other: YouTubeWidget): boolean {
+    return other.embedUrl === this.embedUrl;
+  }
+
+  toDOM(): HTMLElement {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cm-youtube-embed";
+    const iframe = document.createElement("iframe");
+    iframe.src = this.embedUrl;
+    iframe.title = "YouTube video";
+    iframe.allow = YOUTUBE_IFRAME_ALLOW;
+    iframe.referrerPolicy = YOUTUBE_IFRAME_REFERRER_POLICY;
+    iframe.allowFullscreen = true;
+    wrapper.appendChild(iframe);
+    return wrapper;
+  }
+
   ignoreEvent(): boolean {
-    return false;
+    return true;
   }
 }
 
@@ -507,6 +550,11 @@ function noteImagePills(): Extension {
           const urlNode = node.node.getChild("URL");
           if (!urlNode) return;
           const url = view.state.sliceDoc(urlNode.from, urlNode.to);
+          const embedUrl = youTubeEmbedUrl(url);
+          if (embedUrl) {
+            ranges.push(Decoration.replace({ widget: new YouTubeWidget(embedUrl) }).range(node.from, node.to));
+            return;
+          }
           if (!url.startsWith(NOTE_IMAGE_SCHEME)) return;
           const imageId = Number(url.slice(NOTE_IMAGE_SCHEME.length));
           if (!Number.isFinite(imageId)) return;
@@ -533,42 +581,22 @@ function noteImagePills(): Extension {
   );
 }
 
-// Moves the line holding image `imageId` to wherever the drop landed (see
-// NoteImageWidget's dragstart) — snapped to the start of the target line,
-// so a dropped image always lands as its own line rather than splicing into
-// the middle of whatever text happened to be there. Searches the CURRENT
-// document for the image's marker rather than trusting a position captured
-// at dragstart, so it stays correct even if the document changed (e.g. the
-// user kept typing) in between.
-function moveNoteImageLine(view: EditorView, imageId: number, event: DragEvent) {
+// Moves picture `imageId` (see NoteImageWidget's dragstart) to its own
+// line at the start of whichever line the drop landed on — just the
+// picture, not the text it was pasted next to. See noteImageMoveChanges.
+// Searches the CURRENT document rather than trusting a position captured
+// at dragstart, so it stays correct even if the note changed in between.
+function moveNoteImage(view: EditorView, imageId: number, event: DragEvent) {
   const doc = view.state.doc;
-  const marker = `(${NOTE_IMAGE_SCHEME}${imageId})`;
-  const idx = doc.toString().indexOf(marker);
-  if (idx < 0) return;
-  const line = doc.lineAt(idx);
-  const from = line.from;
-  const to = line.to < doc.length ? line.to + 1 : line.to; // swallow one trailing newline, if any
-
   // precise: false — always returns an estimate rather than null for
   // coordinates the precise algorithm doesn't consider "covered" by the
   // rendered viewport (e.g. right at an edge, or a line not yet measured).
   // An estimate is exactly as good as an exact position here anyway, since
   // this only ever snaps to whichever line it lands nearest to.
   const dropPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
-  const dropLine = doc.lineAt(Math.min(dropPos, doc.length));
-  const insertAt = dropLine.from;
-  if (insertAt >= from && insertAt <= to) return; // dropped on (or right next to) itself
-
-  const lineText = `${doc.sliceString(line.from, line.to)}\n`;
-  // Both change specs are given in the ORIGINAL document's coordinates —
-  // CodeMirror composes simultaneous changes itself, so insertAt doesn't
-  // need manually adjusting for the deletion even when it falls after it.
-  view.dispatch({
-    changes: [
-      { from, to, insert: "" },
-      { from: insertAt, insert: lineText },
-    ],
-  });
+  const insertAt = doc.lineAt(Math.min(dropPos, doc.length)).from;
+  const changes = noteImageMoveChanges(doc.toString(), imageId, insertAt);
+  if (changes) view.dispatch({ changes });
 }
 
 // Uploads `file` (resized, transparency preserved — see resizeImageForNote)
@@ -604,7 +632,7 @@ async function insertNoteImage(view: EditorView, file: File, insertPos: number):
 // Handles both directions at once since they share the same "is this an
 // image?" triage and upload path: pasting an image from the clipboard, and
 // dropping one or more image files from outside the browser (an OS file
-// drag — see moveNoteImageLine above for dragging an *already-embedded*
+// drag — see moveNoteImage above for dragging an *already-embedded*
 // image to reorder it, which is a different drag payload entirely).
 function noteImagePasteDrop(): Extension {
   return EditorView.domEventHandlers({
@@ -623,14 +651,14 @@ function noteImagePasteDrop(): Extension {
       const movedImageId = event.dataTransfer?.getData(NOTE_IMAGE_MOVE_MIME);
       if (movedImageId) {
         event.preventDefault();
-        moveNoteImageLine(view, Number(movedImageId), event);
+        moveNoteImage(view, Number(movedImageId), event);
         return true;
       }
 
       const files = Array.from(event.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
       if (files.length === 0) return false;
       event.preventDefault();
-      // precise: false — see moveNoteImageLine's comment on the same call.
+      // precise: false — see moveNoteImage's comment on the same call.
       const dropPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
       // Sequential, not Promise.all — each file's placeholder needs the
       // document left by the previous one's insert, not the pre-drop one.
@@ -1446,6 +1474,19 @@ const editorTheme = EditorView.theme({
     minHeight: "4rem",
     minWidth: "6rem",
     backgroundColor: "var(--muted)",
+  },
+  // An embedded YouTube player — see YouTubeWidget above.
+  ".cm-youtube-embed": {
+    display: "block",
+    margin: "0.5em 0",
+    maxWidth: "40rem",
+  },
+  ".cm-youtube-embed iframe": {
+    display: "block",
+    width: "100%",
+    aspectRatio: "16 / 9",
+    border: "1px solid var(--border)",
+    borderRadius: "0.5em",
   },
   // Live-preview formatting — see liveMarkdownFormatting() above.
   ".cm-heading": {

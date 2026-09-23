@@ -1,12 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import { APP_THEME_STORAGE_KEY, isAppTheme, type AppTheme } from "@/lib/appThemes";
 
-export type AppTheme = "calm" | "gamified" | "mono" | "sepia" | "blueprint" | "canvas";
-
-const APP_THEMES: AppTheme[] = ["calm", "gamified", "mono", "sepia", "blueprint", "canvas"];
-
-const STORAGE_KEY = "studybuddy-app-theme";
+export type { AppTheme };
 
 const AppThemeContext = createContext<{
   theme: AppTheme;
@@ -30,7 +27,7 @@ export default function AppThemeProvider({ children }: { children: React.ReactNo
   const [theme, setThemeState] = useState<AppTheme>(() => {
     if (typeof document === "undefined") return "calm";
     const attr = document.documentElement.getAttribute("data-app-theme");
-    return (APP_THEMES as string[]).includes(attr ?? "") ? (attr as AppTheme) : "calm";
+    return isAppTheme(attr) ? attr : "calm";
   });
 
   useEffect(() => {
@@ -40,7 +37,7 @@ export default function AppThemeProvider({ children }: { children: React.ReactNo
   function setTheme(next: AppTheme) {
     setThemeState(next);
     try {
-      localStorage.setItem(STORAGE_KEY, next);
+      localStorage.setItem(APP_THEME_STORAGE_KEY, next);
     } catch {
       // localStorage unavailable — harmless, just won't persist.
     }

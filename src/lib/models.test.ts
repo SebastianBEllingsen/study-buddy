@@ -63,6 +63,11 @@ const {
   recordRecentView,
   listRecentViews,
   positionCases,
+  getCourse,
+  updateCourseCustomization,
+  listCourseSummaries,
+  getAppSettings,
+  setFolderChips,
 } = await import("./models");
 
 beforeEach(() => {
@@ -637,6 +642,60 @@ describe("reconcileFlashcardScheduleAfterRemoval / reconcileFlashcardReviewsAfte
 // function it ran inside — /api/stats (the whole home dashboard) for
 // listDueFlashcardItems, and /api/search (all search) for the item-candidate
 // scan inside searchAll. Both now skip just the broken row.
+describe("course page display settings", () => {
+  it("new courses show Practice and follow the global folder tags", async () => {
+    const course = await createCourse("Course");
+    const stored = await getCourse(course.id);
+    expect(stored?.show_practice).toBe(true);
+    expect(stored?.folder_chips).toBeNull();
+  });
+
+  it("stores a course's own Practice and folder tag choices, also in the dashboard summary", async () => {
+    const course = await createCourse("Course");
+    await updateCourseCustomization(course.id, {
+      show_practice: false,
+      folder_chips: JSON.stringify({ enabled: true, hidden: ["notes"] }),
+    });
+    const summary = (await listCourseSummaries()).find((c) => c.id === course.id);
+    expect(summary?.show_practice).toBe(false);
+    expect(summary?.folder_chips).toBe('{"enabled":true,"hidden":["notes"]}');
+  });
+
+  it("round-trips the global folder tag setting, defaulting to every tag", async () => {
+    expect((await getAppSettings()).folderChips).toEqual({ enabled: true, hidden: [] });
+    await setFolderChips({ enabled: false, hidden: ["generated"] });
+    expect((await getAppSettings()).folderChips).toEqual({ enabled: false, hidden: ["generated"] });
+    await setFolderChips({ enabled: true, hidden: [] });
+  });
+});
+
+describe("listDueFlashcardItems", () => {
+  it("doesn't count cards reviewed ahead of time as due", async () => {
+    const { course, folder } = await makeCourseWithFolder();
+    const deck = await createGeneratedItem({
+      courseId: course.id,
+      folderId: folder.id,
+      sourceFolderId: null,
+      sourceHandpicked: false,
+      mode: "flashcards",
+      title: "Deck",
+      contentJson: { cards: [{ front: "a", back: "a" }, { front: "b", back: "b" }, { front: "c", back: "c" }] },
+      sourceDocumentIds: [],
+    });
+    const schedule = { generatedItemId: deck.id, easeFactor: 2.5, intervalDays: 1, repetitions: 1 };
+    // Card 0 reviewed and not due yet, card 1 overdue, card 2 never reviewed.
+    await upsertFlashcardSchedule({ ...schedule, cardIndex: 0, dueAt: "2999-01-01 00:00:00" });
+    await upsertFlashcardSchedule({ ...schedule, cardIndex: 1, dueAt: "2000-01-01 00:00:00" });
+
+    expect((await listDueFlashcardItems()).find((d) => d.itemId === deck.id)?.dueCount).toBe(2);
+
+    await upsertFlashcardSchedule({ ...schedule, cardIndex: 1, dueAt: "2999-01-01 00:00:00" });
+    await upsertFlashcardSchedule({ ...schedule, cardIndex: 2, dueAt: "2999-01-01 00:00:00" });
+
+    expect((await listDueFlashcardItems()).map((d) => d.itemId)).not.toContain(deck.id);
+  });
+});
+
 describe("resilience to a corrupted content_json row", () => {
   it("listDueFlashcardItems skips a flashcard item with unparseable content_json instead of throwing", async () => {
     const { course, folder } = await makeCourseWithFolder();

@@ -281,6 +281,13 @@
       "when": 1790110235359,
       "tag": "0040_exotic_rhodey",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790191993626,
+      "tag": "0041_rapid_vision",
+      "breakpoints": true
     }
   ]
 }

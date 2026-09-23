@@ -858,6 +858,1381 @@ li .katex {
   --clay: #d9776b;
 }
 
+/* --- "Solarized" appearance theme ---------------------------------------
+   Ethan Schoonover's Solarized, the long-standing developer palette —
+   familiar from terminals and editors, so the app sits naturally next to
+   them. Uses the canonical base tones and accents (blue for focus,
+   yellow/green/red for due/success/danger), nudged only where a canonical
+   pairing falls short on text contrast: text runs a step darker (light) or
+   lighter (dark) than the canonical base01/base1, and light mode's blue is
+   deepened so white-on-blue buttons stay readable. Headings stay in the plain UI sans. */
+[data-app-theme="solarized"] {
+  --heading-font: var(--font-geist-sans);
+  --background: #fdf6e3;
+  --foreground: #3f5257;
+  --card: #fffbef;
+  --card-foreground: #3f5257;
+  --popover: #fffbef;
+  --popover-foreground: #3f5257;
+  --primary: #1f74b3;
+  --primary-foreground: #fdf6e3;
+  --secondary: #eee8d5;
+  --secondary-foreground: #3f5257;
+  --muted: #eee8d5;
+  --muted-foreground: #566a71;
+  --accent: #eee8d5;
+  --accent-foreground: #3f5257;
+  --destructive: #dc322f;
+  --border: #e4dcc4;
+  --input: #e4dcc4;
+  --ring: #1f74b3;
+  --radius: 0.5rem;
+  --focus: #1f74b3;
+  --amber: #b58900;
+  --sage: #859900;
+  --clay: #dc322f;
+}
+
+.dark[data-app-theme="solarized"] {
+  --background: #002b36;
+  --foreground: #c4cfcf;
+  --card: #073642;
+  --card-foreground: #c4cfcf;
+  --popover: #073642;
+  --popover-foreground: #c4cfcf;
+  --primary: #268bd2;
+  --primary-foreground: #002b36;
+  --secondary: #0b3f4c;
+  --secondary-foreground: #c4cfcf;
+  --muted: #0b3f4c;
+  --muted-foreground: #98a8a8;
+  --accent: #0b3f4c;
+  --accent-foreground: #c4cfcf;
+  --destructive: #e0534f;
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: #268bd2;
+  --focus: #268bd2;
+  --amber: #b58900;
+  --sage: #859900;
+  --clay: #e0534f;
+}
+
+/* --- "Nord" appearance theme --------------------------------------------
+   Arctic Ice Studio's Nord: Polar Night greys, Snow Storm whites, Frost
+   blues for focus and Aurora for the due/success/danger roles. Cooler and
+   greyer than Blueprint's saturated cyanotype — a low-glare, even-toned
+   skin for long sessions. Light mode is Snow Storm with Polar Night ink;
+   Aurora's yellow and green are deepened there, since the originals are
+   pastel and wash out on a light ground. */
+[data-app-theme="nord"] {
+  --heading-font: var(--font-geist-sans);
+  --background: #eceff4;
+  --foreground: #2e3440;
+  --card: #f8f9fb;
+  --card-foreground: #2e3440;
+  --popover: #f8f9fb;
+  --popover-foreground: #2e3440;
+  --primary: #5e81ac;
+  --primary-foreground: #ffffff;
+  --secondary: #e5e9f0;
+  --secondary-foreground: #2e3440;
+  --muted: #e5e9f0;
+  --muted-foreground: #4c566a;
+  --accent: #e5e9f0;
+  --accent-foreground: #2e3440;
+  --destructive: #bf616a;
+  --border: #d8dee9;
+  --input: #d8dee9;
+  --ring: #5e81ac;
+  --radius: 0.5rem;
+  --focus: #5e81ac;
+  --amber: #b3861f;
+  --sage: #5f8a4a;
+  --clay: #bf616a;
+}
+
+.dark[data-app-theme="nord"] {
+  --background: #2e3440;
+  --foreground: #eceff4;
+  --card: #3b4252;
+  --card-foreground: #eceff4;
+  --popover: #3b4252;
+  --popover-foreground: #eceff4;
+  --primary: #88c0d0;
+  --primary-foreground: #2e3440;
+  --secondary: #434c5e;
+  --secondary-foreground: #eceff4;
+  --muted: #434c5e;
+  --muted-foreground: #b4bccb;
+  --accent: #434c5e;
+  --accent-foreground: #eceff4;
+  --destructive: #d57780;
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #88c0d0;
+  --focus: #88c0d0;
+  --amber: #ebcb8b;
+  --sage: #a3be8c;
+  --clay: #d57780;
+}
+
+/* --- "Terminal" appearance theme ----------------------------------------
+   Dark mode is a green-phosphor CRT: near-black glass, pale phosphor text,
+   bright green focus and the amber of an amber-phosphor screen for due
+   cards. Light mode is its printout — tractor-feed "greenbar" paper with
+   dark green ink. JetBrains Mono headings and square corners throughout.
+   The one flourish per mode is on the page background only: faint
+   scanlines on the CRT, faint green bands on the paper. */
+[data-app-theme="terminal"] {
+  --heading-font: var(--font-jetbrains-mono);
+  --background: #f1f6ee;
+  --foreground: #103a1e;
+  --card: #fbfdf9;
+  --card-foreground: #103a1e;
+  --popover: #fbfdf9;
+  --popover-foreground: #103a1e;
+  --primary: #11843b;
+  --primary-foreground: #ffffff;
+  --secondary: #e2ecde;
+  --secondary-foreground: #103a1e;
+  --muted: #e2ecde;
+  --muted-foreground: #3f6b4b;
+  --accent: #e2ecde;
+  --accent-foreground: #103a1e;
+  --destructive: #b3261e;
+  --border: #cfdfca;
+  --input: #cfdfca;
+  --ring: #11843b;
+  --radius: 0rem;
+  --focus: #11843b;
+  --amber: #9a6a00;
+  --sage: #11843b;
+  --clay: #b3261e;
+  --terminal-band: color-mix(in oklch, #11843b 5%, transparent);
+}
+
+.dark[data-app-theme="terminal"] {
+  --background: #070b08;
+  --foreground: #b8f5c4;
+  --card: #0c140e;
+  --card-foreground: #b8f5c4;
+  --popover: #0c140e;
+  --popover-foreground: #b8f5c4;
+  --primary: #39ff7a;
+  --primary-foreground: #070b08;
+  --secondary: #122017;
+  --secondary-foreground: #b8f5c4;
+  --muted: #122017;
+  --muted-foreground: #6fae7f;
+  --accent: #122017;
+  --accent-foreground: #b8f5c4;
+  --destructive: #ff5f56;
+  --border: color-mix(in oklch, #39ff7a 18%, transparent);
+  --input: color-mix(in oklch, #39ff7a 24%, transparent);
+  --ring: #39ff7a;
+  --focus: #39ff7a;
+  --amber: #ffb000;
+  --sage: #5cf08a;
+  --clay: #ff5f56;
+}
+
+[data-app-theme="terminal"] body {
+  background-image: repeating-linear-gradient(
+    var(--terminal-band) 0 48px,
+    transparent 48px 96px
+  );
+}
+.dark[data-app-theme="terminal"] body {
+  background-image: repeating-linear-gradient(
+    rgb(0 0 0 / 0.22) 0 1px,
+    transparent 1px 3px
+  );
+}
+.dark[data-app-theme="terminal"] .stat-glow {
+  text-shadow: 0 0 18px color-mix(in oklch, currentcolor 45%, transparent);
+}
+
+/* --- "Sakura" appearance theme ------------------------------------------
+   Cherry-blossom pink and plum ink — soft and friendly without Gamified's
+   arcade energy. The roundest corners of any theme and Nunito (a rounded
+   sans) for headings. Dark mode is a plum night rather than neutral black,
+   with the blossom pink lifted so it still reads as the accent. */
+[data-app-theme="sakura"] {
+  --heading-font: var(--font-nunito);
+  --background: #fdf2f4;
+  --foreground: #3d2233;
+  --card: #ffffff;
+  --card-foreground: #3d2233;
+  --popover: #ffffff;
+  --popover-foreground: #3d2233;
+  --primary: #c93d70;
+  --primary-foreground: #ffffff;
+  --secondary: #f9e3e8;
+  --secondary-foreground: #3d2233;
+  --muted: #f9e3e8;
+  --muted-foreground: #7d5a6b;
+  --accent: #f9e3e8;
+  --accent-foreground: #3d2233;
+  --destructive: #c2333e;
+  --border: #f2d3db;
+  --input: #f2d3db;
+  --ring: #c93d70;
+  --radius: 1rem;
+  --focus: #c93d70;
+  --amber: #c07a1c;
+  --sage: #4f8a6b;
+  --clay: #c2333e;
+}
+
+.dark[data-app-theme="sakura"] {
+  --background: #1f1419;
+  --foreground: #f6e6ec;
+  --card: #2a1b22;
+  --card-foreground: #f6e6ec;
+  --popover: #2a1b22;
+  --popover-foreground: #f6e6ec;
+  --primary: #f28bb0;
+  --primary-foreground: #1f1419;
+  --secondary: #36232c;
+  --secondary-foreground: #f6e6ec;
+  --muted: #36232c;
+  --muted-foreground: #c9a5b5;
+  --accent: #36232c;
+  --accent-foreground: #f6e6ec;
+  --destructive: #f07a84;
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #f28bb0;
+  --focus: #f28bb0;
+  --amber: #f0b35e;
+  --sage: #7cc8a0;
+  --clay: #f07a84;
+}
+
+/* ========================================================================
+   Study-desk themes: Chalkboard, Highlighter, Index card, Brutal. Unlike
+   the palette-only themes above, each of these also reshapes a component
+   or two — buttons, raised cards, inputs — through the data-slot /
+   data-variant hooks the ui/ primitives already expose, so no component
+   branches on the theme. Only default/outline buttons are touched; ghost
+   and icon buttons stay quiet everywhere so toolbars don't get noisy.
+   Selector for "a raised Card" (ui/card.tsx's elevation="raised"):
+   [data-slot="card"].bg-card.
+   ======================================================================== */
+
+/* --- "Chalkboard" -------------------------------------------------------
+   The lecture hall. Dark mode is a green-slate board with chalk: chalk
+   white text, chalk yellow as the accent, chalk pink for due cards. Light
+   mode is the whiteboard beside it, in marker colors (blue, red, green,
+   orange). The signature is hand-drawn outlines — buttons and raised cards
+   get the irregular "wobbly" border radius of something drawn by hand,
+   and headings are in Kalam, a legible handwriting face. */
+[data-app-theme="chalkboard"] {
+  --heading-font: var(--font-kalam);
+  --background: #f5f6f4;
+  --foreground: #1d2327;
+  --card: #ffffff;
+  --card-foreground: #1d2327;
+  --popover: #ffffff;
+  --popover-foreground: #1d2327;
+  --primary: #1d5fbf;
+  --primary-foreground: #ffffff;
+  --secondary: #e8ebe7;
+  --secondary-foreground: #1d2327;
+  --muted: #e8ebe7;
+  --muted-foreground: #525c61;
+  --accent: #e8ebe7;
+  --accent-foreground: #1d2327;
+  --destructive: #c62828;
+  --border: #d5dad4;
+  --input: #c3c9c2;
+  --ring: #1d5fbf;
+  --radius: 0.6rem;
+  --focus: #1d5fbf;
+  --amber: #b35900;
+  --sage: #1b7f3a;
+  --clay: #c62828;
+  --wobble: 255px 12px 225px 12px / 12px 225px 12px 255px;
+  --wobble-card: 18px 240px 16px 220px / 220px 16px 240px 18px;
+}
+
+.dark[data-app-theme="chalkboard"] {
+  --background: #243229;
+  --foreground: #eef0e6;
+  --card: #2b3b31;
+  --card-foreground: #eef0e6;
+  --popover: #2b3b31;
+  --popover-foreground: #eef0e6;
+  --primary: #f2d45c;
+  --primary-foreground: #243229;
+  --secondary: #34473b;
+  --secondary-foreground: #eef0e6;
+  --muted: #34473b;
+  --muted-foreground: #b9c4b8;
+  --accent: #34473b;
+  --accent-foreground: #eef0e6;
+  --destructive: #ff8a80;
+  --border: rgb(238 240 230 / 0.2);
+  --input: rgb(238 240 230 / 0.28);
+  --ring: #f2d45c;
+  --focus: #f2d45c;
+  --amber: #f59ab5;
+  --sage: #9be0a8;
+  --clay: #ff8a80;
+}
+
+/* Chalk dust: a few soft, wide smudges where the board's been wiped. */
+.dark[data-app-theme="chalkboard"] body {
+  background-image:
+    radial-gradient(ellipse 60% 30% at 20% 15%, rgb(255 255 255 / 0.045), transparent 70%),
+    radial-gradient(ellipse 50% 25% at 80% 60%, rgb(255 255 255 / 0.035), transparent 70%),
+    radial-gradient(ellipse 70% 20% at 40% 95%, rgb(255 255 255 / 0.03), transparent 70%);
+  background-attachment: fixed;
+}
+
+[data-app-theme="chalkboard"] [data-slot="button"][data-variant="default"],
+[data-app-theme="chalkboard"] [data-slot="button"][data-variant="outline"] {
+  border-radius: var(--wobble);
+  border-width: 2px;
+}
+[data-app-theme="chalkboard"] [data-slot="button"][data-variant="outline"] {
+  border-color: currentcolor;
+}
+/* On the board, the main button is drawn in chalk rather than filled in. */
+.dark[data-app-theme="chalkboard"] [data-slot="button"][data-variant="default"] {
+  background-color: transparent;
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.dark[data-app-theme="chalkboard"] [data-slot="button"][data-variant="default"]:hover {
+  background-color: color-mix(in oklch, var(--primary) 14%, transparent);
+}
+[data-app-theme="chalkboard"] [data-slot="card"].bg-card {
+  border-radius: var(--wobble-card);
+  box-shadow: none;
+  border: 2px solid var(--border);
+}
+
+/* --- "Highlighter" ------------------------------------------------------
+   Revision the night before the exam: cool white paper, black ballpoint
+   ink, and a yellow highlighter. The highlighter is the accent itself —
+   primary buttons are a highlighter swipe (fat ink, slightly uneven ends,
+   black text on it), and note headings get highlighted in Preview. Links
+   and focus stay ballpoint blue, pink highlighter marks what's due. Dark
+   mode is black paper with neon ink. */
+[data-app-theme="highlighter"] {
+  --heading-font: var(--font-bricolage);
+  --background: #f3f4f6;
+  --foreground: #15171c;
+  --card: #ffffff;
+  --card-foreground: #15171c;
+  --popover: #ffffff;
+  --popover-foreground: #15171c;
+  --primary: #ffe14d;
+  --primary-foreground: #15171c;
+  --secondary: #e8e9ed;
+  --secondary-foreground: #15171c;
+  --muted: #e8e9ed;
+  --muted-foreground: #525866;
+  --accent: #e8e9ed;
+  --accent-foreground: #15171c;
+  --destructive: #d02f2f;
+  --border: #dcdee3;
+  --input: #cfd2d8;
+  --ring: #1f48c4;
+  --radius: 0.5rem;
+  --focus: #1f48c4;
+  --amber: #c2185b;
+  --sage: #0b7a4b;
+  --clay: #d02f2f;
+  --swipe: 0.3rem 0.9rem 0.35rem 0.8rem / 0.7rem 0.3rem 0.75rem 0.35rem;
+}
+
+.dark[data-app-theme="highlighter"] {
+  --background: #111215;
+  --foreground: #eceef2;
+  --card: #1a1b20;
+  --card-foreground: #eceef2;
+  --popover: #1a1b20;
+  --popover-foreground: #eceef2;
+  --primary: #f5e663;
+  --primary-foreground: #111215;
+  --secondary: #25272e;
+  --secondary-foreground: #eceef2;
+  --muted: #25272e;
+  --muted-foreground: #a4a9b6;
+  --accent: #25272e;
+  --accent-foreground: #eceef2;
+  --destructive: #ff6b6b;
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #7aa2ff;
+  --focus: #7aa2ff;
+  --amber: #ff6fae;
+  --sage: #4ade80;
+  --clay: #ff6b6b;
+}
+
+[data-app-theme="highlighter"] [data-slot="button"][data-variant="default"] {
+  border-radius: var(--swipe);
+  font-weight: 650;
+}
+[data-app-theme="highlighter"] [data-slot="button"][data-variant="default"]:hover {
+  background-color: color-mix(in oklch, var(--primary), var(--foreground) 8%);
+}
+/* A highlighter stroke across the lower half of each note heading. */
+[data-app-theme="highlighter"] .markdown-body :is(h1, h2, h3) {
+  width: fit-content;
+  background-image: linear-gradient(
+    transparent 52%,
+    color-mix(in oklch, var(--primary) 75%, transparent) 52%,
+    color-mix(in oklch, var(--primary) 75%, transparent) 92%,
+    transparent 92%
+  );
+  padding-inline: 0.15em;
+  margin-inline: -0.15em;
+}
+[data-app-theme="highlighter"] ::selection {
+  background-color: color-mix(in oklch, var(--primary) 70%, transparent);
+  color: var(--foreground);
+}
+
+/* --- "Index card" -------------------------------------------------------
+   A corkboard of index cards — fitting for an app built around
+   flashcards. The page is cork; every raised card is a ruled index card
+   (a red rule across the top) sitting on a small stack of blank ones.
+   Buttons are rubber stamps: an inked double outline instead of a fill.
+   Courier Prime headings, like a typed label. Dark mode is the same desk
+   after hours. */
+[data-app-theme="index-card"] {
+  --heading-font: var(--font-courier-prime);
+  --background: #cdae84;
+  --foreground: #2a1f14;
+  --card: #fffdf7;
+  --card-foreground: #2a1f14;
+  --popover: #fffdf7;
+  --popover-foreground: #2a1f14;
+  --primary: #b8322a;
+  --primary-foreground: #fffdf7;
+  --secondary: #f1eadb;
+  --secondary-foreground: #2a1f14;
+  --muted: #f1eadb;
+  --muted-foreground: #46372a;
+  --accent: #f1eadb;
+  --accent-foreground: #2a1f14;
+  --destructive: #b8322a;
+  --border: #e3d8c3;
+  --input: #d6c8ae;
+  --ring: #2f5d9e;
+  --radius: 0.2rem;
+  --focus: #2f5d9e;
+  --amber: #a3490f;
+  --sage: #2f6e3a;
+  --clay: #b8322a;
+  --cork-speck: rgb(90 60 30 / 0.16);
+  --card-stack: #f3ecdd;
+  --card-edge: rgb(42 31 20 / 0.18);
+}
+
+.dark[data-app-theme="index-card"] {
+  --background: #1d1813;
+  --foreground: #efe6d6;
+  --card: #2a241d;
+  --card-foreground: #efe6d6;
+  --popover: #2a241d;
+  --popover-foreground: #efe6d6;
+  --primary: #e8766a;
+  --primary-foreground: #1d1813;
+  --secondary: #352e25;
+  --secondary-foreground: #efe6d6;
+  --muted: #352e25;
+  --muted-foreground: #bba98f;
+  --accent: #352e25;
+  --accent-foreground: #efe6d6;
+  --destructive: #e8766a;
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: #7fa8e0;
+  --focus: #7fa8e0;
+  --amber: #e0a15a;
+  --sage: #7fbf88;
+  --clay: #e8766a;
+  --cork-speck: rgb(255 230 190 / 0.05);
+  --card-stack: #231e18;
+  --card-edge: rgb(0 0 0 / 0.45);
+}
+
+/* Cork: two offset grids of tiny specks. */
+[data-app-theme="index-card"] body {
+  background-image:
+    radial-gradient(var(--cork-speck) 1px, transparent 1.5px),
+    radial-gradient(var(--cork-speck) 1px, transparent 1.5px);
+  background-size: 11px 11px, 17px 17px;
+  background-position: 0 0, 5px 8px;
+}
+[data-app-theme="index-card"] [data-slot="card"].bg-card {
+  border-top: 3px solid color-mix(in oklch, var(--primary) 80%, transparent);
+  box-shadow:
+    0 0 0 1px var(--card-edge),
+    4px 4px 0 -1px var(--card-stack),
+    4px 4px 0 0 var(--card-edge),
+    8px 8px 0 -1px var(--card-stack),
+    8px 8px 0 0 var(--card-edge);
+}
+[data-app-theme="index-card"] [data-slot="button"][data-variant="default"] {
+  background-color: transparent;
+  color: var(--primary);
+  border: 2px solid var(--primary);
+  /* The stamp's inner line — an outline rather than an inset shadow, so the
+     gap inside it is see-through on cork and card alike, and box-shadow is
+     left free for the focus ring. */
+  outline: 1px solid var(--primary);
+  outline-offset: -5px;
+  font-weight: 700;
+}
+[data-app-theme="index-card"] [data-slot="button"][data-variant="default"]:hover {
+  background-color: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+
+/* --- "Brutal" -----------------------------------------------------------
+   Neo-brutalist: flat periwinkle page, white panels with thick black
+   outlines and hard offset shadows, electric blue and lime. The one
+   interaction flourish of all the themes: buttons are physical — they sit
+   on a hard shadow, lift on hover and press flat when clicked. Archivo
+   Black headings. Dark mode swaps black outlines for off-white ones. */
+[data-app-theme="brutal"] {
+  --heading-font: var(--font-archivo-black);
+  --background: #dfe4ff;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+  --primary: #b8f35a;
+  --primary-foreground: #000000;
+  --secondary: #eef0ff;
+  --secondary-foreground: #000000;
+  --muted: #eef0ff;
+  --muted-foreground: #3d4263;
+  --accent: #eef0ff;
+  --accent-foreground: #000000;
+  --destructive: #dc2626;
+  --border: #000000;
+  --input: #000000;
+  --ring: #3342d6;
+  --radius: 0.75rem;
+  --focus: #3342d6;
+  --amber: #c2410c;
+  --sage: #15803d;
+  --clay: #dc2626;
+  --edge: #000000;
+}
+
+.dark[data-app-theme="brutal"] {
+  --background: #16171d;
+  --foreground: #f4f4f6;
+  --card: #20222b;
+  --card-foreground: #f4f4f6;
+  --popover: #20222b;
+  --popover-foreground: #f4f4f6;
+  --primary: #c6f36b;
+  --primary-foreground: #000000;
+  --secondary: #2b2e3a;
+  --secondary-foreground: #f4f4f6;
+  --muted: #2b2e3a;
+  --muted-foreground: #b3b8cc;
+  --accent: #2b2e3a;
+  --accent-foreground: #f4f4f6;
+  --destructive: #ff6b6b;
+  --border: #3a3e4d;
+  --input: #f4f4f6;
+  --ring: #8f9bff;
+  --focus: #8f9bff;
+  --amber: #ffa94d;
+  --sage: #6be08f;
+  --clay: #ff6b6b;
+  --edge: #f4f4f6;
+}
+
+[data-app-theme="brutal"] [data-slot="card"].bg-card {
+  border: 2px solid var(--edge);
+  box-shadow: 5px 5px 0 0 var(--edge);
+}
+[data-app-theme="brutal"] [data-slot="input"],
+[data-app-theme="brutal"] [data-slot="textarea"] {
+  border-width: 2px;
+  border-color: var(--edge);
+}
+[data-app-theme="brutal"] [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"]) {
+  border: 2px solid var(--edge);
+  box-shadow: 3px 3px 0 0 var(--edge);
+  font-weight: 700;
+  transition:
+    transform 80ms ease-out,
+    box-shadow 80ms ease-out,
+    background-color 120ms;
+}
+[data-app-theme="brutal"] [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"]):hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 0 var(--edge);
+}
+[data-app-theme="brutal"] [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"]):active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 0 var(--edge);
+}
+[data-app-theme="brutal"] [data-slot="button"][data-variant="default"]:hover {
+  background-color: var(--primary);
+}
+/* The hard shadow replaces the focus ring's box-shadow, so keyboard focus
+   gets an outline of its own. */
+[data-app-theme="brutal"] [data-slot="button"]:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-app-theme="brutal"] [data-slot="button"] {
+    transition: none;
+  }
+}
+
+/* ========================================================================
+   Maximal themes: Win98, Synthwave, Illuminated, Holo, Comic. These go
+   furthest of all — past buttons and cards into the page background, the
+   app header ([data-slot="app-header"] in layout.tsx), dialogs, tooltips,
+   scrollbars and note typography. Still CSS only, through the same
+   data-slot hooks as the study-desk themes above. Every animation here
+   stops under prefers-reduced-motion (see the end of this block).
+   ======================================================================== */
+
+/* --- "Win98" ------------------------------------------------------------
+   The whole app as a Windows 98 program: the page is a grey window on a
+   teal desktop, the app header its navy title bar, dialogs are windows
+   with their own title bars, buttons are bevelled and press in, inputs and
+   cards are white sunken fields, tooltips are the pale-yellow balloons,
+   and the scrollbars are the chunky originals. Dark mode is the same
+   machine after hours: charcoal chrome, purple desktop, magenta title
+   bars. Pixelify Sans headings. */
+[data-app-theme="win98"] {
+  --heading-font: var(--font-pixelify);
+  --background: #c0c0c0;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #c0c0c0;
+  --popover-foreground: #000000;
+  --primary: #000080;
+  --primary-foreground: #ffffff;
+  --secondary: #d4d0c8;
+  --secondary-foreground: #000000;
+  --muted: #d4d0c8;
+  --muted-foreground: #3a3a3a;
+  --accent: #d4d0c8;
+  --accent-foreground: #000000;
+  --destructive: #b00000;
+  --border: #808080;
+  --input: #808080;
+  --ring: #000080;
+  --radius: 0rem;
+  --focus: #0000c8;
+  --amber: #8a5a00;
+  --sage: #006400;
+  --clay: #b00000;
+  --w98-light: #ffffff;
+  --w98-hilite: #dfdfdf;
+  --w98-shadow: #808080;
+  --w98-dark: #0a0a0a;
+  --w98-desktop: #008080;
+  --w98-title: linear-gradient(90deg, #000080, #1084d0);
+  --w98-tooltip: #ffffe1;
+  --w98-out:
+    inset -1px -1px var(--w98-dark), inset 1px 1px var(--w98-light),
+    inset -2px -2px var(--w98-shadow), inset 2px 2px var(--w98-hilite);
+  --w98-in:
+    inset -1px -1px var(--w98-light), inset 1px 1px var(--w98-shadow),
+    inset -2px -2px var(--w98-hilite), inset 2px 2px var(--w98-dark);
+}
+
+.dark[data-app-theme="win98"] {
+  --background: #3c3c46;
+  --foreground: #ececf2;
+  --card: #1f1f26;
+  --card-foreground: #ececf2;
+  --popover: #3c3c46;
+  --popover-foreground: #ececf2;
+  --primary: #b03060;
+  --primary-foreground: #ffffff;
+  --secondary: #4a4a56;
+  --secondary-foreground: #ececf2;
+  --muted: #4a4a56;
+  --muted-foreground: #c4c4d0;
+  --accent: #4a4a56;
+  --accent-foreground: #ececf2;
+  --destructive: #ff7070;
+  --border: #25252c;
+  --input: #25252c;
+  --ring: #ff79b0;
+  --focus: #ff9ec6;
+  --amber: #ffc861;
+  --sage: #7de08a;
+  --clay: #ff7070;
+  --w98-light: #75758a;
+  --w98-hilite: #55555f;
+  --w98-shadow: #25252c;
+  --w98-dark: #0d0d10;
+  --w98-desktop: #2a1f3d;
+  --w98-title: linear-gradient(90deg, #4b0082, #b03060);
+  --w98-tooltip: #2e2e44;
+}
+
+[data-app-theme="win98"] body {
+  background-color: var(--w98-desktop);
+}
+/* The page itself is one big window on the desktop. */
+[data-app-theme="win98"] main {
+  background-color: var(--background);
+  box-shadow: var(--w98-out);
+  margin-block: 12px;
+}
+[data-app-theme="win98"] [data-slot="app-header"] {
+  background: var(--w98-title);
+  border-bottom: 0;
+  --foreground: #ffffff;
+  --muted-foreground: #e4e8ff;
+  --muted: rgb(255 255 255 / 0.18);
+}
+[data-app-theme="win98"] [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"]),
+[data-app-theme="win98"] [data-slot="dialog-close"] {
+  background-color: var(--background);
+  color: var(--foreground);
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--w98-out);
+}
+[data-app-theme="win98"] [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"]):active {
+  box-shadow: var(--w98-in);
+  transform: translate(1px, 1px);
+}
+[data-app-theme="win98"] [data-slot="button"][data-variant="default"] {
+  font-weight: 700;
+}
+[data-app-theme="win98"] [data-slot="button"]:focus-visible {
+  outline: 1px dotted var(--foreground);
+  outline-offset: -5px;
+}
+[data-app-theme="win98"] [data-slot="card"].bg-card,
+[data-app-theme="win98"] [data-slot="input"],
+[data-app-theme="win98"] [data-slot="textarea"],
+[data-app-theme="win98"] [data-slot="select-trigger"] {
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--w98-in);
+}
+[data-app-theme="win98"] [data-slot="input"],
+[data-app-theme="win98"] [data-slot="textarea"],
+[data-app-theme="win98"] [data-slot="select-trigger"] {
+  background-color: var(--card);
+}
+[data-app-theme="win98"] [data-slot="dialog-content"] {
+  border-radius: 0;
+  box-shadow: var(--w98-out), 6px 6px 0 rgb(0 0 0 / 0.35);
+  padding-top: 0;
+}
+/* Dialog titles become the window's title bar, edge to edge. */
+[data-app-theme="win98"] [data-slot="dialog-title"] {
+  margin: 3px -13px 0;
+  padding: 4px 36px 4px 8px;
+  background: var(--w98-title);
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+[data-app-theme="win98"] [data-slot="dialog-close"] {
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 20px;
+}
+[data-app-theme="win98"] [data-slot="tooltip-content"] {
+  background-color: var(--w98-tooltip);
+  color: var(--foreground);
+  border: 1px solid var(--w98-dark);
+  border-radius: 0;
+}
+[data-app-theme="win98"] ::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+[data-app-theme="win98"] ::-webkit-scrollbar-track {
+  background-color: var(--w98-hilite);
+  background-image: repeating-conic-gradient(var(--w98-light) 0 25%, transparent 0 50%);
+  background-size: 2px 2px;
+}
+[data-app-theme="win98"] ::-webkit-scrollbar-thumb {
+  background-color: var(--background);
+  box-shadow: var(--w98-out);
+}
+[data-app-theme="win98"] ::-webkit-scrollbar-button:single-button {
+  display: block;
+  height: 16px;
+  width: 16px;
+  background-color: var(--background);
+  box-shadow: var(--w98-out);
+}
+
+/* --- "Synthwave" --------------------------------------------------------
+   An 80s neon sunset. Behind everything, fixed to the viewport: a striped
+   sun sinking into a perspective grid that scrolls toward you. Headings
+   are lit in the sunset gradient, the main button is a pink-to-orange
+   neon bar with a glow, outline buttons are cyan tubes, and cards float
+   with a faint pink halo. Light mode is the sunrise: pastel sky, same
+   grid and sun, darker ink. Orbitron headings. */
+[data-app-theme="synthwave"] {
+  --heading-font: var(--font-orbitron);
+  --background: #fff1f8;
+  --foreground: #2a0f3d;
+  --card: #ffffff;
+  --card-foreground: #2a0f3d;
+  --popover: #ffffff;
+  --popover-foreground: #2a0f3d;
+  --primary: #d4137a;
+  --primary-foreground: #ffffff;
+  --secondary: #fbe1f0;
+  --secondary-foreground: #2a0f3d;
+  --muted: #fbe1f0;
+  --muted-foreground: #6b4a7d;
+  --accent: #fbe1f0;
+  --accent-foreground: #2a0f3d;
+  --destructive: #c8102e;
+  --border: #f3c6de;
+  --input: #eab3d2;
+  --ring: #007c8a;
+  --radius: 0.5rem;
+  --focus: #007c8a;
+  --amber: #b25b00;
+  --sage: #0a7d5a;
+  --clay: #c8102e;
+  --sky: linear-gradient(#fff6fb 0%, #ffe3f1 45%, #ffd6cc 100%);
+  --grid-color: rgb(212 19 122 / 0.35);
+  --sun: linear-gradient(#ffd86b, #ff9a5a 50%, #ff5fae 95%);
+  --sun-opacity: 0.45;
+  --neon: linear-gradient(90deg, #ff5fae, #ffa25e);
+  --neon-ink: #2a0f3d;
+  --title-ink: linear-gradient(90deg, #c2126f, #c2410c 60%, #9a3412);
+  --glow: rgb(212 19 122 / 0.35);
+  --tube: #007c8a;
+}
+
+.dark[data-app-theme="synthwave"] {
+  --background: #12051f;
+  --foreground: #f8e9ff;
+  --card: #1c0a36;
+  --card-foreground: #f8e9ff;
+  --popover: #1c0a36;
+  --popover-foreground: #f8e9ff;
+  --primary: #ff2e97;
+  --primary-foreground: #12051f;
+  --secondary: #2a1148;
+  --secondary-foreground: #f8e9ff;
+  --muted: #2a1148;
+  --muted-foreground: #cfb3e6;
+  --accent: #2a1148;
+  --accent-foreground: #f8e9ff;
+  --destructive: #ff5570;
+  --border: rgb(255 46 151 / 0.3);
+  --input: rgb(45 226 230 / 0.35);
+  --ring: #2de2e6;
+  --focus: #2de2e6;
+  --amber: #ffd319;
+  --sage: #3dfab0;
+  --clay: #ff5570;
+  --sky: linear-gradient(#0d0221 0%, #1a0536 45%, #3b0a57 78%, #6a1466 100%);
+  --grid-color: rgb(255 46 151 / 0.55);
+  --sun: linear-gradient(#ffd319, #ff8c42 45%, #ff2e97 90%);
+  --sun-opacity: 0.6;
+  --neon: linear-gradient(90deg, #ff2e97, #ff8a3d);
+  --neon-ink: #12051f;
+  --title-ink: linear-gradient(90deg, #ffd319, #ff8c42 45%, #ff2e97);
+  --glow: rgb(255 46 151 / 0.55);
+  --tube: #2de2e6;
+}
+
+[data-app-theme="synthwave"] body {
+  isolation: isolate;
+  background-image: var(--sky);
+  background-attachment: fixed;
+}
+/* The sun: horizontal slices cut out of its lower half. */
+[data-app-theme="synthwave"] body::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  left: 50%;
+  bottom: 16vh;
+  width: min(44vmin, 420px);
+  aspect-ratio: 1;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: var(--sun);
+  opacity: var(--sun-opacity);
+  mask-image: linear-gradient(
+    #000 52%, transparent 52% 56%, #000 56% 64%, transparent 64% 68%,
+    #000 68% 75%, transparent 75% 80%, #000 80% 86%, transparent 86% 92%, #000 92%
+  );
+  pointer-events: none;
+}
+/* The grid floor, rolling toward the viewer. */
+[data-app-theme="synthwave"] body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  left: -50%;
+  right: -50%;
+  bottom: 0;
+  height: 34vh;
+  background-image:
+    linear-gradient(var(--grid-color) 2px, transparent 2px),
+    linear-gradient(90deg, var(--grid-color) 2px, transparent 2px);
+  background-size: 64px 64px;
+  transform: perspective(260px) rotateX(58deg);
+  transform-origin: bottom;
+  mask-image: linear-gradient(to top, #000 25%, transparent 95%);
+  animation: synth-grid 2.4s linear infinite;
+  pointer-events: none;
+}
+@keyframes synth-grid {
+  to {
+    background-position: 0 64px;
+  }
+}
+[data-app-theme="synthwave"] [data-slot="app-header"] {
+  background-color: color-mix(in oklch, var(--card) 75%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 24px -4px var(--glow);
+}
+[data-app-theme="synthwave"] [data-slot="card"].bg-card {
+  background-color: color-mix(in oklch, var(--card) 88%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 1px var(--border), 0 0 32px -10px var(--glow);
+}
+[data-app-theme="synthwave"] :is(.markdown-body :is(h1, h2, h3), [data-slot="dialog-title"], main :is(h1, h2)) {
+  background-image: var(--title-ink);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 10px var(--glow));
+}
+[data-app-theme="synthwave"] [data-slot="button"][data-variant="default"] {
+  background-image: var(--neon);
+  color: var(--neon-ink);
+  font-weight: 700;
+  box-shadow: 0 0 18px -2px var(--glow);
+}
+[data-app-theme="synthwave"] [data-slot="button"][data-variant="default"]:hover {
+  filter: brightness(1.1) saturate(1.15);
+  box-shadow: 0 0 26px 0 var(--glow);
+}
+[data-app-theme="synthwave"] [data-slot="button"][data-variant="outline"] {
+  border-color: var(--tube);
+  color: var(--tube);
+  box-shadow: 0 0 12px -3px var(--tube), inset 0 0 8px -4px var(--tube);
+}
+
+/* --- "Illuminated" ------------------------------------------------------
+   A medieval manuscript. Vellum with a darkened edge, iron-gall ink,
+   rubric red for the main actions, gold leaf and lapis blue. Notes open
+   with a gilded initial — the first letter set in red inside a gold
+   square — and a horizontal rule becomes a fleuron. Cards carry gold
+   corner brackets like a framed miniature. Cinzel headings, carved
+   Roman capitals. Dark mode is the scriptorium by candlelight. */
+[data-app-theme="illuminated"] {
+  --heading-font: var(--font-cinzel);
+  --background: #f3e9d2;
+  --foreground: #2b1d0e;
+  --card: #fbf5e6;
+  --card-foreground: #2b1d0e;
+  --popover: #fbf5e6;
+  --popover-foreground: #2b1d0e;
+  --primary: #a3201b;
+  --primary-foreground: #fbf5e6;
+  --secondary: #eadcbd;
+  --secondary-foreground: #2b1d0e;
+  --muted: #eadcbd;
+  --muted-foreground: #5a4630;
+  --accent: #eadcbd;
+  --accent-foreground: #2b1d0e;
+  --destructive: #a3201b;
+  --border: #dccaa4;
+  --input: #cdb88d;
+  --ring: #1f4e9c;
+  --radius: 0.2rem;
+  --focus: #1f4e9c;
+  --amber: #8a6207;
+  --sage: #3f7d5c;
+  --clay: #a3201b;
+  --gold: #b8860b;
+  --gold-leaf: linear-gradient(135deg, #f7e7a1, #d4a72c 45%, #9c7208 70%, #f0d77a);
+  --vignette: radial-gradient(ellipse at center, transparent 55%, rgb(110 70 20 / 0.22) 100%);
+}
+
+.dark[data-app-theme="illuminated"] {
+  --background: #1a120a;
+  --foreground: #f0e2c4;
+  --card: #251a10;
+  --card-foreground: #f0e2c4;
+  --popover: #251a10;
+  --popover-foreground: #f0e2c4;
+  --primary: #d4473d;
+  --primary-foreground: #1a120a;
+  --secondary: #32251a;
+  --secondary-foreground: #f0e2c4;
+  --muted: #32251a;
+  --muted-foreground: #c4ad88;
+  --accent: #32251a;
+  --accent-foreground: #f0e2c4;
+  --destructive: #e0645a;
+  --border: rgb(224 181 74 / 0.22);
+  --input: rgb(224 181 74 / 0.3);
+  --ring: #7fa3e8;
+  --focus: #8fb0ee;
+  --amber: #e0b54a;
+  --sage: #7fbf98;
+  --clay: #e0645a;
+  --gold: #e0b54a;
+  --vignette:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgb(255 170 60 / 0.16), transparent 70%),
+    radial-gradient(ellipse at center, transparent 50%, rgb(0 0 0 / 0.45) 100%);
+}
+
+[data-app-theme="illuminated"] body {
+  background-image: var(--vignette);
+  background-attachment: fixed;
+}
+[data-app-theme="illuminated"] [data-slot="app-header"] {
+  border-bottom: 3px double var(--gold);
+}
+[data-app-theme="illuminated"] [data-slot="card"].bg-card {
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--gold) 55%, transparent);
+  background-image:
+    linear-gradient(var(--gold), var(--gold)), linear-gradient(var(--gold), var(--gold)),
+    linear-gradient(var(--gold), var(--gold)), linear-gradient(var(--gold), var(--gold)),
+    linear-gradient(var(--gold), var(--gold)), linear-gradient(var(--gold), var(--gold)),
+    linear-gradient(var(--gold), var(--gold)), linear-gradient(var(--gold), var(--gold));
+  background-repeat: no-repeat;
+  background-size: 18px 2px, 2px 18px, 18px 2px, 2px 18px, 18px 2px, 2px 18px, 18px 2px, 2px 18px;
+  background-position:
+    left 6px top 6px, left 6px top 6px,
+    right 6px top 6px, right 6px top 6px,
+    left 6px bottom 6px, left 6px bottom 6px,
+    right 6px bottom 6px, right 6px bottom 6px;
+}
+[data-app-theme="illuminated"] [data-slot="button"][data-variant="default"] {
+  border: 1px solid var(--gold);
+  box-shadow: inset 0 0 0 2px var(--primary), inset 0 0 0 3px color-mix(in oklch, var(--gold) 70%, transparent);
+  letter-spacing: 0.02em;
+}
+/* The gilded initial. */
+[data-app-theme="illuminated"] .markdown-body > p:first-of-type::first-letter {
+  float: left;
+  font-family: var(--font-cinzel-decorative);
+  font-weight: 700;
+  font-size: 3.4em;
+  line-height: 0.9;
+  margin: 0.06em 0.14em 0 0;
+  padding: 0.08em 0.14em 0.02em;
+  color: var(--primary);
+  background: var(--gold-leaf, var(--gold));
+  border: 2px solid var(--primary);
+}
+.dark[data-app-theme="illuminated"] .markdown-body > p:first-of-type::first-letter {
+  color: #1a120a;
+  background: linear-gradient(135deg, #f7e7a1, #e0b54a 50%, #b58a1c);
+  border-color: var(--gold);
+}
+[data-app-theme="illuminated"] .markdown-body hr {
+  border: 0;
+  height: auto;
+  text-align: center;
+  overflow: visible;
+}
+[data-app-theme="illuminated"] .markdown-body hr::after {
+  content: "❦";
+  color: var(--gold);
+  font-size: 1.4em;
+}
+[data-app-theme="illuminated"] ::selection {
+  background-color: color-mix(in oklch, var(--gold) 45%, transparent);
+}
+
+/* --- "Holo" -------------------------------------------------------------
+   Holographic foil. Every raised card is edged in an iridescent rim that
+   slowly turns; the main button is a pill of shimmering foil; headings
+   are printed in the same spectrum. Dark mode is foil on black, light
+   mode foil on pearl, both with faint pastel light leaking in at the
+   corners. Syne headings, wide and strange. */
+@property --holo-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+[data-app-theme="holo"] {
+  --heading-font: var(--font-syne);
+  --background: #f5f5fa;
+  --foreground: #15131f;
+  --card: #ffffff;
+  --card-foreground: #15131f;
+  --popover: #ffffff;
+  --popover-foreground: #15131f;
+  --primary: #6c4cf0;
+  --primary-foreground: #ffffff;
+  --secondary: #ecebf5;
+  --secondary-foreground: #15131f;
+  --muted: #ecebf5;
+  --muted-foreground: #55526a;
+  --accent: #ecebf5;
+  --accent-foreground: #15131f;
+  --destructive: #d42a5b;
+  --border: #e0def0;
+  --input: #d3d0e6;
+  --ring: #6c4cf0;
+  --radius: 1rem;
+  --focus: #5b3de0;
+  --amber: #b5600c;
+  --sage: #0e7f62;
+  --clay: #d42a5b;
+  --foil: linear-gradient(110deg, #ffb3e1, #c8b6ff, #a8e6ff, #b8ffe0, #fff6b0, #ffb3e1);
+  --spectrum: linear-gradient(90deg, #d4389a, #6c4cf0 35%, #0f8fb5 65%, #0e9f75);
+  --leaks:
+    radial-gradient(ellipse 50% 40% at 0% 0%, rgb(255 154 213 / 0.35), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgb(143 211 255 / 0.35), transparent 70%);
+}
+
+.dark[data-app-theme="holo"] {
+  --background: #07070c;
+  --foreground: #efeef8;
+  --card: #111019;
+  --card-foreground: #efeef8;
+  --popover: #111019;
+  --popover-foreground: #efeef8;
+  --primary: #c3b1ff;
+  --primary-foreground: #07070c;
+  --secondary: #1b1a26;
+  --secondary-foreground: #efeef8;
+  --muted: #1b1a26;
+  --muted-foreground: #aaa7c2;
+  --accent: #1b1a26;
+  --accent-foreground: #efeef8;
+  --destructive: #ff7aa2;
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #c3b1ff;
+  --focus: #b8a4ff;
+  --amber: #ffc978;
+  --sage: #8af5c8;
+  --clay: #ff7aa2;
+  --spectrum: linear-gradient(90deg, #ff9ad5, #c3b1ff 35%, #8fd3ff 65%, #9dffcf);
+  --leaks:
+    radial-gradient(ellipse 50% 40% at 0% 0%, rgb(255 154 213 / 0.14), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgb(143 211 255 / 0.14), transparent 70%);
+}
+
+[data-app-theme="holo"] body {
+  background-image: var(--leaks);
+  background-attachment: fixed;
+}
+[data-app-theme="holo"] [data-slot="app-header"] {
+  border-bottom: 2px solid transparent;
+  border-image: var(--spectrum) 1;
+}
+[data-app-theme="holo"] [data-slot="card"].bg-card {
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    conic-gradient(from var(--holo-angle), #ff9ad5, #c3b1ff, #8fd3ff, #9dffcf, #fff59a, #ff9ad5) border-box;
+  box-shadow: 0 14px 40px -22px rgb(160 130 255 / 0.7);
+  animation: holo-turn 9s linear infinite;
+}
+@keyframes holo-turn {
+  to {
+    --holo-angle: 360deg;
+  }
+}
+[data-app-theme="holo"] [data-slot="button"][data-variant="default"] {
+  border-radius: 999px;
+  background-image: var(--foil);
+  background-size: 300% 100%;
+  color: #15131f;
+  font-weight: 700;
+  border: 1px solid rgb(255 255 255 / 0.6);
+  box-shadow: 0 4px 18px -6px rgb(160 130 255 / 0.8);
+  animation: holo-shimmer 6s ease-in-out infinite alternate;
+}
+[data-app-theme="holo"] [data-slot="button"][data-variant="outline"] {
+  border-radius: 999px;
+}
+@keyframes holo-shimmer {
+  to {
+    background-position: 100% 0;
+  }
+}
+[data-app-theme="holo"] :is(.markdown-body :is(h1, h2, h3), [data-slot="dialog-title"], main :is(h1, h2)) {
+  background-image: var(--spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* --- "Comic" ------------------------------------------------------------
+   A comic book page. Ben-Day halftone dots on the paper, every card an
+   inked panel with a hard shadow, headings lettered in Bangers with a
+   drop shadow, the main button a yellow caption box that tilts when you
+   point at it, and tooltips become speech balloons with a tail. Dark mode
+   is noir: black paper, grey dots, yellow and red spot color. */
+[data-app-theme="comic"] {
+  --heading-font: var(--font-bangers);
+  --background: #fdfcf7;
+  --foreground: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #ffd400;
+  --primary-foreground: #111111;
+  --secondary: #f1f0ea;
+  --secondary-foreground: #111111;
+  --muted: #f1f0ea;
+  --muted-foreground: #45443f;
+  --accent: #f1f0ea;
+  --accent-foreground: #111111;
+  --destructive: #d81e28;
+  --border: #111111;
+  --input: #111111;
+  --ring: #1654d9;
+  --radius: 0.4rem;
+  --focus: #1654d9;
+  --amber: #c2410c;
+  --sage: #138a36;
+  --clay: #d81e28;
+  --ink: #111111;
+  --dot: rgb(22 84 217 / 0.14);
+  --letter: #d81e28;
+  --letter-shadow: #111111;
+}
+
+.dark[data-app-theme="comic"] {
+  --background: #111111;
+  --foreground: #f5f5f0;
+  --card: #1c1c1c;
+  --card-foreground: #f5f5f0;
+  --popover: #1c1c1c;
+  --popover-foreground: #f5f5f0;
+  --primary: #ffd400;
+  --primary-foreground: #111111;
+  --secondary: #2a2a2a;
+  --secondary-foreground: #f5f5f0;
+  --muted: #2a2a2a;
+  --muted-foreground: #bdbdb5;
+  --accent: #2a2a2a;
+  --accent-foreground: #f5f5f0;
+  --destructive: #ff5a5f;
+  --border: #f5f5f0;
+  --input: #f5f5f0;
+  --ring: #6f9bff;
+  --focus: #7ea6ff;
+  --amber: #ffb04d;
+  --sage: #5fd67f;
+  --clay: #ff5a5f;
+  --ink: #f5f5f0;
+  --dot: rgb(255 255 255 / 0.07);
+  --letter: #ffd400;
+  --letter-shadow: #d81e28;
+}
+
+[data-app-theme="comic"] body {
+  background-image: radial-gradient(var(--dot) 1.3px, transparent 1.8px);
+  background-size: 9px 9px;
+}
+[data-app-theme="comic"] [data-slot="app-header"] {
+  border-bottom: 3px solid var(--ink);
+}
+[data-app-theme="comic"] [data-slot="card"].bg-card {
+  border: 3px solid var(--ink);
+  box-shadow: 6px 6px 0 0 var(--ink);
+}
+.dark[data-app-theme="comic"] [data-slot="card"].bg-card {
+  box-shadow: 6px 6px 0 0 var(--primary);
+}
+[data-app-theme="comic"] :is(.markdown-body :is(h1, h2, h3), [data-slot="dialog-title"], main :is(h1, h2)) {
+  color: var(--letter);
+  letter-spacing: 0.04em;
+  text-shadow: 2px 2px 0 var(--letter-shadow);
+}
+[data-app-theme="comic"] [data-slot="button"][data-variant="default"] {
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 0 var(--ink);
+  font-family: var(--font-bangers);
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  transition: transform 120ms cubic-bezier(0.3, 1.6, 0.5, 1), box-shadow 120ms;
+}
+[data-app-theme="comic"] [data-slot="button"][data-variant="default"]:hover {
+  background-color: var(--primary);
+  transform: rotate(-2.5deg) scale(1.05);
+  box-shadow: 5px 5px 0 0 var(--ink);
+}
+[data-app-theme="comic"] [data-slot="button"][data-variant="default"]:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 0 var(--ink);
+}
+[data-app-theme="comic"] [data-slot="button"][data-variant="outline"] {
+  border: 2px solid var(--ink);
+}
+[data-app-theme="comic"] [data-slot="input"],
+[data-app-theme="comic"] [data-slot="textarea"] {
+  border-width: 2px;
+}
+/* Tooltips as speech balloons, tail pointing at whatever they describe. */
+[data-app-theme="comic"] [data-slot="tooltip-content"] {
+  position: relative;
+  background-color: var(--card);
+  color: var(--foreground);
+  border: 2.5px solid var(--ink);
+  border-radius: 14px;
+  font-weight: 600;
+  overflow: visible;
+}
+[data-app-theme="comic"] [data-slot="tooltip-content"]:is([data-side="top"], [data-side="bottom"])::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  width: 12px;
+  height: 12px;
+  background-color: var(--card);
+  border: solid var(--ink);
+  rotate: 45deg;
+}
+[data-app-theme="comic"] [data-slot="tooltip-content"][data-side="top"]::after {
+  bottom: -8px;
+  border-width: 0 2.5px 2.5px 0;
+}
+[data-app-theme="comic"] [data-slot="tooltip-content"][data-side="bottom"]::after {
+  top: -8px;
+  border-width: 2.5px 0 0 2.5px;
+}
+
+/* Every animation in the maximal themes stops for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-app-theme="synthwave"] body::after,
+  [data-app-theme="holo"] [data-slot="card"].bg-card,
+  [data-app-theme="holo"] [data-slot="button"][data-variant="default"] {
+    animation: none;
+  }
+  [data-app-theme="comic"] [data-slot="button"] {
+    transition: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

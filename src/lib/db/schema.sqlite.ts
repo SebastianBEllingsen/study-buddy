@@ -37,6 +37,9 @@ export const courses = sqliteTable("courses", {
   icon_image: text("icon_image"),
   show_cover_on_card: integer("show_cover_on_card", { mode: "boolean" }).notNull().default(false),
   show_icon_frame: integer("show_icon_frame", { mode: "boolean" }).notNull().default(true),
+  // See the matching columns in schema.pg.ts.
+  show_practice: integer("show_practice", { mode: "boolean" }).notNull().default(true),
+  folder_chips: text("folder_chips"),
   page_background_image: text("page_background_image"),
   created_at: text("created_at").notNull(),
 });
@@ -99,6 +102,8 @@ export const app_settings = sqliteTable("app_settings", {
   // column/comment in schema.pg.ts and the AppSettings.documentBadgeDetail
   // doc comment in models.ts.
   document_badge_detail: text("document_badge_detail"),
+  // See the matching column in schema.pg.ts.
+  folder_chips: text("folder_chips"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: integer("ai_efficiency_mode", { mode: "boolean" }).notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

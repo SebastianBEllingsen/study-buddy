@@ -61,6 +61,12 @@ export const courses = pgTable("courses", {
   // directly on the course's own background instead of inside a box.
   // Defaults true so existing courses keep today's boxed look unchanged.
   show_icon_frame: boolean("show_icon_frame").notNull().default(true),
+  // False hides the course page's Practice card, for courses that aren't
+  // studied with quizzes/flashcards. Defaults true (today's behavior).
+  show_practice: boolean("show_practice").notNull().default(true),
+  // This course's own choice of folder count tags, as JSON — see
+  // lib/folderChips.ts. Null follows app_settings.folder_chips.
+  folder_chips: text("folder_chips"),
   // A big, Steam-library-style backdrop behind the whole course page — a
   // separate field from cover_image because a good banner crop (wide,
   // short) and a good full-page background crop (tall, atmospheric) are
@@ -129,6 +135,9 @@ export const app_settings = pgTable("app_settings", {
   // column/comment in schema.sqlite.ts and the AppSettings.documentBadgeDetail
   // doc comment in models.ts.
   document_badge_detail: text("document_badge_detail"),
+  // Which folder count tags course pages show, as JSON — see
+  // lib/folderChips.ts. Null == all of them.
+  folder_chips: text("folder_chips"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: boolean("ai_efficiency_mode").notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching
