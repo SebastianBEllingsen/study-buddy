@@ -148,6 +148,8 @@ export const app_settings = pgTable("app_settings", {
   // How the nav bar is colored over backdrops — see lib/headerTint.ts.
   // Null == "static".
   header_tint: text("header_tint"),
+  // The dashboard Links widget's links, as JSON — see lib/dashboardLinks.ts.
+  dashboard_links: text("dashboard_links"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: boolean("ai_efficiency_mode").notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

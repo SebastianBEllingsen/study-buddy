@@ -71,6 +71,22 @@ export function relativeLuminance([r, g, b]: Rgb): number {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
+// WCAG contrast ratio between two colors, 1 (none) – 21 (black on white).
+export function contrastRatio(a: Rgb, b: Rgb): number {
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+// The app name in the header keeps the theme's accent color while it stays
+// readable on the header's current color; below this contrast it switches
+// to the header's adapted text color instead. 3:1 is WCAG's minimum for
+// large text — the name is large, bold, logo-style type.
+export const BRAND_MIN_CONTRAST = 3;
+
+export function brandNeedsAdapting(brand: Rgb, background: Rgb): boolean {
+  return contrastRatio(brand, background) < BRAND_MIN_CONTRAST;
+}
+
 // Whichever of white or near-black text has more contrast on `background`.
 export function textToneFor(background: Rgb): "light" | "dark" {
   const l = relativeLuminance(background);

@@ -503,6 +503,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "header_tint")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN header_tint TEXT");
   }
+  if (!hasColumn("app_settings", "dashboard_links")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN dashboard_links TEXT");
+  }
   if (!hasColumn("app_settings", "ai_efficiency_mode")) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN ai_efficiency_mode INTEGER NOT NULL DEFAULT 0"

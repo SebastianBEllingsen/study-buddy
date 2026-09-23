@@ -309,6 +309,13 @@
       "when": 1790194861235,
       "tag": "0044_giant_agent_zero",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790197257298,
+      "tag": "0045_condemned_giant_man",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import type { AppSettings } from "@/lib/models";
 import { shouldShowWallpaper } from "@/lib/appWallpaper";
 import {
   backdropFractionUnderHeader,
+  brandNeedsAdapting,
   colorAtFraction,
   mix,
   stripColors,
@@ -88,7 +89,7 @@ function cssColorToRgb(value: string): Rgb | null {
   return [r, g, b];
 }
 
-const ATTRS = ["data-header-adaptive", "data-header-text"] as const;
+const ATTRS = ["data-header-adaptive", "data-header-text", "data-header-brand"] as const;
 
 export default function AdaptiveHeader() {
   const pathname = usePathname();
@@ -148,8 +149,17 @@ export default function AdaptiveHeader() {
       const tint = card ? mix(color, card, 0.25) : color;
       root.style.setProperty("--header-tint", `rgb(${tint.map(Math.round).join(" ")})`);
       root.setAttribute("data-header-adaptive", "");
-      if (mode === "adaptive-text") root.setAttribute("data-header-text", textToneFor(tint));
-      else root.removeAttribute("data-header-text");
+      if (mode === "adaptive-text") {
+        root.setAttribute("data-header-text", textToneFor(tint));
+        // The app name keeps its accent color unless that would be hard to
+        // read on this tint (lib/headerTint.ts, brandNeedsAdapting).
+        const brand = cssColorToRgb(styles.getPropertyValue("--primary"));
+        if (brand && brandNeedsAdapting(brand, tint)) root.setAttribute("data-header-brand", "adapt");
+        else root.removeAttribute("data-header-brand");
+      } else {
+        root.removeAttribute("data-header-text");
+        root.removeAttribute("data-header-brand");
+      }
     }
 
     // Once per frame while visible. Browsers pause animation frames in a

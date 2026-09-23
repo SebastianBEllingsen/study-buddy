@@ -2,10 +2,12 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { EyeOff, GripVertical, Pencil, Plus } from "lucide-react";
+import { EyeOff, GripVertical, Link2, Maximize2, Minimize2, Pencil, Plus } from "lucide-react";
 import { cn } from "cn";
+import { Button } from "@/components/ui/button";
 import type { HomeWidgetConfig, HomeWidgetId, HomeWidgetZone } from "@/lib/models";
 import { HOME_WIDGET_META } from "@/lib/homeWidgetMeta";
+import { LinksEditorDialog } from "@/components/LinksWidget";
 import {
   GRID_COLS,
   MAX_ROW_SPAN,
@@ -128,6 +130,7 @@ function WidgetTile({
 }) {
   const { label: defaultLabel } = HOME_WIDGET_META[widget.id];
   const label = widget.label ?? defaultLabel;
+  const [editingLinks, setEditingLinks] = useState(false);
   return (
     <div className={cn("dashboard-tile relative h-full touch-none", dimmed && "opacity-40")} style={tileGridStyle(widget)}>
       <div className="pointer-events-none h-full [&_a]:pointer-events-none">{children}</div>
@@ -153,6 +156,21 @@ function WidgetTile({
         onRename={onRename}
         className="absolute bottom-1.5 left-1.5"
       />
+      {/* The Links widget's own content is edited here, next to its name. */}
+      {widget.id === "links" && (
+        <>
+          <button
+            type="button"
+            onClick={() => setEditingLinks(true)}
+            aria-label="Edit links"
+            title="Edit links"
+            className="absolute bottom-1.5 left-9 flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-80 backdrop-blur-sm hover:opacity-100"
+          >
+            <Link2 className="size-3.5" />
+          </button>
+          <LinksEditorDialog open={editingLinks} onOpenChange={setEditingLinks} />
+        </>
+      )}
       <button
         type="button"
         onPointerDown={onResizeStart}
@@ -220,6 +238,7 @@ function ZoneGrid({
   onRename,
   renderContent,
   emptyLabel,
+  bleed = false,
 }: {
   zone: HomeWidgetZone;
   gridRef: React.RefObject<HTMLDivElement | null>;
@@ -232,10 +251,14 @@ function ZoneGrid({
   onRename: (id: HomeWidgetId, label: string | null) => void;
   renderContent: (widget: HomeWidgetConfig) => ReactNode;
   emptyLabel: string;
+  // Pulls the grid's own padding out past its container, so the tiles span
+  // exactly the container's width — used full screen, where that width
+  // matches the real dashboard's.
+  bleed?: boolean;
 }) {
   const showPreviewHere = previewLayout?.zone === zone;
   return (
-    <div ref={gridRef} className="dashboard-grid relative min-h-[130px] rounded-xl bg-muted/30 p-2">
+    <div ref={gridRef} className={cn("dashboard-grid relative min-h-[130px] rounded-xl bg-muted/30 p-2", bleed && "-mx-2")}>
       {widgets.length === 0 && !showPreviewHere && (
         <p className="col-span-full py-8 text-center text-sm text-muted-foreground">{emptyLabel}</p>
       )}
@@ -262,6 +285,26 @@ function ZoneGrid({
   );
 }
 
+// Whether Customize opens full screen — remembered per browser, like other
+// view preferences.
+const FULLSCREEN_KEY = "studybuddy:dashboard-customize-fullscreen";
+
+function readFullscreenPreference(): boolean {
+  try {
+    return localStorage.getItem(FULLSCREEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveFullscreenPreference(on: boolean) {
+  try {
+    localStorage.setItem(FULLSCREEN_KEY, on ? "1" : "0");
+  } catch {
+    // Not saved — it just opens in the default size next time.
+  }
+}
+
 export function DashboardCustomizeDialog({
   open,
   onOpenChange,
@@ -277,6 +320,7 @@ export function DashboardCustomizeDialog({
 }) {
   const topGridRef = useRef<HTMLDivElement>(null);
   const bottomGridRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(readFullscreenPreference);
   const [ghost, setGhost] = useState<DragGhost | null>(null);
   const [activeId, setActiveId] = useState<HomeWidgetId | null>(null);
   const [previewLayout, setPreviewLayout] = useState<HomeWidgetConfig | null>(null);
@@ -400,8 +444,42 @@ export function DashboardCustomizeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl">
-        <DialogHeader>
+      <DialogContent
+        className="flex max-h-[85vh] flex-col sm:max-w-xl"
+        // Full screen: the whole window, set inline so it reliably beats the
+        // dialog's own centered/max-width classes. The grids inside are then
+        // centered at the dashboard's real width (max-w-5xl, same padding),
+        // so every tile has its true size and shape rather than a squeezed
+        // preview.
+        style={
+          fullscreen
+            ? {
+                inset: 0,
+                translate: "none",
+                width: "100vw",
+                maxWidth: "none",
+                height: "100dvh",
+                maxHeight: "none",
+                borderRadius: 0,
+              }
+            : undefined
+        }
+      >
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="absolute top-2 right-10"
+          aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+          title={fullscreen ? "Exit full screen" : "Full screen"}
+          onClick={() => {
+            const next = !fullscreen;
+            setFullscreen(next);
+            saveFullscreenPreference(next);
+          }}
+        >
+          {fullscreen ? <Minimize2 /> : <Maximize2 />}
+        </Button>
+        <DialogHeader className={cn(fullscreen && "mx-auto w-full max-w-5xl px-4 sm:px-6")}>
           <DialogTitle>Customize dashboard</DialogTitle>
           <DialogDescription>
             Drag a widget by its grip to move it, by its corner to resize it, or onto Hidden to
@@ -414,7 +492,8 @@ export function DashboardCustomizeDialog({
             place — same fixed-header/scrolling-body split as
             EditFlashcardsDialog — instead of the dialog itself overflowing
             past the screen edge. */}
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
+        <div className="min-h-0 flex-1 overflow-y-auto px-1">
+          <div className={cn("space-y-4", fullscreen && "mx-auto w-full max-w-5xl px-4 pb-6 sm:px-6")}>
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">Above your courses</p>
             <ZoneGrid
@@ -431,6 +510,7 @@ export function DashboardCustomizeDialog({
               onRename={handleRename}
               renderContent={renderContent}
               emptyLabel="Nothing here — drag a widget up from Hidden."
+              bleed={fullscreen}
             />
           </div>
 
@@ -450,6 +530,7 @@ export function DashboardCustomizeDialog({
               onRename={handleRename}
               renderContent={renderContent}
               emptyLabel="Nothing here — drag a widget down from Hidden or from the grid above."
+              bleed={fullscreen}
             />
           </div>
 
@@ -467,6 +548,7 @@ export function DashboardCustomizeDialog({
                 />
               ))}
             </div>
+          </div>
           </div>
         </div>
       </DialogContent>

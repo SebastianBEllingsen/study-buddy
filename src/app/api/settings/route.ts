@@ -12,6 +12,7 @@ import {
   setFolderChips,
   setAppWallpaper,
   setHeaderTint,
+  setDashboardLinks,
   setAiEfficiencyMode,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
@@ -25,6 +26,8 @@ import {
 import { normalizeFolderChipSettings } from "@/lib/folderChips";
 import { normalizeAppWallpaper } from "@/lib/appWallpaper";
 import { HEADER_TINT_MODES, parseHeaderTintMode } from "@/lib/headerTint";
+import { normalizeDashboardLinks } from "@/lib/dashboardLinks";
+import { LINK_BRAND_KEYS } from "@/lib/linkIcons";
 import type { AiBackend, AiProviderKeyName, HomeWidgetConfig, HomeWidgetId } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
 import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
@@ -151,6 +154,14 @@ export async function POST(request: Request) {
       );
     }
     await setFolderChips(chips);
+  }
+
+  if (body?.dashboardLinks !== undefined) {
+    const links = normalizeDashboardLinks(body.dashboardLinks, LINK_BRAND_KEYS);
+    if (!links) {
+      return Response.json({ error: "dashboardLinks must be a list of links" }, { status: 400 });
+    }
+    await setDashboardLinks(links);
   }
 
   if (body?.headerTint !== undefined) {

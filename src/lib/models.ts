@@ -36,6 +36,8 @@ import {
 } from "./folderChips";
 import { parseAppWallpaper, type AppWallpaperSettings } from "./appWallpaper";
 import { parseHeaderTintMode, type HeaderTintMode } from "./headerTint";
+import { parseDashboardLinks, type DashboardLink } from "./dashboardLinks";
+import { LINK_BRAND_KEYS } from "./linkIcons";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
@@ -185,6 +187,7 @@ interface SettingsRow {
   folder_chips: string | null;
   app_wallpaper: string | null;
   header_tint: string | null;
+  dashboard_links: string | null;
   ai_efficiency_mode: boolean;
   model_badge_detail: string | null;
   ai_enabled: boolean;
@@ -224,6 +227,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       folder_chips: app_settings.folder_chips,
       app_wallpaper: app_settings.app_wallpaper,
       header_tint: app_settings.header_tint,
+      dashboard_links: app_settings.dashboard_links,
       ai_efficiency_mode: app_settings.ai_efficiency_mode,
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
@@ -426,6 +430,8 @@ export interface AppSettings {
   // How the nav bar is colored over the backdrop and wallpaper — see
   // lib/headerTint.ts.
   headerTint: HeaderTintMode;
+  // The dashboard Links widget's shortcuts — see lib/dashboardLinks.ts.
+  dashboardLinks: DashboardLink[];
   // Off (the default): generation/chat calls use the main model at their
   // normal effort/maxTokens, same as before this setting existed. On: every
   // AI call in lib/generate.ts and lib/chat.ts asks its backend for a
@@ -488,6 +494,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     folderChips: parseFolderChipSettings(row?.folder_chips) ?? DEFAULT_FOLDER_CHIPS,
     appWallpaper: parseAppWallpaper(row?.app_wallpaper),
     headerTint: parseHeaderTintMode(row?.header_tint),
+    dashboardLinks: parseDashboardLinks(row?.dashboard_links, LINK_BRAND_KEYS),
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
@@ -547,6 +554,13 @@ export async function setFolderChips(settings: FolderChipSettings): Promise<void
   await db
     .update(app_settings)
     .set({ folder_chips: serializeFolderChipSettings(settings), updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setDashboardLinks(links: DashboardLink[]): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ dashboard_links: JSON.stringify(links), updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1393,7 +1407,7 @@ export async function getDocumentLines(documentId: number): Promise<string[]> {
 // col/row/span → CSS translation, shared between the live dashboard
 // (page.tsx) and the editing UI (DashboardCustomizeDialog.tsx).
 
-export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments", "recent", "pomodoro"] as const;
+export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments", "recent", "pomodoro", "links"] as const;
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
 
 // Two independent widget grids on the home page: "top" above the courses
@@ -1429,6 +1443,9 @@ const DEFAULT_HOME_WIDGETS: HomeWidgetConfig[] = [
   { id: "assignments", enabled: true, zone: "top", col: 0, row: 3, colSpan: 6, rowSpan: 1 },
   { id: "recent", enabled: true, zone: "top", col: 0, row: 4, colSpan: 6, rowSpan: 2 },
   { id: "pomodoro", enabled: true, zone: "top", col: 0, row: 6, colSpan: 3, rowSpan: 2 },
+  // Starts hidden: it's empty until links are added, so it's opted into
+  // from Customize rather than appearing blank on every dashboard.
+  { id: "links", enabled: false, zone: "top", col: 3, row: 6, colSpan: 3, rowSpan: 2 },
 ];
 
 function defaultFor(id: HomeWidgetId): HomeWidgetConfig {
@@ -2806,8 +2823,8 @@ export async function searchAll(query: string, courseId?: number): Promise<Searc
 
 // One year back, in the same "YYYY-MM-DD HH:MM:SS" format as every other
 // timestamp column (see lib/time.ts's nowUtc) — both consumers below
-// (streak.ts's computeStreak and StudyHeatmap's 14-week grid) only ever
-// look at the last few months, so a full unbounded history scan of
+// (streak.ts's computeStreak and StudyHeatmap, which shows up to 52 weeks,
+// see lib/heatmapFit.ts) never look further back, so a full unbounded history scan of
 // quiz_attempts/flashcard_reviews (which only ever grows) is wasted egress.
 function oneYearAgoUtc(): string {
   const d = new Date();

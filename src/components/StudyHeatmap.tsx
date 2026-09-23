@@ -1,10 +1,15 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { HEATMAP_GAP, fitHeatmap, type HeatmapFit } from "@/lib/heatmapFit";
+
 // A compact GitHub-style activity graph — quiz attempts and flashcard
 // reviews per day. The streak counter already tells you "how many days in a
 // row," but not "was last week actually lighter than usual" — this is the
 // shape of that answer, not just a number.
-const DEFAULT_WEEKS = 14;
+// Room the "last N weeks" line takes above the grid: its own height plus
+// the gap below it.
+const LABEL_SPACE = 22;
 
 function levelFor(count: number): string {
   if (count === 0) return "bg-muted";
@@ -18,21 +23,48 @@ function toDateKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-// `weeks` shrinks when the dashboard widget is resized narrower, and
-// `showLabel` drops when it's resized shorter (see page.tsx) — a real
-// widget resize, not just a CSS overflow clip, same idea as an iOS/Android
-// widget showing less detail at a smaller size. The label's own line is
-// taller than a row of squares, so it's the first thing to go: at the
-// shortest widget height there's exactly enough room for the 7 squares and
-// no more.
+// Fills whatever space it's given: it measures itself, then picks the
+// square size from the height and the number of weeks from the width (see
+// lib/heatmapFit.ts) — a bigger widget tile shows a bigger, longer
+// heatmap rather than a small fixed grid in one corner. `showLabel` drops
+// the "last N weeks" line on the shortest tiles (see page.tsx).
 export default function StudyHeatmap({
   activity,
-  weeks: weeksCount = DEFAULT_WEEKS,
   showLabel = true,
 }: {
   activity: Record<string, number>;
-  weeks?: number;
   showLabel?: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<HeatmapFit | null>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setFit(fitHeatmap(width, height - (showLabel ? LABEL_SPACE : 0)));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [showLabel]);
+
+  return (
+    <div ref={containerRef} className="flex h-full w-full items-center justify-center">
+      {fit && <HeatmapGrid activity={activity} weeksCount={fit.weeks} cell={fit.cell} showLabel={showLabel} />}
+    </div>
+  );
+}
+
+function HeatmapGrid({
+  activity,
+  weeksCount,
+  cell,
+  showLabel,
+}: {
+  activity: Record<string, number>;
+  weeksCount: number;
+  cell: number;
+  showLabel: boolean;
 }) {
   // Always renders, even with zero activity anywhere — an all-empty grid is
   // itself the "nothing yet" state (same idea as GitHub's own contribution
@@ -70,20 +102,21 @@ export default function StudyHeatmap({
   }
 
   return (
-    <div className="flex h-full flex-col justify-center gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       {showLabel && (
         <p className="truncate text-xs text-muted-foreground">Study activity — last {weeksCount} weeks</p>
       )}
-      <div className="flex gap-[3px]">
+      <div className="flex" style={{ gap: HEATMAP_GAP }}>
         {weeks.map((week, i) => (
-          <div key={i} className="flex flex-col gap-[3px]">
+          <div key={i} className="flex flex-col" style={{ gap: HEATMAP_GAP }}>
             {week.map((day) => {
               const isFuture = day.date > today;
               return (
                 <div
                   key={day.key}
                   title={isFuture ? undefined : `${day.count} ${day.count === 1 ? "activity" : "activities"} on ${day.key}`}
-                  className={`size-2.5 rounded-sm ${isFuture ? "bg-transparent" : levelFor(day.count)}`}
+                  style={{ width: cell, height: cell, borderRadius: Math.max(2, Math.round(cell / 5)) }}
+                  className={isFuture ? "bg-transparent" : levelFor(day.count)}
                 />
               );
             })}

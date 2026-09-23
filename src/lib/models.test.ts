@@ -70,6 +70,8 @@ const {
   setFolderChips,
   setAppWallpaper,
   setHeaderTint,
+  setDashboardLinks,
+  setHomeWidgets,
 } = await import("./models");
 
 beforeEach(() => {
@@ -679,6 +681,21 @@ describe("course page display settings", () => {
     await setAppWallpaper(wallpaper);
     expect((await getAppSettings()).appWallpaper).toEqual(wallpaper);
     await setAppWallpaper({ ...wallpaper, enabled: false });
+  });
+
+  it("round-trips dashboard links, empty by default", async () => {
+    expect((await getAppSettings()).dashboardLinks).toEqual([]);
+    const links = [{ id: "a", title: "Lectures", url: "https://youtube.com/", icon: "brand:youtube" }];
+    await setDashboardLinks(links);
+    expect((await getAppSettings()).dashboardLinks).toEqual(links);
+    await setDashboardLinks([]);
+  });
+
+  it("adds the Links widget hidden to a dashboard saved before it existed", async () => {
+    const before = (await getAppSettings()).homeWidgets.filter((w) => w.id !== "links");
+    await setHomeWidgets(before);
+    const links = (await getAppSettings()).homeWidgets.find((w) => w.id === "links");
+    expect(links?.enabled).toBe(false);
   });
 
   it("round-trips the nav bar color mode, static by default", async () => {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   backdropFractionUnderHeader,
+  brandNeedsAdapting,
   colorAtFraction,
+  contrastRatio,
   mix,
   parseHeaderTintMode,
   relativeLuminance,
@@ -50,6 +52,20 @@ describe("contrast", () => {
     expect(textToneFor([240, 230, 200])).toBe("dark");
     expect(textToneFor([255, 212, 0])).toBe("dark");
     expect(textToneFor([0, 0, 200])).toBe("light");
+  });
+
+  it("measures contrast ratios", () => {
+    expect(contrastRatio([0, 0, 0], [255, 255, 255])).toBeCloseTo(21);
+    expect(contrastRatio([255, 255, 255], [0, 0, 0])).toBeCloseTo(21);
+    expect(contrastRatio([120, 120, 120], [120, 120, 120])).toBe(1);
+  });
+
+  it("keeps the accent-colored app name only while it stays readable", () => {
+    const red: [number, number, number] = [214, 53, 44];
+    expect(brandNeedsAdapting(red, [255, 255, 255])).toBe(false); // ~4.7:1
+    expect(brandNeedsAdapting(red, [20, 20, 24])).toBe(false); // ~4:1
+    expect(brandNeedsAdapting(red, [200, 60, 50])).toBe(true); // red on red
+    expect(brandNeedsAdapting(red, [120, 110, 105])).toBe(true); // mid grey
   });
 
   it("mixes colors", () => {

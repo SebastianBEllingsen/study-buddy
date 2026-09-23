@@ -39,6 +39,7 @@ import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { tileGridStyle } from "@/lib/dashboardGrid";
 import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
 import StudyHeatmap from "@/components/StudyHeatmap";
+import LinksWidget from "@/components/LinksWidget";
 import PomodoroWidget from "@/components/pomodoro/PomodoroWidget";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
@@ -373,12 +374,6 @@ function DueCardsWidget({
 
 // Fewer weeks at a narrower width, so squares stay a legible size instead
 // of shrinking to fit — a real resize of the content, not a CSS clip.
-function heatmapWeeksFor(colSpan: number): number {
-  if (colSpan <= 2) return 6;
-  if (colSpan <= 4) return 10;
-  return 14;
-}
-
 function HeatmapWidget({
   activity,
   layout,
@@ -393,11 +388,7 @@ function HeatmapWidget({
       elevation={transparent ? "flat" : "raised"}
       className={`h-full overflow-hidden p-3 ${transparent ? "" : "border"}`}
     >
-      <StudyHeatmap
-        activity={activity}
-        weeks={heatmapWeeksFor(layout.colSpan)}
-        showLabel={layout.rowSpan >= 2}
-      />
+      <StudyHeatmap activity={activity} showLabel={layout.rowSpan >= 2} />
     </Card>
   );
 }
@@ -1118,6 +1109,8 @@ function HomePageContent() {
         return (
           <PomodoroWidget key="pomodoro" layout={layout} label={widget.label} transparent={transparentWidgets} />
         );
+      case "links":
+        return <LinksWidget key="links" layout={layout} label={widget.label} transparent={transparentWidgets} />;
     }
   }
 

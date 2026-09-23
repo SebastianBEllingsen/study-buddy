@@ -107,6 +107,7 @@ export const app_settings = sqliteTable("app_settings", {
   folder_chips: text("folder_chips"),
   app_wallpaper: text("app_wallpaper"),
   header_tint: text("header_tint"),
+  dashboard_links: text("dashboard_links"),
   // See AppSettings.aiEfficiencyMode's doc comment in models.ts.
   ai_efficiency_mode: integer("ai_efficiency_mode", { mode: "boolean" }).notNull().default(false),
   // "detailed" | "minimal" | null (null == "detailed") — see the matching

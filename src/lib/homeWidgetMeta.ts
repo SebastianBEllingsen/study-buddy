@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, Clock, Flame, Layers, ListChecks, Timer, type LucideIcon } from "lucide-react";
+import { Activity, CalendarDays, Clock, Flame, Layers, Link2, ListChecks, Timer, type LucideIcon } from "lucide-react";
 import type { HomeWidgetId } from "./models";
 
 // Display metadata for home dashboard widgets — shared between the home
@@ -12,4 +12,5 @@ export const HOME_WIDGET_META: Record<HomeWidgetId, { label: string; icon: Lucid
   assignments: { label: "Assignments", icon: ListChecks },
   recent: { label: "Recent activity", icon: Clock },
   pomodoro: { label: "Pomodoro", icon: Timer },
+  links: { label: "Links", icon: Link2 },
 };

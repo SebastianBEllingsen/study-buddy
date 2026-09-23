@@ -24,7 +24,7 @@ export default function AppBranding({ initial }: { initial: AppSettings }) {
   const icon = data?.appIcon;
 
   return (
-    <Link href="/" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
+    <Link href="/" data-slot="app-brand" className="flex items-center gap-2 font-heading text-lg font-semibold text-primary">
       {iconImage ? (
         <span
           className="size-5 shrink-0 rounded bg-cover bg-center"

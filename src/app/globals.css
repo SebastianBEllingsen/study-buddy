@@ -2295,6 +2295,11 @@ html[data-header-text="dark"] [data-slot="app-header"] {
   --input: rgb(0 0 0 / 0.18);
   --background: rgb(255 255 255 / 0.35);
 }
+/* The app name keeps its accent color unless it would be hard to read on
+   the current tint (data-header-brand, see brandNeedsAdapting). */
+html[data-header-brand="adapt"] [data-slot="app-brand"] {
+  color: var(--foreground);
+}
 @media (prefers-reduced-motion: reduce) {
   html[data-header-adaptive] [data-slot="app-header"] {
     transition: none;
