@@ -12,9 +12,10 @@ import {
   InvalidDestinationFolderError,
   type GenerationMode,
 } from "@/lib/models";
-import { computeDueCardIndices } from "@/lib/spacedRepetition";
+import { deckDueCardIndices } from "@/lib/spacedRepetition";
 import type { FlashcardsContent } from "@/lib/types";
 import { parseId } from "@/lib/routeParams";
+import { isValidCardMediaList } from "@/lib/cardMedia";
 
 // Only checks the shape the rest of the app actually reads (ReactMarkdown's
 // string, FlashcardViewer's card array, QuizRunner's question array) — not
@@ -33,8 +34,14 @@ function isValidContent(mode: GenerationMode, content: unknown): boolean {
           card &&
           typeof card === "object" &&
           typeof (card as Record<string, unknown>).front === "string" &&
-          typeof (card as Record<string, unknown>).back === "string"
-      )
+          typeof (card as Record<string, unknown>).back === "string" &&
+          // Optional, imported decks only — see CardMedia in lib/types.ts.
+          ["frontMedia", "backMedia"].every((key) => {
+            const media = (card as Record<string, unknown>)[key];
+            return media === undefined || isValidCardMediaList(media);
+          })
+      ) &&
+      (c.reminders === undefined || typeof c.reminders === "boolean")
     );
   }
   if (mode === "quiz") return Array.isArray(c.questions);
@@ -72,10 +79,7 @@ export async function GET(_request: Request, { params }: Params) {
       })),
       dueCardIndices:
         item.mode === "flashcards"
-          ? computeDueCardIndices(
-              schedule,
-              (JSON.parse(item.content_json) as FlashcardsContent).cards.length
-            )
+          ? deckDueCardIndices(schedule, JSON.parse(item.content_json) as FlashcardsContent)
           : [],
     });
   } catch (err) {

@@ -54,6 +54,8 @@ Upload the PDFs for a course and generate study material scoped strictly to that
     </tr>
   </table>
 
+- 🗃️ **Anki import & export** — upload an `.apkg` (any Anki version's export) and each deck inside becomes a flashcard set, images/audio/video included; **Export to Anki** on any flashcard set downloads it back as an `.apkg`. Review history isn't carried across.
+
 - 💡 **On-demand hints & explanations** — highlight anything for a hint or explanation, never spoiling an unanswered question
 
   <img src="docs/images/HighlightAndExplainOnPdf.png" width="600" alt="Highlighting text in a PDF to ask for an explanation">

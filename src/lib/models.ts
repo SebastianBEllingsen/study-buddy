@@ -26,7 +26,7 @@ import {
 } from "./db";
 import { nowUtc } from "./time";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
-import { computeDueCardIndices } from "./spacedRepetition";
+import { deckDueCardIndices } from "./spacedRepetition";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { canvasReferencesTarget, emptyCanvas, parseCanvasJson, type CanvasData } from "./canvas";
@@ -2796,7 +2796,7 @@ export interface DueFlashcardItem {
 // across every course. Two queries (items, all schedule rows) combined in
 // JS rather than one aggregate SQL query — card counts live inside
 // content_json, not a column, so per-item due-ness has to go through
-// computeDueCardIndices the same way the single-item route does.
+// deckDueCardIndices the same way the single-item route does.
 export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
   const [rows, dueSchedule] = await Promise.all([
     db
@@ -2826,14 +2826,14 @@ export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
     // whole dashboard — this is on /api/stats's hot path (every home page
     // load). Skipped rather than thrown: the rest of the deck is still
     // meaningful without this one item's due count.
-    let cardCount: number;
+    let content: FlashcardsContent;
     try {
-      cardCount = (JSON.parse(item.content_json) as FlashcardsContent).cards.length;
+      content = JSON.parse(item.content_json) as FlashcardsContent;
     } catch (err) {
       console.error(`Skipping flashcard item ${item.id} with unparseable content_json:`, err);
       continue;
     }
-    const dueCount = computeDueCardIndices(scheduleByItem.get(item.id) ?? [], cardCount).length;
+    const dueCount = deckDueCardIndices(scheduleByItem.get(item.id) ?? [], content).length;
     if (dueCount > 0) {
       due.push({
         itemId: item.id,

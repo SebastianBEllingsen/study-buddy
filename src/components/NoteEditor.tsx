@@ -12,7 +12,9 @@ import {
 import { useRouter } from "next/navigation";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
-import { syntaxTree } from "@codemirror/language";
+import { defaultHighlightStyle, HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import { tags } from "@lezer/highlight";
 import {
   autocompletion,
   snippet,
@@ -1412,6 +1414,29 @@ function NotePreview({
   );
 }
 
+// Colors code inside a ```cpp (etc.) fence with the same --code-* tokens
+// rehype-highlight's hljs-* classes use in Preview (globals.css). Built on
+// top of defaultHighlightStyle's own specs rather than beside it: adding any
+// highlighter switches off basicSetup's fallback one, which would otherwise
+// take the markdown styling (heading, emphasis, link…) down with it. Later
+// specs win for a tag both define, so only the code colors change.
+const codeHighlightStyle = HighlightStyle.define([
+  ...defaultHighlightStyle.specs,
+  {
+    tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword, tags.moduleKeyword, tags.definitionKeyword, tags.modifier],
+    color: "var(--code-keyword)",
+  },
+  { tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character], color: "var(--code-string)" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--code-number)" },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--code-comment)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.className, tags.namespace, tags.standard(tags.typeName)], color: "var(--code-type)" },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.function(tags.definition(tags.variableName))],
+    color: "var(--code-function)",
+  },
+  { tag: tags.definition(tags.variableName), color: "inherit" },
+]);
+
 export interface NoteEditorHandle {
   scrollToHighlight: (text: string) => void;
 }
@@ -1871,7 +1896,11 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       // Plain markdown() only parses base CommonMark — pass the GFM-extended
       // language so strikethrough (~~text~~) actually shows up in the syntax
       // tree for liveMarkdownFormatting() to conceal, same as headings/bold.
-      markdown({ base: markdownLanguage }),
+      // codeLanguages: a ```cpp (or python, js, …) fence gets its contents
+      // parsed and highlighted as that language — each grammar is lazy-
+      // loaded the first time a fence names it, so unused ones cost nothing.
+      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      syntaxHighlighting(codeHighlightStyle),
       // markdown() parses the syntax tree but doesn't bind any keys itself —
       // without this, Enter falls through to basicSetup's default binding
       // (plain newline, nothing list-aware), so a new line after "1. " or

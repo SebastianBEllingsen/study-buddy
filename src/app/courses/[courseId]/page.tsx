@@ -1053,6 +1053,7 @@ function FolderCard({
                   triggerIcon={Plus}
                   actions={[
                     { label: "Upload files", icon: Upload, onSelect: () => onAddToFolder(folder.id, "upload") },
+                    { label: "Import Anki deck", icon: Layers, onSelect: () => onAddToFolder(folder.id, "upload") },
                     { label: "New note", icon: StickyNote, onSelect: () => onAddToFolder(folder.id, "note") },
                     // Nesting is one level deep — a subfolder can't have its
                     // own subfolder, so this option only shows up top-level.
@@ -1464,6 +1465,10 @@ export default function CoursePage() {
     setError(null);
     let uploaded = 0;
     for (const file of Array.from(files)) {
+      if (file.name.toLowerCase().endsWith(".apkg")) {
+        await importAnkiDeck(folderId, file);
+        continue;
+      }
       const formData = new FormData();
       formData.append("file", file);
       if (folderId !== null) formData.append("folderId", String(folderId));
@@ -1482,6 +1487,30 @@ export default function CoursePage() {
       toast.success(`Uploaded ${uploaded} file${uploaded === 1 ? "" : "s"}`);
     }
     refresh();
+  }
+
+  // An Anki package becomes flashcard sets (one per deck inside it), not a
+  // document — see /api/courses/[courseId]/anki-import.
+  async function importAnkiDeck(folderId: number | null, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (folderId !== null) formData.append("folderId", String(folderId));
+    const res = await fetch(`/api/courses/${courseId}/anki-import`, { method: "POST", body: formData });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(body.error ?? `Failed to import ${file.name}`);
+      return;
+    }
+    const items = body.items as { title: string; cards: number }[];
+    const cards = items.reduce((n, i) => n + i.cards, 0);
+    toast.success(
+      items.length === 1
+        ? `Imported "${items[0].title}" (${cards} cards)`
+        : `Imported ${items.length} decks (${cards} cards)`,
+      body.mediaSkipped > 0
+        ? { description: `${body.mediaSkipped} media file(s) couldn't be imported` }
+        : undefined
+    );
   }
 
   function openNewFolderDialog(parentFolderId: number | null) {
@@ -2420,7 +2449,8 @@ export default function CoursePage() {
                   <DialogHeader>
                     <DialogTitle>Upload files</DialogTitle>
                     <DialogDescription>
-                      Choose documents (PDF, DOCX, ODT, PPTX) or images (PNG, JPG, GIF, WEBP) and where they should go.
+                      Choose documents (PDF, DOCX, ODT, PPTX), images (PNG, JPG, GIF, WEBP), or Anki decks (.apkg)
+                      and where they should go. Anki decks become flashcard sets; their review history isn&apos;t imported.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-4">
@@ -2430,7 +2460,7 @@ export default function CoursePage() {
                         id="upload-files"
                         ref={uploadFileInputRef}
                         type="file"
-                        accept={UPLOAD_ACCEPT}
+                        accept={`${UPLOAD_ACCEPT},.apkg`}
                         multiple
                         className="text-xs"
                       />
@@ -2711,6 +2741,7 @@ export default function CoursePage() {
               triggerIcon={Plus}
               actions={[
                 { label: "Upload files", icon: Upload, onSelect: () => openAddToFolder(null, "upload") },
+                { label: "Import Anki deck", icon: Layers, onSelect: () => openAddToFolder(null, "upload") },
                 { label: "New note", icon: StickyNote, onSelect: () => openAddToFolder(null, "note") },
               ]}
             />

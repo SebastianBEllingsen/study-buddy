@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAiEnabled } from "@/lib/useAiEnabled";
@@ -163,7 +164,7 @@ export function CropAskThread({
             {/* Same rendering as AskAiAnswer — answers routinely include
                 inline LaTeX (e.g. explaining a cropped equation). */}
             <div className="markdown-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeHighlight]}>
                 {normalizeLatexDelimiters(turn.answer)}
               </ReactMarkdown>
             </div>

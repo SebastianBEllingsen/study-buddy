@@ -161,6 +161,75 @@
   padding: 0;
 }
 
+/* Syntax colors for a fenced block tagged with a language (```cpp etc.) —
+   rehype-highlight's hljs-* spans in every rendered view, and the same
+   --code-* tokens drive NoteEditor's codeHighlightStyle so Edit and Preview
+   color a block identically. A light and a dark value only, not one per
+   appearance theme: these hues read fine on any of their grounds. */
+:root {
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-number: #0550ae;
+  --code-comment: #6e7781;
+  --code-type: #953800;
+  --code-function: #8250df;
+  --code-meta: #116329;
+}
+.dark {
+  --code-keyword: #ff7b72;
+  --code-string: #a5d6ff;
+  --code-number: #79c0ff;
+  --code-comment: #8b949e;
+  --code-type: #ffa657;
+  --code-function: #d2a8ff;
+  --code-meta: #7ee787;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag {
+  color: var(--code-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: var(--code-string);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-variable.constant_ {
+  color: var(--code-number);
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--code-comment);
+  font-style: italic;
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-title.class_,
+.hljs-attr,
+.hljs-attribute {
+  color: var(--code-type);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name {
+  color: var(--code-function);
+}
+.hljs-meta,
+.hljs-tag {
+  color: var(--code-meta);
+}
+.hljs-addition {
+  color: var(--code-meta);
+}
+.hljs-deletion {
+  color: var(--code-keyword);
+}
+
 /* GFM tables (remark-gfm) — .markdown-body-table-wrap (NotePreview's own
    <table> override) gives this its horizontal scroll on narrow screens; the
    table itself just needs to actually look like a table, which a bare

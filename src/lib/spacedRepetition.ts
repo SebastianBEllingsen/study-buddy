@@ -1,4 +1,5 @@
 import type { FlashcardResult } from "./models";
+import type { FlashcardsContent } from "./types";
 
 export interface ScheduleState {
   easeFactor: number;
@@ -72,4 +73,16 @@ export function computeDueCardIndices(
     if (!entry || entry.due_at <= nowStr) due.push(i);
   }
   return due;
+}
+
+// A deck with reminders turned off never has anything due, whatever its
+// schedule says — every due count (item page, course page, dashboard) goes
+// through here rather than computeDueCardIndices directly.
+export function deckDueCardIndices(
+  schedule: { card_index: number; due_at: string }[],
+  content: FlashcardsContent,
+  now = new Date()
+): number[] {
+  if (content.reminders === false) return [];
+  return computeDueCardIndices(schedule, content.cards.length, now);
 }

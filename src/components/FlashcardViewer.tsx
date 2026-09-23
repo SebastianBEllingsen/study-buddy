@@ -8,7 +8,7 @@ import type { FlashcardResult } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
-import { MathText } from "@/components/MathText";
+import { CardFace } from "@/components/CardFace";
 import { tap } from "@/lib/haptics";
 
 // Colors span the same recall-confidence gradient used everywhere else in
@@ -150,6 +150,11 @@ export default function FlashcardViewer({
 
   if (!card) return null;
 
+  // Both faces share the card's height (the back is absolutely positioned
+  // over the front), so a card with media on either side reserves room for
+  // it up front instead of squeezing a back-side image into text height.
+  const hasMedia = !!(card.frontMedia?.length || card.backMedia?.length);
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -167,7 +172,7 @@ export default function FlashcardViewer({
             tap(10);
             setFlipped((f) => !f);
           }}
-          className="flip-card min-h-40 cursor-pointer justify-center overflow-visible px-6 py-8 text-lg outline-none hover:shadow-md focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className={`flip-card ${hasMedia ? "min-h-[55vh]" : "min-h-40"} cursor-pointer justify-center overflow-visible px-6 py-8 text-lg outline-none hover:shadow-md focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50`}
         >
           {/* Each face holds ONLY its own text, so it centers on its own —
               the "Click to..." caption used to live inside these faces and
@@ -175,14 +180,17 @@ export default function FlashcardViewer({
               looked inconsistent. The caption now lives entirely outside
               the flipping card (below), always in the same place. */}
           <CardContent className="flip-face px-0">
-            <div className="max-h-56 overflow-y-auto">
-              <MathText text={card.front} />
-            </div>
+            <CardFace text={card.front} media={card.frontMedia} active={!flipped} />
           </CardContent>
           <CardContent className="flip-face flip-face-back px-0">
-            <div className="max-h-56 overflow-y-auto">
-              <MathText text={card.back} />
-            </div>
+            {/* Like Anki's {{FrontSide}}: the back replays the front's media
+                (e.g. a video clip next to its answer). Mounted only once
+                revealed, so the clip isn't loaded twice before then. */}
+            <CardFace
+              text={card.back}
+              media={flipped ? [...(card.frontMedia ?? []), ...(card.backMedia ?? [])] : []}
+              active={flipped}
+            />
           </CardContent>
         </Card>
       </div>

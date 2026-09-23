@@ -34,3 +34,14 @@ export const localBlobStore: BlobStore = {
     await fs.rm(filePath, { force: true });
   },
 };
+
+// Bytes of a blob stored by localBlobStore, by key — null when it's gone.
+// Used where the server needs the file itself rather than its URL (e.g.
+// bundling a flashcard's image into an Anki export).
+export async function readLocalBlob(key: string): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(resolveBlobPath(key));
+  } catch {
+    return null;
+  }
+}

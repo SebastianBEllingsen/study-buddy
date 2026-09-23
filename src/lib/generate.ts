@@ -335,7 +335,9 @@ function mergeGeneratedContent(
         ],
       };
     case "flashcards":
+      // Spread first so deck-level settings (e.g. `reminders`) survive.
       return {
+        ...(existing as FlashcardsContent),
         cards: [...(existing as FlashcardsContent).cards, ...(delta as FlashcardsContent).cards],
       };
     case "notes":

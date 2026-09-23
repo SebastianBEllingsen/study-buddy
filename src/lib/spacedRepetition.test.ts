@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { computeNextSchedule, dueAtFromInterval, computeDueCardIndices, DEFAULT_SCHEDULE } from "./spacedRepetition";
+import { computeNextSchedule, dueAtFromInterval, computeDueCardIndices, deckDueCardIndices, DEFAULT_SCHEDULE } from "./spacedRepetition";
 
 describe("computeNextSchedule", () => {
   it("'again' resets interval/repetitions and lowers ease, floored at 1.3", () => {
@@ -113,5 +113,23 @@ describe("computeDueCardIndices", () => {
       // card_index 2 has no schedule row at all -> due
     ];
     expect(computeDueCardIndices(schedule, 3, now)).toEqual([0, 2]);
+  });
+});
+
+describe("deckDueCardIndices", () => {
+  const now = new Date("2026-01-10T00:00:00.000Z");
+  const schedule = [{ card_index: 0, due_at: "2026-01-01 00:00:00" }];
+  const cards = [
+    { front: "a", back: "a" },
+    { front: "b", back: "b" },
+  ];
+
+  it("defaults to reminders on", () => {
+    expect(deckDueCardIndices(schedule, { cards }, now)).toEqual([0, 1]);
+    expect(deckDueCardIndices(schedule, { cards, reminders: true }, now)).toEqual([0, 1]);
+  });
+
+  it("has nothing due when the deck's reminders are off", () => {
+    expect(deckDueCardIndices(schedule, { cards, reminders: false }, now)).toEqual([]);
   });
 });

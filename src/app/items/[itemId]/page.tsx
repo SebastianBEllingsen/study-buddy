@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { Download, Pencil, Sparkles } from "lucide-react";
+import { Bell, BellOff, Download, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedItem, QuizAttempt } from "@/lib/models";
 import type { QuizContent, FlashcardsContent, NotesContent } from "@/lib/types";
@@ -175,6 +175,34 @@ export default function ItemPage() {
     return true;
   }
 
+  // The deck's due-date reminders on/off (see FlashcardsContent.reminders) —
+  // its own PATCH + message rather than saveContent()'s generic "Saved".
+  // Stored only as `false`; turning them back on drops the key.
+  async function toggleDeckReminders() {
+    if (!detail) return;
+    const current = JSON.parse(detail.item.content_json) as FlashcardsContent;
+    const turningOff = current.reminders !== false;
+    const next: FlashcardsContent = { ...current };
+    if (turningOff) next.reminders = false;
+    else delete next.reminders;
+    const res = await fetch(`/api/items/${params.itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: next }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      toast.error(body.error ?? "Couldn't update reminders");
+      return;
+    }
+    await mutateItem();
+    toast.success(
+      turningOff
+        ? "Reminders off — this set's cards won't come due"
+        : "Reminders on — cards will come due again"
+    );
+  }
+
   // Quiet debounced autosave for notes content — unlike saveContent() above
   // (used for flashcards edits), this skips the toast and full item reload
   // on every keystroke, matching the Vault NoteEditor's own autosave feel.
@@ -244,6 +272,7 @@ export default function ItemPage() {
 
   const { item, attempts, bestScore } = detail;
   const content = JSON.parse(item.content_json);
+  const remindersOn = item.mode !== "flashcards" || (content as FlashcardsContent).reminders !== false;
   // attempts is only the most recent RECENT_QUIZ_ATTEMPTS_LIMIT (see
   // listRecentQuizAttemptsForItem) — fine for "last score" (the most recent
   // completed attempt is always in range) but bestScore comes from the
@@ -389,7 +418,30 @@ export default function ItemPage() {
 
       {item.mode === "flashcards" && (
         <>
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<a href={`/api/items/${item.id}/anki-export`} />}
+            >
+              <Download className="size-3.5" />
+              Export to Anki
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={remindersOn}
+              onClick={toggleDeckReminders}
+              title={
+                remindersOn
+                  ? "Cards in this set come due for review — click to turn off"
+                  : "Cards in this set never come due — click to turn on"
+              }
+            >
+              {remindersOn ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
+              {remindersOn ? "Reminders on" : "Reminders off"}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setEditingCards(true)}>
               <Pencil className="size-3.5" />
               Edit cards
@@ -404,7 +456,7 @@ export default function ItemPage() {
             open={editingCards}
             onOpenChange={setEditingCards}
             cards={(content as FlashcardsContent).cards}
-            onSave={(cards, removedIndices) => saveContent({ cards }, removedIndices)}
+            onSave={(cards, removedIndices) => saveContent({ ...content, cards }, removedIndices)}
           />
         </>
       )}

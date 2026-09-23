@@ -58,3 +58,6 @@ next-env.d.ts
 AGENTS.md
 CLAUDE.md
 .claude/
+
+# Personal, machine-local scripts and their output — never committed.
+/personal/

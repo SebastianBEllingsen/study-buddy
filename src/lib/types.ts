@@ -47,13 +47,32 @@ export interface QuizContent {
   questions: QuizQuestion[];
 }
 
+export type CardMediaType = "video" | "image" | "audio";
+
+// A video/image/audio clip shown on a card face above its text — only ever
+// set on imported decks (see lib/anki/apkgReader.ts); AI-generated cards
+// are text-only. `src` is an http(s) URL (media an imported deck links to
+// rather than bundles), one of this app's own /api/blobs/ URLs, or a data: URL —
+// see isSafeCardMediaSrc.
+export interface CardMedia {
+  type: CardMediaType;
+  src: string;
+}
+
 export interface Flashcard {
   front: string;
   back: string;
+  frontMedia?: CardMedia[];
+  backMedia?: CardMedia[];
 }
 
 export interface FlashcardsContent {
   cards: Flashcard[];
+  // Due-date reminders for the whole deck. Absent means on (the default) —
+  // only ever stored as `false`, for decks the student doesn't want
+  // scheduled: none of their cards count as due anywhere (see
+  // deckDueCardIndices), though they can still be studied via "review all".
+  reminders?: boolean;
 }
 
 export interface NotesContent {

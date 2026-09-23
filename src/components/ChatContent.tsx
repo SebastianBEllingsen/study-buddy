@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import { toast } from "sonner";
 import { ArrowUp, Bot, BookOpen, FileText, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
 import type { ChatAttachment, ChatConversation, ChatMessage, CourseSummary } from "@/lib/models";
@@ -531,7 +532,7 @@ export default function ChatContent({
                   )}
                   {m.role === "assistant" ? (
                     <div className="markdown-body">
-                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeHighlight]}>
                         {normalizeLatexDelimiters(m.content)}
                       </ReactMarkdown>
                     </div>

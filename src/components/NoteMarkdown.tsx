@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import { normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 import type { LinkTargets } from "@/lib/models";
 import { buildNoteLinkHref, parseNoteLinks, resolveNoteLinkTarget } from "@/lib/noteLinks";
@@ -106,7 +107,7 @@ export default function NoteMarkdown({
       // Preview. This turns every source newline into a real line break,
       // matching what you actually typed.
       remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
+      rehypePlugins={[rehypeKatex, rehypeHighlight]}
       // react-markdown sanitizes every href/src through its own built-in
       // urlTransform by default, allow-listing only http(s)/irc(s)/
       // mailto/xmpp — a studybuddy-image: reference isn't a URL a browser

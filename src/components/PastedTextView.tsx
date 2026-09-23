@@ -3,6 +3,7 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import Linkify from "./Linkify";
 import { normalizeLatexDelimiters } from "@/lib/mathSanitizer";
 
@@ -31,7 +32,7 @@ function MarkdownPastedText({ text }: { text: string }) {
     <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeKatex, rehypeHighlight]}
         urlTransform={allowDataImages}
       >
         {normalizeLatexDelimiters(text)}
