@@ -29,12 +29,16 @@ export function ImageLibraryDialog({
   kind,
   onSelect,
   onUpload,
+  imageLabel,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   kind: UploadedImageKind;
   onSelect: (url: string) => void;
   onUpload?: () => void;
+  // What the picked image is used as, in the title ("Change link icon
+  // image"); defaults to the kind's own name (badge, banner, backdrop).
+  imageLabel?: string;
 }) {
   const [images, setImages] = useState<UploadedImage[] | null>(null);
 
@@ -83,7 +87,7 @@ export function ImageLibraryDialog({
 
   const aspectClass = kind === "cover" ? "aspect-[3.2/1]" : kind === "background" ? "aspect-[2.1/1]" : "aspect-square";
   const gridClass = kind === "icon" ? "grid-cols-4 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-3";
-  const kindLabel = kind === "cover" ? "banner" : kind === "background" ? "backdrop" : "badge";
+  const kindLabel = imageLabel ?? (kind === "cover" ? "banner" : kind === "background" ? "backdrop" : "badge");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

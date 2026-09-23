@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -60,6 +60,10 @@ import {
 } from "@/lib/dashboardLinks";
 import { LINK_BRANDS, linkBrand } from "@/lib/linkIcons";
 import { relativeLuminance } from "@/lib/headerTint";
+import { ImageCropDialog } from "@/components/ImageCropDialog";
+import { ImageLibraryDialog } from "@/components/ImageLibraryDialog";
+import { ICON_ASPECT, ICON_OUTPUT } from "@/lib/imageCropPresets";
+import { describeUploadError, uploadImage } from "@/lib/uploadImage";
 
 const GENERIC_ICONS: Record<GenericLinkIcon, LucideIcon> = {
   globe: Globe,
@@ -111,6 +115,14 @@ function BrandLogo({ brandKey, className }: { brandKey: string; className?: stri
 // Draws a link's icon: see DashboardLink.icon for the forms it can take.
 export function LinkIcon({ icon, url, className }: { icon: string; url: string; className?: string }) {
   if (icon.startsWith("brand:")) return <BrandLogo brandKey={icon.slice(6)} className={className} />;
+  if (icon.startsWith("image:")) {
+    return (
+      <span
+        className={cn("block shrink-0 rounded-sm bg-contain bg-center bg-no-repeat", className)}
+        style={{ backgroundImage: `url(${JSON.stringify(icon.slice(6))})` }}
+      />
+    );
+  }
   if (icon.startsWith("icon:")) {
     const Icon = GENERIC_ICONS[icon.slice(5) as GenericLinkIcon] ?? Globe;
     return <Icon className={cn("text-muted-foreground", className)} />;
@@ -350,14 +362,33 @@ export function LinksEditorDialog({ open, onOpenChange }: { open: boolean; onOpe
   );
 }
 
-type PickerTab = "sites" | "icons" | "emoji";
+type PickerTab = "sites" | "icons" | "emoji" | "upload";
 
 function IconPicker({ value, url, onChange }: { value: string; url: string; onChange: (icon: string) => void }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PickerTab>("sites");
   const [query, setQuery] = useState("");
   const [emoji, setEmoji] = useState("");
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const normalized = normalizeLinkUrl(url) ?? "";
+
+  // Same square crop and storage as a course badge image, and recorded in
+  // the same "previous uploads" library so it can be reused.
+  async function handleCropped(blob: Blob) {
+    try {
+      const uploaded = await uploadImage(blob, "icon");
+      fetch("/api/uploaded-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "icon", url: uploaded }),
+      }).catch(() => {});
+      onChange(`image:${uploaded}`);
+    } catch (err) {
+      toast.error(describeUploadError(err, "Couldn't upload that image"));
+    }
+  }
 
   function pick(icon: string) {
     onChange(icon);
@@ -383,9 +414,9 @@ function IconPicker({ value, url, onChange }: { value: string; url: string; onCh
           >
             Auto
           </Button>
-          {(["sites", "icons", "emoji"] as const).map((t) => (
+          {(["sites", "icons", "emoji", "upload"] as const).map((t) => (
             <Button key={t} variant={tab === t ? "secondary" : "ghost"} size="sm" onClick={() => setTab(t)}>
-              {t === "sites" ? "Sites" : t === "icons" ? "Icons" : "Emoji"}
+              {PICKER_TAB_LABELS[t]}
             </Button>
           ))}
         </div>
@@ -433,6 +464,34 @@ function IconPicker({ value, url, onChange }: { value: string; url: string; onCh
             })}
           </div>
         )}
+        {tab === "upload" && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  fileInputRef.current?.click();
+                }}
+              >
+                <ImageIcon className="size-3.5" />
+                Upload image
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  setLibraryOpen(true);
+                }}
+              >
+                Previous uploads
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Cropped to a square. Transparent backgrounds are kept.</p>
+          </div>
+        )}
         {tab === "emoji" && (
           <form
             className="flex items-center gap-2"
@@ -454,6 +513,46 @@ function IconPicker({ value, url, onChange }: { value: string; url: string; onCh
           </form>
         )}
       </PopoverContent>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) setCropFile(file);
+          e.target.value = "";
+        }}
+      />
+      <ImageCropDialog
+        open={cropFile !== null}
+        onOpenChange={(next) => {
+          if (!next) setCropFile(null);
+        }}
+        file={cropFile}
+        aspect={ICON_ASPECT}
+        outputWidth={ICON_OUTPUT}
+        outputHeight={ICON_OUTPUT}
+        outputFormat="png"
+        uploadKind="icon"
+        title="Position link icon"
+        onCropped={handleCropped}
+      />
+      <ImageLibraryDialog
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        kind="icon"
+        imageLabel="link icon"
+        onSelect={(picked) => onChange(`image:${picked}`)}
+        onUpload={() => fileInputRef.current?.click()}
+      />
     </Popover>
   );
 }
+
+const PICKER_TAB_LABELS: Record<PickerTab, string> = {
+  sites: "Sites",
+  icons: "Icons",
+  emoji: "Emoji",
+  upload: "Upload",
+};

@@ -38,6 +38,7 @@ import { parseAppWallpaper, type AppWallpaperSettings } from "./appWallpaper";
 import { parseHeaderTintMode, type HeaderTintMode } from "./headerTint";
 import { parseDashboardLinks, type DashboardLink } from "./dashboardLinks";
 import { LINK_BRAND_KEYS } from "./linkIcons";
+import { isValidIconImage } from "./dataUrlImage";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
@@ -494,7 +495,10 @@ export async function getAppSettings(): Promise<AppSettings> {
     folderChips: parseFolderChipSettings(row?.folder_chips) ?? DEFAULT_FOLDER_CHIPS,
     appWallpaper: parseAppWallpaper(row?.app_wallpaper),
     headerTint: parseHeaderTintMode(row?.header_tint),
-    dashboardLinks: parseDashboardLinks(row?.dashboard_links, LINK_BRAND_KEYS),
+    dashboardLinks: parseDashboardLinks(row?.dashboard_links, {
+      brandKeys: LINK_BRAND_KEYS,
+      isValidImageUrl: isValidIconImage,
+    }),
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
@@ -950,8 +954,8 @@ export async function getUploadedImage(id: number): Promise<UploadedImage | unde
 }
 
 // True if `url` is still the current value of any course's cover/icon/
-// background image, the app's branding icon or dashboard backdrop, or any
-// uploaded_images library row — checked before actually deleting a blob
+// background image, the app's branding icon or dashboard backdrop, a
+// dashboard link's uploaded icon, or any uploaded_images library row — checked before actually deleting a blob
 // (see src/lib/blobStorage/cleanup.ts) so replacing one field's image can
 // never delete a blob that's still in use somewhere else. The same URL
 // legitimately ends up in more than one place: every crop-and-save in
@@ -971,7 +975,11 @@ export async function isImageUrlReferenced(url: string): Promise<boolean> {
     getAppSettings(),
   ]);
   if (courseRows.length > 0 || uploadedRows.length > 0) return true;
-  return settings.appIconImage === url || settings.dashboardBackgroundImage === url;
+  return (
+    settings.appIconImage === url ||
+    settings.dashboardBackgroundImage === url ||
+    settings.dashboardLinks.some((link) => link.icon === `image:${url}`)
+  );
 }
 
 // True if any note embeds this uploaded_images row via a

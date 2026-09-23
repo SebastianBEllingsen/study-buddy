@@ -1,14 +1,20 @@
 // The dashboard's Links widget: the user's own shortcuts, each with a title,
 // a URL and an icon. Stored as JSON in app_settings.dashboard_links; edited
-// from the widget itself (components/LinksWidget.tsx).
+// from the dashboard's Customize dialog (components/LinksWidget.tsx).
+//
+// Imported by client components too, so this module must stay free of
+// server-only imports: whether an uploaded icon's URL is acceptable is
+// checked by a function the server passes in (isValidIconImage from
+// lib/dataUrlImage.ts, which pulls in blob storage).
 
 export interface DashboardLink {
   id: string;
   title: string;
   url: string;
   // "auto" (a known site's logo, detected from the URL, else a globe),
-  // "brand:<key>" (see lib/linkIcons.ts), "icon:<key>" (GENERIC_LINK_ICONS)
-  // or "emoji:<emoji>".
+  // "brand:<key>" (see lib/linkIcons.ts), "icon:<key>" (GENERIC_LINK_ICONS),
+  // "emoji:<emoji>" or "image:<url>" (an uploaded picture, same kinds of
+  // URL a course badge image accepts).
   icon: string;
 }
 
@@ -71,10 +77,16 @@ export function titleFromUrl(url: string): string {
   }
 }
 
-function isValidIcon(icon: string, brandKeys: ReadonlySet<string>): boolean {
+export interface LinkIconRules {
+  brandKeys: ReadonlySet<string>;
+  isValidImageUrl: (url: string) => boolean;
+}
+
+function isValidIcon(icon: string, rules: LinkIconRules): boolean {
   if (icon === "auto") return true;
-  if (icon.startsWith("brand:")) return brandKeys.has(icon.slice(6));
+  if (icon.startsWith("brand:")) return rules.brandKeys.has(icon.slice(6));
   if (icon.startsWith("icon:")) return (GENERIC_LINK_ICONS as readonly string[]).includes(icon.slice(5));
+  if (icon.startsWith("image:")) return icon.length > 6 && rules.isValidImageUrl(icon.slice(6));
   if (icon.startsWith("emoji:")) {
     const emoji = icon.slice(6);
     return emoji.length > 0 && [...emoji].length <= 8;
@@ -84,7 +96,7 @@ function isValidIcon(icon: string, brandKeys: ReadonlySet<string>): boolean {
 
 // Validates a stored value or an API body. Broken entries are dropped
 // rather than failing the whole list; an unknown icon falls back to "auto".
-export function normalizeDashboardLinks(value: unknown, brandKeys: ReadonlySet<string>): DashboardLink[] | null {
+export function normalizeDashboardLinks(value: unknown, rules: LinkIconRules): DashboardLink[] | null {
   if (!Array.isArray(value)) return null;
   const links: DashboardLink[] = [];
   const seen = new Set<string>();
@@ -101,19 +113,32 @@ export function normalizeDashboardLinks(value: unknown, brandKeys: ReadonlySet<s
       id,
       title: cleanTitle || titleFromUrl(normalizedUrl),
       url: normalizedUrl,
-      icon: typeof icon === "string" && isValidIcon(icon, brandKeys) ? icon : "auto",
+      icon: typeof icon === "string" && isValidIcon(icon, rules) ? icon : "auto",
     });
   }
   return links;
 }
 
-export function parseDashboardLinks(raw: string | null | undefined, brandKeys: ReadonlySet<string>): DashboardLink[] {
+export function parseDashboardLinks(raw: string | null | undefined, rules: LinkIconRules): DashboardLink[] {
   if (!raw) return [];
   try {
-    return normalizeDashboardLinks(JSON.parse(raw), brandKeys) ?? [];
+    return normalizeDashboardLinks(JSON.parse(raw), rules) ?? [];
   } catch {
     return [];
   }
+}
+
+// The uploaded picture a link's icon points at, if it is one — so the
+// image's storage can be cleaned up once no link uses it any more.
+export function linkIconImageUrl(icon: string): string | null {
+  return icon.startsWith("image:") ? icon.slice(6) : null;
+}
+
+// Uploaded pictures `before` used that `after` no longer does.
+export function droppedLinkIconImages(before: DashboardLink[], after: DashboardLink[]): string[] {
+  const still = new Set(after.map((l) => linkIconImageUrl(l.icon)).filter(Boolean));
+  const dropped = before.map((l) => linkIconImageUrl(l.icon)).filter((url): url is string => !!url && !still.has(url));
+  return [...new Set(dropped)];
 }
 
 // The known site a URL belongs to, by hostname — the most specific match

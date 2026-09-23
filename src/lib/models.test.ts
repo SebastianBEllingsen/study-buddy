@@ -72,6 +72,7 @@ const {
   setHeaderTint,
   setDashboardLinks,
   setHomeWidgets,
+  isImageUrlReferenced,
 } = await import("./models");
 
 beforeEach(() => {
@@ -689,6 +690,15 @@ describe("course page display settings", () => {
     await setDashboardLinks(links);
     expect((await getAppSettings()).dashboardLinks).toEqual(links);
     await setDashboardLinks([]);
+  });
+
+  it("counts an uploaded link icon as in use, so its image is never deleted from under it", async () => {
+    const url = "/api/blobs/icon/link-icon.png";
+    expect(await isImageUrlReferenced(url)).toBe(false);
+    await setDashboardLinks([{ id: "a", title: "Site", url: "https://example.org/", icon: `image:${url}` }]);
+    expect(await isImageUrlReferenced(url)).toBe(true);
+    await setDashboardLinks([]);
+    expect(await isImageUrlReferenced(url)).toBe(false);
   });
 
   it("adds the Links widget hidden to a dashboard saved before it existed", async () => {
