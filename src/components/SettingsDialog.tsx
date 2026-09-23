@@ -332,7 +332,7 @@ function AiSection() {
       )}
 
       {(backend === "claude_code" || backend === "codex_cli") && (
-        <label className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm">
+        <label className="flex items-center justify-between gap-3 rounded-md border border-amber/30 bg-amber/10 p-2 text-sm">
           <span className="flex flex-col gap-0.5">
             <span className="flex items-center gap-1.5">
               Full tool access for this CLI backend
@@ -342,7 +342,7 @@ function AiSection() {
                 can read images (Crop &amp; Ask, chat attachments).
               </HelpTooltip>
             </span>
-            <span className="text-xs text-amber-600 dark:text-amber-400">
+            <span className="text-xs text-amber">
               Only enable if you trust the material you feed it — a malicious PDF could try to
               abuse these tools.
             </span>

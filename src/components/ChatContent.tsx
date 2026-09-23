@@ -414,25 +414,28 @@ export default function ChatContent({
           </Button>
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
             {conversations.map((c) => (
+              // Select and delete are sibling buttons rather than one nested
+              // in the other. Delete shows on hover, while anything in the
+              // row has keyboard focus, and always on touch screens.
               <div
                 key={c.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => selectConversation(c.id)}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && selectConversation(c.id)}
-                className={`group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-xs ${
+                className={`group flex items-center rounded-md text-xs ${
                   c.id === activeId ? "bg-muted" : "hover:bg-muted/60"
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{c.title ?? "New chat"}</span>
                 <button
                   type="button"
-                  aria-label="Delete conversation"
-                  className="shrink-0 opacity-0 hover:text-destructive group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteTargetId(c.id);
-                  }}
+                  onClick={() => selectConversation(c.id)}
+                  aria-current={c.id === activeId ? "true" : undefined}
+                  className="min-w-0 flex-1 truncate rounded-md py-1.5 pl-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {c.title ?? "New chat"}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete ${c.title ?? "conversation"}`}
+                  className="shrink-0 rounded-md p-1.5 text-muted-foreground opacity-0 outline-none group-focus-within:opacity-100 group-hover:opacity-100 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring [@media(hover:none)]:opacity-100"
+                  onClick={() => setDeleteTargetId(c.id)}
                 >
                   <Trash2 className="size-3" />
                 </button>
@@ -512,7 +515,7 @@ export default function ChatContent({
                     ) : (
                       <div
                         key={i}
-                        className="mb-1.5 flex items-center gap-1.5 rounded-md bg-black/10 px-2 py-1 text-xs"
+                        className="mb-1.5 flex items-center gap-1.5 rounded-md bg-current/10 px-2 py-1 text-xs"
                       >
                         <FileText className="size-3.5 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">{a.filename}</span>

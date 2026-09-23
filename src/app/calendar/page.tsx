@@ -270,12 +270,13 @@ function EventDialog({
                 {event.htmlLink && (
                   <Button
                     variant="ghost"
-                    size="icon-sm"
-                    aria-label="Open in Google Calendar"
+                    size="sm"
+                    className="text-muted-foreground"
                     nativeButton={false}
                     render={<Link href={event.htmlLink} target="_blank" rel="noopener noreferrer" />}
                   >
-                    <ExternalLink className="size-3.5 text-muted-foreground" />
+                    <ExternalLink />
+                    Google Calendar
                   </Button>
                 )}
               </div>
@@ -306,8 +307,19 @@ function DeleteEventButton({ onConfirm }: { onConfirm: () => Promise<void> | voi
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger render={<Button variant="ghost" size="icon-sm" />} aria-label="Delete event">
-        <Trash2 className="size-3.5 text-muted-foreground" />
+      {/* Labelled and colored as destructive, not a bare icon: it also
+          deletes the event from Google Calendar. */}
+      <AlertDialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          />
+        }
+      >
+        <Trash2 />
+        Delete
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -453,7 +465,7 @@ function MonthGrid({
                 className={cn(
                   "inline-flex size-5 items-center justify-center rounded-full text-xs",
                   !inMonth && "text-muted-foreground",
-                  isToday && "bg-focus font-medium text-white"
+                  isToday && "bg-focus font-medium text-background"
                 )}
               >
                 {d.getDate()}

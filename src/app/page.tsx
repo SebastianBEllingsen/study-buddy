@@ -1328,7 +1328,10 @@ function HomePageContent() {
                 className={`col-start-1 row-start-1 self-start bg-gradient-to-b ${stickerBackdrop ? "from-transparent" : "from-black/10"} via-background/70 ${fadeTo}`}
                 style={{ aspectRatio: BACKGROUND_ASPECT }}
               />
-              <div className="relative col-start-1 row-start-1 mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
+              <div
+                data-on-backdrop
+                className="relative col-start-1 row-start-1 mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8"
+              >
                 {backdropContent}
               </div>
             </div>
@@ -1347,7 +1350,7 @@ function HomePageContent() {
               <div
                 className={`absolute inset-0 bg-gradient-to-b ${stickerBackdrop ? "from-transparent" : "from-black/10"} via-background/70 ${fadeTo}`}
               />
-              <div className="relative mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
+              <div data-on-backdrop className="relative mx-auto max-w-5xl space-y-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8">
                 {backdropContent}
               </div>
             </>
@@ -1356,7 +1359,10 @@ function HomePageContent() {
       ) : (
         // "overlap" (or no banner at all, where this negative margin is
         // simply never applied) — see the comment on the banner block above.
-        <div className={hasBanner ? "relative -mt-12 space-y-6 sm:-mt-16" : "space-y-6"}>
+        <div
+          data-on-backdrop={hasBanner || undefined}
+          className={hasBanner ? "relative -mt-12 space-y-6 sm:-mt-16" : "space-y-6"}
+        >
           {dashboardSection}
           {coursesSection}
           {bottomWidgetsSection}

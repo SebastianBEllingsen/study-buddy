@@ -2245,6 +2245,29 @@ html[data-wallpaper] [data-slot="detached-page"] {
   background-color: transparent;
 }
 
+/* Text laid straight over a backdrop picture (the dashboard's backdrop, a
+   course page's header). The picture can be dark in one place and light in
+   another, so rather than picking one text color, the theme's own text
+   colors get a soft halo in the theme's background color — readable over
+   any part of any picture, in light and dark themes alike. Inherited, so
+   things with their own surface (filled buttons, raised cards) opt out. */
+[data-on-backdrop] {
+  text-shadow:
+    0 0 1px var(--background),
+    0 0 3px var(--background),
+    0 0 8px color-mix(in oklch, var(--background) 85%, transparent),
+    0 0 16px color-mix(in oklch, var(--background) 65%, transparent),
+    0 0 28px color-mix(in oklch, var(--background) 45%, transparent);
+}
+[data-on-backdrop] :is(
+    [data-slot="button"][data-variant="default"],
+    [data-slot="button"][data-variant="destructive"],
+    [data-slot="button"][data-variant="secondary"],
+    [data-slot="card"][data-elevation="raised"]
+  ) {
+  text-shadow: none;
+}
+
 /* The header tinted by the page's backdrop picture (lib/useHeaderReflection.ts):
    a blurred, faded copy of it between the header's own background and its
    content, so the colors carry up into the header without the picture's

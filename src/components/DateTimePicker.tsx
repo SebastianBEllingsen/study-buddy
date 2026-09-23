@@ -203,7 +203,7 @@ export function DateTimePicker({
                     "mx-auto flex size-8 items-center justify-center rounded-full text-sm transition-colors hover:bg-muted",
                     !inMonth && "text-muted-foreground/50",
                     isToday && !isSelected && "ring-1 ring-inset ring-focus",
-                    isSelected && "bg-focus font-medium text-white hover:bg-focus"
+                    isSelected && "bg-focus font-medium text-background hover:bg-focus"
                   )}
                 >
                   {d.getDate()}

@@ -95,7 +95,7 @@ function MediaClip({ media, active }: { media: CardMedia; active: boolean }) {
         loop
         playsInline
         preload="auto"
-        className="max-h-[45vh] min-h-0 w-full flex-1 rounded-md bg-black/5 object-contain"
+        className="max-h-[45vh] min-h-0 w-full flex-1 rounded-md bg-muted object-contain"
       />
       <button
         type="button"

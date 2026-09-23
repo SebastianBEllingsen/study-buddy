@@ -4,22 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { ArrowLeft, Download, Trash2, X } from "lucide-react";
+import { ArrowLeft, Download, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { RowActionsMenu } from "@/components/RowActionsMenu";
 import type { Canvas, LinkTargets } from "@/lib/models";
 import { canvasFileName, serializeCanvas, type CanvasData } from "@/lib/canvas";
 import CanvasBoard from "./CanvasBoard";
@@ -40,7 +30,6 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
   );
   const [title, setTitle] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [deleting, setDeleting] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingFields = useRef<{ title?: string; data?: CanvasData }>({});
 
@@ -136,20 +125,15 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
   }
 
   async function handleDelete() {
-    setDeleting(true);
-    try {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-      pendingFields.current = {};
-      const res = await fetch(`/api/canvases/${canvasId}`, { method: "DELETE" });
-      if (!res.ok) {
-        toast.error("Couldn't delete canvas");
-        return;
-      }
-      router.push(detail ? `/courses/${detail.canvas.course_id}` : "/");
-    } finally {
-      setDeleting(false);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    pendingFields.current = {};
+    const res = await fetch(`/api/canvases/${canvasId}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error("Couldn't delete canvas");
+      return;
     }
+    router.push(detail ? `/courses/${detail.canvas.course_id}` : "/");
   }
 
   if (notFound) {
@@ -196,35 +180,16 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
         <span className="shrink-0 text-xs text-muted-foreground">
           {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Export as .canvas file"
-          title="Export as .canvas file (opens in Obsidian too)"
-          onClick={handleExport}
-        >
-          <Download className="size-3.5 text-muted-foreground" />
-        </Button>
-        <AlertDialog>
-          <AlertDialogTrigger render={<Button variant="ghost" size="icon-sm" />} aria-label="Delete canvas">
-            <Trash2 className="size-3.5 text-muted-foreground" />
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete this canvas?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This can&apos;t be undone. Notes and documents on it aren&apos;t affected — only the board itself is
-                deleted.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleDelete}>
-                {deleting ? "Deleting…" : "Delete canvas"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <RowActionsMenu
+          ariaLabel="Canvas actions"
+          actions={[{ label: "Export as .canvas file", icon: Download, onSelect: handleExport }]}
+          deleteLabel="Delete canvas"
+          deleteDescription="This can't be undone. Notes and documents on it aren't affected — only the board itself is deleted."
+          onDelete={handleDelete}
+        />
+        {/* Close leaves the canvas rather than acting on it — past a
+            divider, same as a note's header. */}
+        <div className="mx-1 h-5 w-px shrink-0 bg-border" />
         <Button variant="ghost" size="icon-sm" aria-label="Close canvas" onClick={() => router.push(courseHref)}>
           <X className="size-3.5 text-muted-foreground" />
         </Button>

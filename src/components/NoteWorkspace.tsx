@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { ArrowLeft, ExternalLink, GitFork, Link2, Trash2, X } from "lucide-react";
+import { ArrowLeft, ExternalLink, GitFork, Link2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { CanvasBacklink, Note, NoteBacklink } from "@/lib/models";
 import { stripNoteLinkSyntax } from "@/lib/noteLinks";
@@ -15,17 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ICON_CHOICES } from "@/lib/pickerChoices";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { RowActionsMenu } from "@/components/RowActionsMenu";
 
 interface NoteDetail {
   note: Note;
@@ -67,7 +57,6 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   // rendered markdown, not an editable field) — the title above it should
   // follow suit rather than staying editable while everything below it isn't.
   const [noteMode, setNoteMode] = useState<"edit" | "preview">("edit");
-  const [deleting, setDeleting] = useState(false);
   const editorRef = useRef<NoteEditorHandle>(null);
   // Memoized on the primitive fields — NoteEditor rebuilds its CodeMirror
   // extensions whenever this object's identity changes.
@@ -223,25 +212,20 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   }
 
   async function handleDelete() {
-    setDeleting(true);
-    try {
-      const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
-      if (!res.ok) {
-        toast.error("Couldn't delete note");
-        return;
-      }
-      if (detached) {
-        // Nothing left to show in a standalone window — same instinct as
-        // closing a document's detached window after it's gone, though
-        // there's no equivalent there since documents can't be deleted from
-        // the viewer. Silently no-ops if the browser won't allow a
-        // script-closed window (e.g. it wasn't opened via window.open).
-        window.close();
-      } else {
-        router.push(detail ? `/courses/${detail.note.course_id}` : "/");
-      }
-    } finally {
-      setDeleting(false);
+    const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error("Couldn't delete note");
+      return;
+    }
+    if (detached) {
+      // Nothing left to show in a standalone window — same instinct as
+      // closing a document's detached window after it's gone, though
+      // there's no equivalent there since documents can't be deleted from
+      // the viewer. Silently no-ops if the browser won't allow a
+      // script-closed window (e.g. it wasn't opened via window.open).
+      window.close();
+    } else {
+      router.push(detail ? `/courses/${detail.note.course_id}` : "/");
     }
   }
 
@@ -285,38 +269,22 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
             {courseName ?? "Course"}
           </Link>
         )}
-        {/* Save status, then the note's actions as one tight run of
-            identical ghost icon buttons, then — past a divider, like the app
-            header's — close, which leaves the note rather than acting on it. */}
+        {/* Save status, syntax help, the note's own actions behind "⋯"
+            (delete included, with its confirm step), then — past a divider,
+            like the app header's — close, which leaves the note rather than
+            acting on it. */}
         <div className="flex items-center gap-1">
           <span className="mr-2 text-xs text-muted-foreground">
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
           </span>
           <NoteSyntaxHelp />
-          {!detached && (
-            <Button variant="ghost" size="icon-sm" aria-label="Detach note" onClick={handleDetach}>
-              <ExternalLink className="size-3.5 text-muted-foreground" />
-            </Button>
-          )}
-          <AlertDialog>
-            <AlertDialogTrigger render={<Button variant="ghost" size="icon-sm" />} aria-label="Delete note">
-              <Trash2 className="size-3.5 text-muted-foreground" />
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete this note?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This can&apos;t be undone. Links to it from other notes will point nowhere.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleDelete}>
-                  {deleting ? "Deleting…" : "Delete note"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <RowActionsMenu
+            ariaLabel="Note actions"
+            actions={detached ? [] : [{ label: "Open in new window", icon: ExternalLink, onSelect: handleDetach }]}
+            deleteLabel="Delete note"
+            deleteDescription="This can't be undone. Links to it from other notes will point nowhere."
+            onDelete={handleDelete}
+          />
           {/* The "← Course" link above doubles as a way back, but it reads
               as "go to this course" rather than "close this note" — this
               is the same destination, just in the conventional top-right

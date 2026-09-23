@@ -58,7 +58,7 @@ import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
-import { RowActionsMenu } from "@/components/RowActionsMenu";
+import { RowActionsMenu, type RowAction } from "@/components/RowActionsMenu";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -137,6 +137,25 @@ const MODE_META: Record<GenerationMode, { icon: LucideIcon; borderClass: string;
   flashcards: { icon: Layers, borderClass: "border-b-2 border-b-sage", textClass: "text-sage" },
 };
 
+// What every "+" menu on this page offers — the Folders header's, each
+// folder's, and "On this page"'s — so they list the same things in the same
+// order and only differ in where the new content ends up.
+type AddKind = "upload" | "paste" | "note";
+
+function addContentActions(onAdd: (kind: AddKind) => void): RowAction[] {
+  return [
+    { label: "Upload files", icon: Upload, onSelect: () => onAdd("upload") },
+    { label: "Paste text", icon: ClipboardPaste, onSelect: () => onAdd("paste") },
+    { label: "New note", icon: StickyNote, onSelect: () => onAdd("note") },
+  ];
+}
+
+const DELETE_ITEM_LABEL: Record<GenerationMode, string> = {
+  notes: "Delete notes",
+  quiz: "Delete quiz",
+  flashcards: "Delete flashcards",
+};
+
 const ALL_MATERIAL = "all";
 const NEW_FOLDER_SENTINEL = "__new__";
 // Stands in for filing something directly on the course page rather than
@@ -189,57 +208,6 @@ function useCollapsed(key: string, defaultOpen = true) {
   }
 
   return [open, onOpenChange] as const;
-}
-
-// Documents and generated items previously deleted on a single unconfirmed
-// click — unlike courses/folders, which already confirm. Both represent
-// real, possibly hours-of-work content (a generated quiz/flashcard set, an
-// uploaded PDF), so they get the same confirm-before-delete treatment here.
-function DeleteRowButton({
-  itemLabel,
-  ariaLabel,
-  onConfirm,
-}: {
-  itemLabel: string;
-  ariaLabel: string;
-  onConfirm: () => Promise<void> | void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  async function handleConfirm() {
-    setDeleting(true);
-    try {
-      await onConfirm();
-      setOpen(false);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger
-        render={<Button variant="ghost" size="icon-sm" />}
-        aria-label={ariaLabel}
-        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-      >
-        <Trash2 className="size-3.5 text-muted-foreground" />
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {itemLabel}?</AlertDialogTitle>
-          <AlertDialogDescription>This can&apos;t be undone.</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleConfirm}>
-            {deleting ? "Deleting…" : "Delete"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
 }
 
 function FolderSelect({
@@ -558,6 +526,8 @@ function GeneratedItemList({
   editMode,
   selected,
   onToggleSelect,
+  folders,
+  onMove,
   onDelete,
   onReorder,
 }: {
@@ -568,6 +538,8 @@ function GeneratedItemList({
   editMode: boolean;
   selected: Set<number>;
   onToggleSelect: (itemId: number) => void;
+  folders: Folder[];
+  onMove: (itemId: number, folderId: number | null) => void;
   onDelete: (itemId: number) => void;
   onReorder: (folderId: number | null, orderedIds: number[]) => void;
 }) {
@@ -660,11 +632,21 @@ function GeneratedItemList({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <DeleteRowButton
-              itemLabel={item.title}
-              ariaLabel={`Delete ${item.title}`}
-              onConfirm={() => onDelete(item.id)}
-            />
+            <RowActionsMenu
+              ariaLabel={`Actions for ${item.title}`}
+              deleteLabel={DELETE_ITEM_LABEL[item.mode]}
+              onDelete={() => onDelete(item.id)}
+            >
+              <div className="space-y-1.5 p-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Move to</p>
+                <FolderSelect
+                  folders={folders}
+                  value={item.folder_id}
+                  onChange={(folderId) => onMove(item.id, folderId)}
+                  ariaLabel={`Move ${item.title} to folder`}
+                />
+              </div>
+            </RowActionsMenu>
           </div>
         </li>
         );
@@ -736,16 +718,9 @@ function NoteList({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Open ${note.title} in a new window`}
-              onClick={() => detachNote(note.id)}
-            >
-              <ExternalLink className="size-3.5 text-muted-foreground" />
-            </Button>
             <RowActionsMenu
               ariaLabel={`Actions for ${note.title}`}
+              actions={[{ label: "Open in new window", icon: ExternalLink, onSelect: () => detachNote(note.id) }]}
               deleteLabel="Delete note"
               onDelete={() => onDelete(note.id)}
             >
@@ -823,7 +798,7 @@ function FolderCard({
   onMoveNote: (noteId: number, folderId: number | null) => void;
   onDeleteNote: (noteId: number) => void;
   onReorderNotes: (folderId: number | null, orderedIds: number[]) => void;
-  onAddToFolder: (folderId: number, kind: "upload" | "note") => void;
+  onAddToFolder: (folderId: number, kind: AddKind) => void;
   onDeleteFolder: (folderId: number) => Promise<void>;
   onRenameFolder: (folderId: number, name: string) => Promise<void>;
   onCustomizeFolder: (folderId: number, fields: { icon?: string | null; color?: string | null }) => void;
@@ -1070,9 +1045,7 @@ function FolderCard({
                   ariaLabel={`Add to ${folder.name}`}
                   triggerIcon={Plus}
                   actions={[
-                    { label: "Upload files", icon: Upload, onSelect: () => onAddToFolder(folder.id, "upload") },
-                    { label: "Import Anki deck", icon: Layers, onSelect: () => onAddToFolder(folder.id, "upload") },
-                    { label: "New note", icon: StickyNote, onSelect: () => onAddToFolder(folder.id, "note") },
+                    ...addContentActions((kind) => onAddToFolder(folder.id, kind)),
                     // Nesting is one level deep — a subfolder can't have its
                     // own subfolder, so this option only shows up top-level.
                     ...(isSubfolder
@@ -1132,6 +1105,8 @@ function FolderCard({
                     editMode={editMode}
                     selected={selectedItems}
                     onToggleSelect={onToggleSelectItem}
+                    folders={folders}
+                    onMove={onMoveItem}
                     onDelete={onDeleteItem}
                     onReorder={onReorderItems}
                   />
@@ -1548,15 +1523,21 @@ export default function CoursePage() {
     setNewFolderOpen(true);
   }
 
-  // Pre-scopes the Upload/New note dialogs (which otherwise default to
-  // whatever destination was last picked) to one specific folder — used by
-  // that folder's own "+" menu, so "Upload files" from inside "App Ideas"
-  // doesn't need "App Ideas" re-picked from the destination dropdown. `null`
-  // pre-scopes to the course page itself (the top-level section's own "+" menu).
-  function openAddToFolder(folderId: number | null, kind: "upload" | "note") {
-    setUploadDestination(folderId === null ? COURSE_PAGE_SENTINEL : String(folderId));
+  // Opens the Upload/Paste/New note dialog, keeping whatever destination
+  // was last picked — the Folders header's "+".
+  function openAddDialog(kind: AddKind) {
     if (kind === "upload") setUploadOpen(true);
+    else if (kind === "paste") setPasteOpen(true);
     else setNoteOpen(true);
+  }
+
+  // The same, pre-scoped to one folder — used by that folder's own "+"
+  // menu, so "Upload files" from inside a folder doesn't need it re-picked
+  // from the destination dropdown. `null` pre-scopes to the course page
+  // itself ("On this page"'s "+").
+  function openAddToFolder(folderId: number | null, kind: AddKind) {
+    setUploadDestination(folderId === null ? COURSE_PAGE_SENTINEL : String(folderId));
+    openAddDialog(kind);
   }
 
   async function handleCreateFolder(e: React.FormEvent) {
@@ -2110,9 +2091,6 @@ export default function CoursePage() {
   const backdropOverWallpaper =
     !!settingsData &&
     shouldShowWallpaper(settingsData.appWallpaper, settingsData.dashboardBackgroundImage, `/courses/${courseId}`);
-  // Where see-through areas or the wallpaper can end up behind the title,
-  // it uses the theme's text color rather than white-on-image.
-  const themeColoredTitle = stickerBackdrop || backdropOverWallpaper;
 
   const folderChips = visibleFolderChips(
     settingsData?.folderChips ?? null,
@@ -2220,20 +2198,24 @@ export default function CoursePage() {
                     : "via-background/50 to-black/10"
               }`}
             />
-            <div className="relative mx-auto flex h-full max-w-5xl flex-col justify-end gap-2 px-4 pb-5 sm:px-6">
+            {/* The title sits where the picture fades into the page color
+                (or the wallpaper, or a sticker's see-through areas), so it
+                uses the theme's text colors with a halo — see
+                [data-on-backdrop] in globals.css — rather than white. */}
+            <div
+              data-on-backdrop
+              className="relative mx-auto flex h-full max-w-5xl flex-col justify-end gap-2 px-4 pb-5 sm:px-6"
+            >
               <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
-                    <BreadcrumbLink
-                      render={<Link href="/" />}
-                      className={themeColoredTitle ? "" : "text-white/70 hover:text-white"}
-                    >
+                    <BreadcrumbLink render={<Link href="/" />}>
                       Study Buddy
                     </BreadcrumbLink>
                   </BreadcrumbItem>
-                  <BreadcrumbSeparator className={themeColoredTitle ? "" : "text-white/50"} />
+                  <BreadcrumbSeparator />
                   <BreadcrumbItem>
-                    <BreadcrumbPage className={themeColoredTitle ? "" : "text-white/90"}>{detail.course.name}</BreadcrumbPage>
+                    <BreadcrumbPage>{detail.course.name}</BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
               </Breadcrumb>
@@ -2242,7 +2224,7 @@ export default function CoursePage() {
                   <div
                     className={`size-9 shrink-0 bg-center ${
                       detail.course.show_icon_frame
-                        ? "rounded-lg border border-white/20 bg-cover bg-white/10"
+                        ? "rounded-lg border border-foreground/10 bg-cover bg-background/40"
                         : "bg-contain"
                     }`}
                     style={{ backgroundImage: `url(${shownCourse.icon_image})` }}
@@ -2252,22 +2234,12 @@ export default function CoursePage() {
                     <span className="text-2xl drop-shadow-sm">{shownCourse.icon}</span>
                   )
                 )}
-                {/* White-on-image by default; a sticker's see-through areas
-                    show the page color instead, so it uses the theme's own
-                    text color to stay readable on light themes. */}
-                <h1
-                  className={`font-heading text-2xl font-semibold tracking-tight sm:text-3xl ${
-                    themeColoredTitle
-                      ? "text-foreground [text-shadow:0_1px_12px_var(--background)]"
-                      : "text-white drop-shadow-sm"
-                  }`}
-                >
+                <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
                   {detail.course.name}
                 </h1>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className={themeColoredTitle ? "" : "text-white/80 hover:bg-white/15 hover:text-white"}
                   onClick={() => setCustomizeOpen(true)}
                   aria-label="Customize course"
                 >
@@ -2448,10 +2420,7 @@ export default function CoursePage() {
               triggerIcon={Plus}
               triggerVariant="default"
               actions={[
-                { label: "Upload files", icon: Upload, onSelect: () => setUploadOpen(true) },
-                { label: "Import Anki deck", icon: Layers, onSelect: () => setUploadOpen(true) },
-                { label: "Paste text", icon: ClipboardPaste, onSelect: () => setPasteOpen(true) },
-                { label: "New note", icon: StickyNote, onSelect: () => setNoteOpen(true) },
+                ...addContentActions(openAddDialog),
                 { label: "New folder", icon: FolderPlus, onSelect: () => openNewFolderDialog(null) },
               ]}
             />
@@ -2851,11 +2820,7 @@ export default function CoursePage() {
             <RowActionsMenu
               ariaLabel="Add to this course page"
               triggerIcon={Plus}
-              actions={[
-                { label: "Upload files", icon: Upload, onSelect: () => openAddToFolder(null, "upload") },
-                { label: "Import Anki deck", icon: Layers, onSelect: () => openAddToFolder(null, "upload") },
-                { label: "New note", icon: StickyNote, onSelect: () => openAddToFolder(null, "note") },
-              ]}
+              actions={addContentActions((kind) => openAddToFolder(null, kind))}
             />
           </div>
           {topLevelDocuments.length + topLevelItems.length + topLevelNotes.length === 0 ? (
@@ -2888,6 +2853,8 @@ export default function CoursePage() {
                   editMode={editMode}
                   selected={selectedItems}
                   onToggleSelect={toggleSelectItem}
+                  folders={detail.folders}
+                  onMove={handleMoveItem}
                   onDelete={handleDeleteItem}
                   onReorder={handleReorderItems}
                 />

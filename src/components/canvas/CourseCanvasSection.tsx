@@ -15,7 +15,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { RowActionsMenu } from "@/components/RowActionsMenu";
 import { HelpTooltip } from "@/components/HelpTooltip";
@@ -48,6 +47,7 @@ export function CourseCanvasSection({
   // cards, groups, links, arrows — imports as-is.
   async function handleImport(file: File) {
     setImporting(true);
+    const toastId = toast.loading("Importing canvas…");
     try {
       const data = parseCanvasFile(await file.text());
       if (!data) {
@@ -66,6 +66,7 @@ export function CourseCanvasSection({
       }
       router.push(`/canvas/${body.canvas.id}`);
     } finally {
+      toast.dismiss(toastId);
       setImporting(false);
     }
   }
@@ -128,17 +129,23 @@ export function CourseCanvasSection({
             labeled arrows.
           </HelpTooltip>
         </h2>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={importing}
-            onClick={() => importInput.current?.click()}
-            title="Import a .canvas file — from Obsidian, or exported from here"
-          >
-            <Upload />
-            {importing ? "Importing…" : "Import"}
-          </Button>
+        <div className="flex items-center">
+          {/* Same quiet "+" as each folder row's — the course's one filled
+              "+" is the Folders header's. */}
+          <RowActionsMenu
+            ariaLabel="Add canvas"
+            triggerIcon={Plus}
+            actions={[
+              { label: "New canvas", icon: GitFork, onSelect: () => setOpen(true) },
+              {
+                label: "Import .canvas file",
+                icon: Upload,
+                onSelect: () => {
+                  if (!importing) importInput.current?.click();
+                },
+              },
+            ]}
+          />
           <input
             ref={importInput}
             type="file"
@@ -151,10 +158,6 @@ export function CourseCanvasSection({
             }}
           />
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger render={<Button variant="outline" size="sm" />}>
-              <Plus />
-              New canvas
-            </DialogTrigger>
             <DialogContent>
               <form onSubmit={handleCreate}>
                 <DialogHeader>
