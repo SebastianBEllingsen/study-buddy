@@ -58,6 +58,10 @@ export default function HelpDialog() {
             only surface what&apos;s actually due, using real spaced repetition. Select any text (or
             crop a region of a PDF) for a hint or explanation.
           </HelpSection>
+          <HelpSection title="Pomodoro timer">
+            The timer icon in the header starts a focus session that keeps running on every page;
+            the gear sets your lengths, and the expand button opens a fullscreen focus view.
+          </HelpSection>
           <HelpSection title="The Vault">
             Your own Obsidian-style notes, separate from generated material. Type{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs">[[</code> to link another note,

@@ -36,6 +36,7 @@ import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
 import { tileGridStyle } from "@/lib/dashboardGrid";
 import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
 import StudyHeatmap from "@/components/StudyHeatmap";
+import PomodoroWidget from "@/components/pomodoro/PomodoroWidget";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
 import { DueFlashcardsDialog } from "@/components/DueFlashcardsDialog";
@@ -1108,6 +1109,10 @@ function HomePageContent() {
             label={widget.label}
             transparent={transparentWidgets}
           />
+        );
+      case "pomodoro":
+        return (
+          <PomodoroWidget key="pomodoro" layout={layout} label={widget.label} transparent={transparentWidgets} />
         );
     }
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  appendBelow,
   GRID_COLS,
   MAX_ROW_SPAN,
   clampLayout,
@@ -214,4 +215,35 @@ describe("resolveZoneAtPoint", () => {
   // hooks, not a full rendered dialog with Radix internals and pointer
   // capture). Per this repo's testing policy, that gap is being said
   // explicitly rather than left implied by a mislabeled pure-function test.
+});
+
+describe("appendBelow", () => {
+  const w = (id: HomeWidgetConfig["id"], zone: HomeWidgetConfig["zone"], row: number, rowSpan: number, enabled = true): HomeWidgetConfig => ({
+    id,
+    enabled,
+    zone,
+    col: 2,
+    row,
+    colSpan: 3,
+    rowSpan,
+  });
+
+  it("puts a new widget on the first free row of its zone, at column 0", () => {
+    const out = appendBelow([w("streak", "top", 0, 1), w("recent", "top", 1, 2), w("due", "bottom", 0, 3)], [w("pomodoro", "top", 0, 2)]);
+    expect(out.find((x) => x.id === "pomodoro")).toMatchObject({ col: 0, row: 3, zone: "top", rowSpan: 2 });
+  });
+
+  it("ignores hidden widgets and other zones", () => {
+    const out = appendBelow([w("streak", "top", 5, 1, false), w("due", "bottom", 0, 3)], [w("pomodoro", "top", 4, 2)]);
+    expect(out.find((x) => x.id === "pomodoro")).toMatchObject({ col: 0, row: 0 });
+  });
+
+  it("stacks several added widgets below each other", () => {
+    const out = appendBelow([w("streak", "top", 0, 1)], [w("recent", "top", 0, 2), w("pomodoro", "top", 0, 2)]);
+    expect(out.map((x) => [x.id, x.row])).toEqual([
+      ["streak", 0],
+      ["recent", 1],
+      ["pomodoro", 3],
+    ]);
+  });
 });

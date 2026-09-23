@@ -185,3 +185,18 @@ export function setWidgetEnabled(
 ): HomeWidgetConfig[] {
   return widgets.map((w) => (w.id === id ? { ...w, enabled } : w));
 }
+
+// Places widgets that a saved layout doesn't know about yet (added to the
+// app after the layout was saved) on fresh rows below everything already in
+// their zone, full-left — dropping them at their default slot instead would
+// land them on top of whatever the user has since moved there.
+export function appendBelow(existing: HomeWidgetConfig[], added: HomeWidgetConfig[]): HomeWidgetConfig[] {
+  const placed = [...existing];
+  for (const w of added) {
+    const bottom = placed
+      .filter((p) => p.enabled && p.zone === w.zone)
+      .reduce((max, p) => Math.max(max, p.row + p.rowSpan), 0);
+    placed.push({ ...w, col: 0, row: bottom });
+  }
+  return placed;
+}

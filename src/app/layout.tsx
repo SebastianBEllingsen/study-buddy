@@ -10,6 +10,8 @@ import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
 import SWRProvider from "@/components/SWRProvider";
 import AppBranding from "@/components/AppBranding";
+import PomodoroProvider from "@/components/pomodoro/PomodoroProvider";
+import PomodoroButton from "@/components/pomodoro/PomodoroButton";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { getAppSettings } from "@/lib/models";
@@ -98,6 +100,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AppThemeProvider>
             <SWRProvider>
+              <PomodoroProvider>
               {/* sticky rather than static so a page that fills the viewport
                   below it (see vault/[noteId]/page.tsx's full-bleed note view)
                   still always has the header in view, without restructuring
@@ -109,9 +112,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                     {/* Two visual groups instead of five buttons in a row with
                         mismatched labeled/icon-only/variant styling: named
                         destinations first (Calendar, Search), then a divider,
-                        then equally-weighted icon-only utility actions (Chat,
-                        Settings, Help) — same order as before, just grouped so
-                        the header reads as two decisions instead of five. */}
+                        then equally-weighted icon-only utility actions (Pomodoro
+                        timer, Chat, Settings, Help) — grouped so the header
+                        reads as two decisions instead of six. The timer turns
+                        into a live countdown chip while a session runs. */}
                     <div className="flex items-center gap-1">
                       <Button variant="ghost" size="sm" className="gap-1.5 px-3 text-xs" nativeButton={false} render={<Link href="/calendar" />}>
                         <Calendar className="size-3.5" />
@@ -121,6 +125,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                     </div>
                     <div className="h-5 w-px shrink-0 bg-border" />
                     <div className="flex items-center gap-1">
+                      <PomodoroButton />
                       <ChatDialog />
                       <SettingsDialog />
                       <HelpDialog />
@@ -132,6 +137,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 {children}
               </main>
               <Toaster />
+              </PomodoroProvider>
             </SWRProvider>
           </AppThemeProvider>
         </ThemeProvider>

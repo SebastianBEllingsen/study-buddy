@@ -24,6 +24,7 @@ import {
   runTransaction,
   uploaded_images,
 } from "./db";
+import { appendBelow } from "./dashboardGrid";
 import { nowUtc } from "./time";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
 import { deckDueCardIndices } from "./spacedRepetition";
@@ -1332,7 +1333,7 @@ export async function getDocumentLines(documentId: number): Promise<string[]> {
 // col/row/span → CSS translation, shared between the live dashboard
 // (page.tsx) and the editing UI (DashboardCustomizeDialog.tsx).
 
-export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments", "recent"] as const;
+export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments", "recent", "pomodoro"] as const;
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
 
 // Two independent widget grids on the home page: "top" above the courses
@@ -1367,6 +1368,7 @@ const DEFAULT_HOME_WIDGETS: HomeWidgetConfig[] = [
   { id: "calendar", enabled: true, zone: "top", col: 0, row: 2, colSpan: 6, rowSpan: 1 },
   { id: "assignments", enabled: true, zone: "top", col: 0, row: 3, colSpan: 6, rowSpan: 1 },
   { id: "recent", enabled: true, zone: "top", col: 0, row: 4, colSpan: 6, rowSpan: 2 },
+  { id: "pomodoro", enabled: true, zone: "top", col: 0, row: 6, colSpan: 3, rowSpan: 2 },
 ];
 
 function defaultFor(id: HomeWidgetId): HomeWidgetConfig {
@@ -1430,7 +1432,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
         })
     );
     const missing = HOME_WIDGET_IDS.filter((id) => !known.has(id)).map((id) => defaultFor(id));
-    return [...known.values(), ...missing];
+    return appendBelow([...known.values()], missing);
   } catch {
     return DEFAULT_HOME_WIDGETS;
   }
