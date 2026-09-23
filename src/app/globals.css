@@ -146,6 +146,171 @@
   text-decoration-color: var(--focus);
 }
 
+/* Links to other notes — [[note:ID]] and Obsidian-style [[Title]] alike —
+   read as Obsidian's internal links: no underline until hovered. */
+.markdown-body a.wikilink {
+  text-decoration: none;
+}
+
+.markdown-body a.wikilink:hover {
+  text-decoration: underline;
+}
+
+/* A [[Title]] with no note behind it yet (Obsidian's "unresolved link") —
+   dimmed, and creates the note on click (see NoteMarkdown). Matches
+   NoteEditor's .cm-wikilink-missing pill color. */
+.markdown-body .wikilink-missing {
+  color: color-mix(in srgb, var(--clay) 75%, transparent);
+  text-decoration: none;
+}
+
+.markdown-body a.wikilink-missing:hover {
+  color: var(--clay);
+  text-decoration: underline dashed;
+}
+
+/* Obsidian callouts (> [!type] Title — see lib/callouts.ts). Each type's
+   color is an "r, g, b" triple so the border, tinted background, and title
+   can all derive from it; Obsidian's own values, which it uses unchanged in
+   light and dark themes. Also read by NoteEditor's .cm-callout-* lines. */
+[data-callout] {
+  --callout-color: 8, 109, 221;
+}
+[data-callout="abstract"],
+[data-callout="tip"] {
+  --callout-color: 0, 191, 188;
+}
+[data-callout="success"] {
+  --callout-color: 8, 185, 78;
+}
+[data-callout="question"],
+[data-callout="warning"] {
+  --callout-color: 236, 117, 0;
+}
+[data-callout="failure"],
+[data-callout="danger"],
+[data-callout="bug"] {
+  --callout-color: 233, 49, 71;
+}
+[data-callout="example"] {
+  --callout-color: 120, 82, 238;
+}
+[data-callout="quote"] {
+  --callout-color: 158, 158, 158;
+}
+
+.markdown-body .callout {
+  margin: 0.75em 0 1em;
+  padding: 0.6em 0.9em;
+  border-left: 3px solid rgb(var(--callout-color));
+  border-radius: 0.4em;
+  background-color: rgba(var(--callout-color), 0.08);
+}
+
+.markdown-body .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-weight: 600;
+  color: rgb(var(--callout-color));
+  line-height: 1.5;
+}
+
+.markdown-body summary.callout-title {
+  cursor: pointer;
+  list-style: none;
+}
+
+.markdown-body summary.callout-title::-webkit-details-marker {
+  display: none;
+}
+
+/* Fold chevron for [!type]+ / [!type]- callouts, after the title. */
+.markdown-body summary.callout-title::after {
+  content: "›";
+  margin-left: 0.1em;
+  transition: transform 150ms;
+}
+
+.markdown-body details.callout[open] > summary.callout-title::after {
+  transform: rotate(90deg);
+}
+
+.markdown-body .callout-icon {
+  width: 1.05em;
+  height: 1.05em;
+  flex-shrink: 0;
+}
+
+.markdown-body .callout-content {
+  margin-top: 0.4em;
+}
+
+.markdown-body .callout-content > :last-child {
+  margin-bottom: 0;
+}
+
+/* Obsidian's Properties panel for a note's YAML frontmatter. */
+.markdown-body .note-properties {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 0.3em 1.25em;
+  margin-bottom: 1.25em;
+  padding-bottom: 0.9em;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+.markdown-body .note-property {
+  display: contents;
+}
+
+.markdown-body .note-property dt {
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.markdown-body .note-property dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body .note-property-chip {
+  padding: 0 0.5em;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--focus) 12%, transparent);
+  color: var(--focus);
+}
+
+.markdown-body .note-property-empty {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+/* Edit mode's lighter-weight version of the above (see NoteEditor's
+   obsidianBlockStyles): callout lines get their type's bar and tint, and
+   the frontmatter block reads as metadata rather than prose. */
+/* An inset shadow rather than a border, so the bar doesn't shift the text
+   off the editor's own line padding (list lines set theirs per line). */
+.cm-line.cm-callout {
+  box-shadow: inset 3px 0 0 rgb(var(--callout-color));
+  background-color: rgba(var(--callout-color), 0.08);
+}
+
+.cm-line.cm-callout-title {
+  color: rgb(var(--callout-color));
+  font-weight: 600;
+}
+
+.cm-line.cm-frontmatter {
+  color: var(--muted-foreground);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.9em;
+}
+
 .markdown-body code {
   font-family: var(--font-geist-mono), monospace;
   font-size: 0.9em;

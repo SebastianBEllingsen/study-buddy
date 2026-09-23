@@ -30,6 +30,7 @@ import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettin
 import { deckDueCardIndices } from "./spacedRepetition";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
+import { wikiLinksToTitle } from "./obsidianLinks";
 import { canvasReferencesTarget, emptyCanvas, parseCanvasJson, type CanvasData } from "./canvas";
 
 // "image" is distinct from "failed": a plain image (png/jpg/...) has no text
@@ -1144,18 +1145,24 @@ function backlinkContext(markdown: string, matchStart: number): string {
 }
 
 export async function getNoteBacklinks(id: number): Promise<NoteBacklink[]> {
-  const all = await db.select().from(notes).where(sql`${notes.id} != ${id}`);
+  const all = await db.select().from(notes);
+  const title = all.find((n) => n.id === id)?.title;
   const backlinks: NoteBacklink[] = [];
   for (const other of all) {
-    for (const link of parseNoteLinks(other.markdown)) {
-      if (link.type === "note" && link.id === id) {
-        backlinks.push({
-          noteId: other.id,
-          noteTitle: other.title,
-          courseId: other.course_id!,
-          context: backlinkContext(other.markdown, link.start),
-        });
-      }
+    if (other.id === id) continue;
+    // Both link syntaxes count: the app's own [[note:ID]] and an Obsidian-
+    // style [[Title]] naming this note (see lib/obsidianLinks.ts).
+    const starts = parseNoteLinks(other.markdown)
+      .filter((link) => link.type === "note" && link.id === id)
+      .map((link) => link.start);
+    if (title) starts.push(...wikiLinksToTitle(other.markdown, title).map((link) => link.start));
+    for (const start of starts.sort((a, b) => a - b)) {
+      backlinks.push({
+        noteId: other.id,
+        noteTitle: other.title,
+        courseId: other.course_id!,
+        context: backlinkContext(other.markdown, start),
+      });
     }
   }
   return backlinks;

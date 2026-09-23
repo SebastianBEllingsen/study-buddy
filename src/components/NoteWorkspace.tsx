@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
@@ -68,6 +68,16 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   const [noteMode, setNoteMode] = useState<"edit" | "preview">("edit");
   const [deleting, setDeleting] = useState(false);
   const editorRef = useRef<NoteEditorHandle>(null);
+  // Memoized on the primitive fields — NoteEditor rebuilds its CodeMirror
+  // extensions whenever this object's identity changes.
+  const loadedNoteId = detail?.note.id;
+  const courseId = detail?.note.course_id;
+  const folderId = detail?.note.folder_id ?? null;
+  const linkContext = useMemo(
+    () =>
+      loadedNoteId !== undefined && courseId !== undefined ? { noteId: loadedNoteId, courseId, folderId } : undefined,
+    [loadedNoteId, courseId, folderId]
+  );
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Fields from scheduleSave calls that haven't been sent yet — merged
   // rather than replaced, so e.g. a title edit followed shortly by a
@@ -104,6 +114,15 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   useEffect(() => {
     if (highlight && detail) {
       editorRef.current?.scrollToHighlight(highlight);
+    } else if (detail && window.location.hash.length > 1) {
+      // A [[Note#Heading]] link — see NoteEditor's scrollToHeading.
+      let slug = window.location.hash.slice(1);
+      try {
+        slug = decodeURIComponent(slug);
+      } catch {
+        // Not valid percent-encoding — use the fragment as-is.
+      }
+      editorRef.current?.scrollToHeading(slug);
     }
     // Runs once when this note's content first loads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,7 +390,13 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
           row) and then the page itself. A bordered container around this
           read as a widget embedded in the page rather than the page. */}
       <div className="min-h-0 flex-1">
-        <NoteEditor ref={editorRef} value={markdown} onChange={handleMarkdownChange} onModeChange={setNoteMode} />
+        <NoteEditor
+          ref={editorRef}
+          value={markdown}
+          onChange={handleMarkdownChange}
+          onModeChange={setNoteMode}
+          linkContext={linkContext}
+        />
       </div>
 
       {backlinkCount > 0 && (

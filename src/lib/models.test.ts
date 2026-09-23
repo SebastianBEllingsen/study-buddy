@@ -35,6 +35,7 @@ const {
   getNote,
   moveNote,
   updateNoteMarkdown,
+  getNoteBacklinks,
   createGeneratedItem,
   getGeneratedItem,
   moveGeneratedItem,
@@ -430,6 +431,34 @@ describe("isUploadedImageReferencedInContent", () => {
     // image1 just because "studybuddy-image:1" is a text prefix of it.
     await updateNoteMarkdown(note.id, `![x](studybuddy-image:${image1.id}0)`);
     expect(await isUploadedImageReferencedInContent(image1.id)).toBe(false);
+  });
+});
+
+describe("getNoteBacklinks", () => {
+  it("counts both [[note:ID]] links and Obsidian-style [[Title]] links", async () => {
+    const course = await createCourse("C");
+    const target = await createNote("Custom PCB", course.id);
+    const byId = await createNote("By id", course.id, null, `See [[note:${target.id}]].`);
+    const byName = await createNote(
+      "By name",
+      course.id,
+      null,
+      "Plan → [[custom pcb]]\nLater: [[Custom PCB#Stage|stage]]\nNot [[Custom PCBs]], not `[[Custom PCB]]`"
+    );
+    await createNote("Unrelated", course.id, null, "[[Firmware]] and [[#Custom PCB]]");
+
+    const backlinks = await getNoteBacklinks(target.id);
+    expect(backlinks.map((b) => [b.noteId, b.context])).toEqual([
+      [byId.id, `See [[note:${target.id}]].`],
+      [byName.id, "Plan → [[custom pcb]]"],
+      [byName.id, "Later: [[Custom PCB#Stage|stage]]"],
+    ]);
+  });
+
+  it("doesn't count a note's own self-links", async () => {
+    const course = await createCourse("C");
+    const note = await createNote("Self", course.id, null, "[[Self]]");
+    expect(await getNoteBacklinks(note.id)).toEqual([]);
   });
 });
 

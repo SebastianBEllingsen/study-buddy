@@ -84,7 +84,14 @@ import {
 } from "@/lib/noteLinks";
 import { fetchNoteImage, NOTE_IMAGE_SCHEME, noteImageCache, uploadNoteImage } from "@/lib/noteImages";
 import { describeUploadError } from "@/lib/uploadImage";
-import NoteMarkdown from "@/components/NoteMarkdown";
+import NoteMarkdown, {
+  createNoteFromLink,
+  LINK_TARGETS_CHANGED_EVENT,
+  type NoteLinkContext,
+} from "@/components/NoteMarkdown";
+import { headingSlug, parseWikiLinks, resolveWikiLink, type WikiLinkMatch } from "@/lib/obsidianLinks";
+import { splitFrontmatter } from "@/lib/frontmatter";
+import { parseCalloutHeader, type CalloutHeader } from "@/lib/callouts";
 import { toggleTaskMarkerAtLine } from "@/lib/taskList";
 
 const EMPTY_TARGETS: LinkTargets = { notes: [], documents: [], items: [] };
@@ -137,11 +144,96 @@ class LinkWidget extends WidgetType {
   }
 }
 
+// Moves the editor to the heading whose slug (see headingSlug) matches —
+// where a [[#Heading]] / [[Note#Heading]] link lands in Edit mode. Returns
+// whether one was found.
+function scrollEditorToHeading(view: EditorView, slug: string): boolean {
+  const doc = view.state.doc;
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    const m = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line.text);
+    if (m && headingSlug(m[1]) === slug) {
+      view.dispatch({
+        selection: EditorSelection.cursor(line.from),
+        effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 16 }),
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+// Edit-mode pill for an Obsidian-style [[Title#Heading|alias]] link — the
+// name-based counterpart of LinkWidget above. Ctrl/Cmd-click follows it:
+// another note, a heading in this one, or (for a title with no note yet)
+// creates that note, as clicking an unresolved link does in Obsidian.
+class WikiNameLinkWidget extends WidgetType {
+  constructor(
+    readonly match: WikiLinkMatch,
+    readonly targets: LinkTargets,
+    readonly linkContext: NoteLinkContext | undefined,
+    readonly onNavigate: (href: string) => void
+  ) {
+    super();
+  }
+
+  eq(other: WikiNameLinkWidget): boolean {
+    return (
+      other.match.raw === this.match.raw &&
+      other.targets === this.targets &&
+      other.linkContext?.noteId === this.linkContext?.noteId
+    );
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const resolved = resolveWikiLink(this.match, this.targets, this.linkContext?.noteId);
+    const span = document.createElement("span");
+    span.className = `cm-wikilink${resolved.missing ? " cm-wikilink-missing" : ""}`;
+    span.title = resolved.missing
+      ? `"${this.match.target}" doesn't exist yet — Ctrl/Cmd-click to create it`
+      : "Click to edit — Ctrl/Cmd-click to open";
+
+    const icon = document.createElement("span");
+    icon.className = "cm-wikilink-icon";
+    icon.textContent = this.match.target ? LINK_ICON.note : "#";
+    span.appendChild(icon);
+
+    const text = document.createElement("span");
+    text.textContent = resolved.label;
+    span.appendChild(text);
+
+    span.addEventListener("mousedown", (e) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      if (resolved.href === null) {
+        const context = this.linkContext;
+        if (!context) return;
+        void createNoteFromLink(this.match.target, context).then((id) => {
+          if (id !== null) this.onNavigate(`/vault/${id}`);
+        });
+      } else if (resolved.href.startsWith("#")) {
+        scrollEditorToHeading(view, resolved.href.slice(1));
+      } else {
+        this.onNavigate(resolved.href);
+      }
+    });
+    return span;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
 // Renders every [[...]] span as a clickable pill EXCEPT the one the cursor
 // is currently inside — matching Obsidian's live-preview editing model:
 // a link looks like a link until you click into it, at which point it
 // drops back to raw, editable source.
-function wikilinkPills(targets: LinkTargets, onNavigate: (href: string) => void): Extension {
+function wikilinkPills(
+  targets: LinkTargets,
+  onNavigate: (href: string) => void,
+  linkContext: NoteLinkContext | undefined
+): Extension {
   function build(view: EditorView): DecorationSet {
     const ranges: Range<Decoration>[] = [];
     const doc = view.state.doc.toString();
@@ -150,6 +242,14 @@ function wikilinkPills(targets: LinkTargets, onNavigate: (href: string) => void)
       if (sel.from <= match.end && sel.to >= match.start) continue;
       ranges.push(
         Decoration.replace({ widget: new LinkWidget(match, targets, onNavigate) }).range(match.start, match.end)
+      );
+    }
+    for (const match of parseWikiLinks(doc)) {
+      if (sel.from <= match.end && sel.to >= match.start) continue;
+      ranges.push(
+        Decoration.replace({
+          widget: new WikiNameLinkWidget(match, targets, linkContext, onNavigate),
+        }).range(match.start, match.end)
       );
     }
     return Decoration.set(ranges, true);
@@ -544,6 +644,58 @@ function noteImagePasteDrop(): Extension {
       return true;
     },
   });
+}
+
+// Edit mode's light-touch take on Obsidian's callouts and Properties: every
+// line of a > [!type] callout gets its type's colored bar (the header line
+// also its title color), and the leading YAML frontmatter block a muted
+// monospace look — no widgets, so the source stays directly editable. Scans
+// the whole document rather than the viewport, since a callout or
+// frontmatter block that starts above it still styles the lines in view.
+function obsidianBlockStyles(): Extension {
+  function build(view: EditorView): DecorationSet {
+    const ranges: Range<Decoration>[] = [];
+    const doc = view.state.doc;
+    const text = doc.toString();
+
+    const { lineCount } = splitFrontmatter(text);
+    for (let i = 1; i <= lineCount && i <= doc.lines; i++) {
+      ranges.push(Decoration.line({ class: "cm-frontmatter" }).range(doc.line(i).from));
+    }
+
+    let calloutType: string | null = null;
+    for (let i = lineCount + 1; i <= doc.lines; i++) {
+      const line = doc.line(i);
+      const quote = /^\s*>\s?(.*)$/.exec(line.text);
+      if (!quote) {
+        calloutType = null;
+        continue;
+      }
+      const header: CalloutHeader | null = calloutType === null ? parseCalloutHeader(quote[1]) : null;
+      if (header) calloutType = header.type;
+      if (calloutType === null) continue;
+      ranges.push(
+        Decoration.line({
+          class: header ? "cm-callout cm-callout-title" : "cm-callout",
+          attributes: { "data-callout": calloutType },
+        }).range(line.from)
+      );
+    }
+    return Decoration.set(ranges, true);
+  }
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged) this.decorations = build(update.view);
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
 }
 
 // Matches a list item's marker — leading indent, the bullet/number itself,
@@ -1397,11 +1549,13 @@ function NotePreview({
   targets,
   scrollRef,
   onToggleTask,
+  linkContext,
 }: {
   markdown: string;
   targets: LinkTargets;
   scrollRef: React.Ref<HTMLDivElement>;
   onToggleTask: (lineIndex: number) => void;
+  linkContext?: NoteLinkContext;
 }) {
   return (
     <div
@@ -1409,7 +1563,7 @@ function NotePreview({
       className="markdown-body h-full overflow-y-auto px-4 py-4"
       style={{ fontSize: "var(--note-font-size)" }}
     >
-      <NoteMarkdown markdown={markdown} targets={targets} onToggleTask={onToggleTask} />
+      <NoteMarkdown markdown={markdown} targets={targets} onToggleTask={onToggleTask} context={linkContext} />
     </div>
   );
 }
@@ -1439,6 +1593,9 @@ const codeHighlightStyle = HighlightStyle.define([
 
 export interface NoteEditorHandle {
   scrollToHighlight: (text: string) => void;
+  // Jumps to the heading a /vault/ID#slug link pointed at (see
+  // obsidianLinks.ts's headingSlug), in whichever mode is showing.
+  scrollToHeading: (slug: string) => void;
 }
 
 interface NoteEditorProps {
@@ -1449,6 +1606,10 @@ interface NoteEditorProps {
   // body, and the title should follow suit rather than staying editable
   // while everything below it isn't.
   onModeChange?: (mode: "edit" | "preview") => void;
+  // The note being edited — lets name-based [[links]] resolve self-links
+  // and create missing notes alongside it (see NoteMarkdown's
+  // NoteLinkContext).
+  linkContext?: NoteLinkContext;
 }
 
 // Wraps (or unwraps, if already wrapped) the current selection with `mark`
@@ -1760,7 +1921,7 @@ function InsertTableButton({ onInsert }: { onInsert: (rows: number, cols: number
 }
 
 const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor(
-  { value, onChange, onModeChange },
+  { value, onChange, onModeChange, linkContext },
   ref
 ) {
   const router = useRouter();
@@ -1786,6 +1947,13 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   }
 
   useEffect(loadTargets, []);
+
+  // A [[link]] just created a note (see createNoteFromLink) — refetch so the
+  // link stops showing as unresolved, here and in any other open editor.
+  useEffect(() => {
+    window.addEventListener(LINK_TARGETS_CHANGED_EVENT, loadTargets);
+    return () => window.removeEventListener(LINK_TARGETS_CHANGED_EVENT, loadTargets);
+  }, []);
 
   function switchMode(next: "edit" | "preview") {
     if (next === mode) return;
@@ -1860,6 +2028,20 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       const view = editorRef.current?.view;
       if (view) highlightInEditor(view, text);
     },
+    scrollToHeading: (slug: string) => {
+      // Deferred a tick: this runs right as the note's content first loads,
+      // before CodeMirror / the preview has rendered it.
+      setTimeout(() => {
+        if (mode === "preview") {
+          previewScrollRef.current
+            ?.querySelector(`[id="${CSS.escape(slug)}"]`)
+            ?.scrollIntoView({ block: "start" });
+          return;
+        }
+        const view = editorRef.current?.view;
+        if (view) scrollEditorToHeading(view, slug);
+      });
+    },
   }));
 
   // Jumping to a highlight forces edit mode (above) so CodeMirror mounts —
@@ -1920,19 +2102,20 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       ),
       EditorView.lineWrapping,
       autocompletion({ override: [noteLinkCompletionSource(targets), latexCompletionSource] }),
-      wikilinkPills(targets, onNavigate),
+      wikilinkPills(targets, onNavigate, linkContext),
       markdownLinkPills(),
       taskCheckboxes(),
       noteImagePills(),
       noteImagePasteDrop(),
       listHangingIndent(),
+      obsidianBlockStyles(),
       liveMarkdownFormatting(),
       liveMathFormatting(),
       liveTableFormatting(),
       highlightField,
       editorTheme,
     ],
-    [targets, onNavigate]
+    [targets, onNavigate, linkContext]
   );
 
   function withView(fn: (view: EditorView) => void) {
@@ -2075,6 +2258,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
             targets={targets}
             scrollRef={previewScrollRef}
             onToggleTask={handleToggleTask}
+            linkContext={linkContext}
           />
         </div>
       )}
