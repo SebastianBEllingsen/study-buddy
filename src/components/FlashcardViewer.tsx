@@ -21,6 +21,38 @@ const RESULT_LABELS: { result: FlashcardResult; label: string; className: string
   { result: "easy", label: "Easy", className: "bg-focus/10 text-focus hover:bg-focus/20" },
 ];
 
+export function handleFlashcardKeyDown({
+  event,
+  flipped,
+  onFlip,
+  onRate,
+}: {
+  event: KeyboardEvent;
+  flipped: boolean;
+  onFlip: () => void;
+  onRate: (result: FlashcardResult) => void;
+}) {
+  const target = event.target as HTMLElement | null;
+  const isTypingTarget =
+    !!target &&
+    ((target.tagName === "INPUT" || target.tagName === "TEXTAREA") || target.isContentEditable);
+  if (isTypingTarget) return false;
+
+  if (event.key === " " || event.code === "Space") {
+    event.preventDefault();
+    onFlip();
+    return true;
+  }
+
+  if (!flipped) return false;
+
+  const index = ["1", "2", "3", "4"].indexOf(event.key);
+  if (index === -1) return false;
+  event.preventDefault();
+  onRate(RESULT_LABELS[index].result);
+  return true;
+}
+
 export default function FlashcardViewer({
   itemId,
   cards,
@@ -79,20 +111,17 @@ export default function FlashcardViewer({
     setPosition((p) => p + 1);
   }
 
-  // 1-4 rate the revealed card (Again/Hard/Good/Easy, left to right —
-  // matches RESULT_LABELS) — reviewing a deck one card at a time is the
-  // single most repetitive action in the app, so reaching for the mouse
-  // every card is real friction. Ignored while typing anywhere (e.g. the
-  // Ask AI panel's input) so it never hijacks normal text entry.
+  // Space flips the card; 1-4 rate the revealed card (Again/Hard/Good/Easy,
+  // left to right — matches RESULT_LABELS). This keeps the card review loop
+  // fast without hijacking text entry in forms or the Ask AI panel.
   useEffect(() => {
-    if (!flipped) return;
     function handleKeyDown(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
-      const index = ["1", "2", "3", "4"].indexOf(e.key);
-      if (index === -1) return;
-      e.preventDefault();
-      handleResult(RESULT_LABELS[index].result);
+      handleFlashcardKeyDown({
+        event: e,
+        flipped,
+        onFlip: () => setFlipped((f) => !f),
+        onRate: handleResult,
+      });
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
