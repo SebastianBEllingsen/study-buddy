@@ -1,11 +1,26 @@
 import { listUpcomingEvents, createEvent, describeGoogleCalendarError } from "@/lib/googleCalendar";
-import { fetchAllFeedEvents } from "@/lib/calendarFeeds";
+import { fetchAllFeedEvents, fetchFeedEvents } from "@/lib/calendarFeeds";
 import { listCalendarFeeds } from "@/lib/models";
 
 // A year out comfortably covers "next exam"/"next assignment" without
 // fetching a whole multi-year ICS history for feeds that never expire old
 // recurring series.
 const FEED_LOOKAHEAD_MS = 365 * 24 * 60 * 60 * 1000;
+
+// "?timeMin=&timeMax=" as ISO strings — a feed's own week/month tab needs
+// past days too (Monday of the current week, or last week), which the
+// default now-onward window never includes. Anything unparseable, inverted,
+// or wider than the lookahead is ignored rather than fetched.
+function parseRange(url: URL): { timeMin: Date; timeMax: Date } | null {
+  const min = url.searchParams.get("timeMin");
+  const max = url.searchParams.get("timeMax");
+  if (!min || !max) return null;
+  const timeMin = new Date(min);
+  const timeMax = new Date(max);
+  if (Number.isNaN(timeMin.getTime()) || Number.isNaN(timeMax.getTime())) return null;
+  if (timeMax <= timeMin || timeMax.getTime() - timeMin.getTime() > FEED_LOOKAHEAD_MS) return null;
+  return { timeMin, timeMax };
+}
 
 // Lists events from now onward — the calendar page/dashboard widget only
 // ever shows upcoming deliverables, never a full history browser. Merges
@@ -35,6 +50,27 @@ export async function GET(request: Request) {
   // omit this, since they want every feed event regardless of that toggle.
   const excludeHiddenFeeds = url.searchParams.get("excludeHiddenFeeds") === "true";
   const now = new Date();
+  const range = parseRange(url);
+
+  // "?feedId=" backs a feed's own /calendar tab: that one feed only, no
+  // Google, and a fetch failure is reported rather than swallowed the way
+  // the merged list swallows one bad feed among several — on a tab that
+  // shows nothing else, an empty week would look like a free week.
+  const feedIdParam = url.searchParams.get("feedId");
+  if (feedIdParam !== null) {
+    const feedId = Number(feedIdParam);
+    const feed = (await listCalendarFeeds()).find((f) => f.id === feedId);
+    if (!feed) return Response.json({ error: "Feed not found" }, { status: 404 });
+    try {
+      const events = await fetchFeedEvents(feed, range ?? { timeMin: now, timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) });
+      events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+      return Response.json({ events: events.slice(0, maxResults ?? 20) });
+    } catch (err) {
+      console.error(`Failed to fetch calendar feed "${feed.label}":`, err);
+      const reason = err instanceof Error ? err.message : "unknown error";
+      return Response.json({ error: `Couldn't load "${feed.label}": ${reason}` }, { status: 502 });
+    }
+  }
 
   const [googleResult, feeds] = await Promise.all([
     listUpcomingEvents({ timeMin: now.toISOString(), maxResults }).then(
@@ -49,13 +85,16 @@ export async function GET(request: Request) {
 
   // Disabled feeds are skipped everywhere, unlike show_on_calendar (which
   // only excludeHiddenFeeds callers honor) — a paused feed shouldn't show
-  // up in the Assignments widget or /calendar tab either.
-  const activeFeeds = feeds.filter((f) => f.enabled);
+  // up in the Assignments widget or /calendar tab either. A feed with its
+  // own /calendar tab is kept out of every merged view too: the point of
+  // giving it a tab is keeping its events separate (it's fetched through
+  // the ?feedId= branch above instead).
+  const activeFeeds = feeds.filter((f) => f.enabled && !f.own_calendar);
   const allowedFeeds = excludeHiddenFeeds ? activeFeeds.filter((f) => f.show_on_calendar) : activeFeeds;
-  const feedEvents = await fetchAllFeedEvents(allowedFeeds, {
-    timeMin: now,
-    timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS),
-  });
+  const feedEvents = await fetchAllFeedEvents(
+    allowedFeeds,
+    range ?? { timeMin: now, timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) }
+  );
 
   const events = [...googleResult.events, ...feedEvents]
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())

@@ -358,6 +358,12 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("calendar_feeds", "enabled")) {
     database.exec("ALTER TABLE calendar_feeds ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("calendar_feeds", "own_calendar")) {
+    database.exec("ALTER TABLE calendar_feeds ADD COLUMN own_calendar INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("calendar_feeds", "calendar_config")) {
+    database.exec("ALTER TABLE calendar_feeds ADD COLUMN calendar_config TEXT");
+  }
 
   if (!hasColumn("notes", "course_id")) {
     database.exec("ALTER TABLE notes ADD COLUMN course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE");

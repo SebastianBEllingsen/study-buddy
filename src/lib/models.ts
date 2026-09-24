@@ -763,6 +763,11 @@ export interface CalendarFeed {
   // place the way show_on_calendar/show_in_widget are. Defaults true, same
   // as those two.
   enabled: boolean;
+  // Gives this feed its own /calendar tab; calendar_config is that tab's
+  // settings as raw JSON text — read it through parseFeedCalendarConfig
+  // (lib/feedCalendar.ts), which fills in defaults for anything missing.
+  own_calendar: boolean;
+  calendar_config: string | null;
   created_at: string;
 }
 
@@ -778,9 +783,15 @@ export async function addCalendarFeed(label: string, url: string): Promise<Calen
   return feed;
 }
 
-export async function updateCalendarFeedVisibility(
+export async function updateCalendarFeed(
   id: number,
-  fields: { show_on_calendar?: boolean; show_in_widget?: boolean; enabled?: boolean }
+  fields: {
+    show_on_calendar?: boolean;
+    show_in_widget?: boolean;
+    enabled?: boolean;
+    own_calendar?: boolean;
+    calendar_config?: string;
+  }
 ): Promise<void> {
   await db.update(calendar_feeds).set(fields).where(eq(calendar_feeds.id, id));
 }
@@ -1448,7 +1459,17 @@ export async function getDocumentLines(documentId: number): Promise<string[]> {
 // col/row/span → CSS translation, shared between the live dashboard
 // (page.tsx) and the editing UI (DashboardCustomizeDialog.tsx).
 
-export const HOME_WIDGET_IDS = ["streak", "due", "heatmap", "calendar", "assignments", "recent", "pomodoro", "links"] as const;
+export const HOME_WIDGET_IDS = [
+  "streak",
+  "due",
+  "heatmap",
+  "calendar",
+  "assignments",
+  "recent",
+  "pomodoro",
+  "links",
+  "timetable",
+] as const;
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
 
 // Two independent widget grids on the home page: "top" above the courses
@@ -1487,6 +1508,10 @@ const DEFAULT_HOME_WIDGETS: HomeWidgetConfig[] = [
   // Starts hidden: it's empty until links are added, so it's opted into
   // from Customize rather than appearing blank on every dashboard.
   { id: "links", enabled: false, zone: "top", col: 3, row: 6, colSpan: 3, rowSpan: 2 },
+  // Starts hidden for the same reason: it needs a feed with its own
+  // /calendar tab (Settings → Calendar feeds → "Own tab") before it has
+  // anything to show.
+  { id: "timetable", enabled: false, zone: "top", col: 0, row: 8, colSpan: 6, rowSpan: 2 },
 ];
 
 function defaultFor(id: HomeWidgetId): HomeWidgetConfig {

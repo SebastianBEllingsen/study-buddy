@@ -9,7 +9,11 @@ vi.mock("@/lib/googleCalendar", () => ({
 }));
 
 const fetchAllFeedEvents = vi.fn();
-vi.mock("@/lib/calendarFeeds", () => ({ fetchAllFeedEvents: (...args: unknown[]) => fetchAllFeedEvents(...args) }));
+const fetchFeedEvents = vi.fn();
+vi.mock("@/lib/calendarFeeds", () => ({
+  fetchAllFeedEvents: (...args: unknown[]) => fetchAllFeedEvents(...args),
+  fetchFeedEvents: (...args: unknown[]) => fetchFeedEvents(...args),
+}));
 
 const listCalendarFeeds = vi.fn();
 vi.mock("@/lib/models", () => ({ listCalendarFeeds: (...args: unknown[]) => listCalendarFeeds(...args) }));
@@ -29,6 +33,7 @@ function makeEvents(n: number, startMs = Date.now()) {
 beforeEach(() => {
   listUpcomingEvents.mockReset().mockResolvedValue([]);
   fetchAllFeedEvents.mockReset().mockResolvedValue([]);
+  fetchFeedEvents.mockReset().mockResolvedValue([]);
   listCalendarFeeds.mockReset().mockResolvedValue([]);
 });
 
@@ -88,5 +93,60 @@ describe("GET /api/calendar/events", () => {
     fetchAllFeedEvents.mockResolvedValue(makeEvents(1));
     const res = await GET(new Request("http://localhost/api/calendar/events"));
     expect(res.status).toBe(200);
+  });
+
+  it("passes a valid timeMin/timeMax range through to the feeds", async () => {
+    listCalendarFeeds.mockResolvedValue([{ label: "A", url: "https://x/a.ics", enabled: true, show_on_calendar: true }]);
+    await GET(
+      new Request("http://localhost/api/calendar/events?timeMin=2026-09-21T00:00:00.000Z&timeMax=2026-09-28T00:00:00.000Z")
+    );
+    expect(fetchAllFeedEvents).toHaveBeenCalledWith(expect.anything(), {
+      timeMin: new Date("2026-09-21T00:00:00.000Z"),
+      timeMax: new Date("2026-09-28T00:00:00.000Z"),
+    });
+  });
+
+  it("ignores an inverted range and falls back to now-onward", async () => {
+    await GET(
+      new Request("http://localhost/api/calendar/events?timeMin=2026-09-28T00:00:00.000Z&timeMax=2026-09-21T00:00:00.000Z")
+    );
+    const [, range] = fetchAllFeedEvents.mock.calls[0];
+    expect(Math.abs(range.timeMin.getTime() - Date.now())).toBeLessThan(5000);
+  });
+
+  describe("with feedId", () => {
+    const feed = { id: 3, label: "Mine Studier", url: "https://x/ms.ics", enabled: false, show_on_calendar: false };
+
+    it("returns only that feed's events, skipping Google, even when the feed is disabled", async () => {
+      listCalendarFeeds.mockResolvedValue([feed]);
+      fetchFeedEvents.mockResolvedValue(makeEvents(3));
+      const res = await GET(new Request("http://localhost/api/calendar/events?feedId=3&maxResults=1000"));
+      const { events } = await res.json();
+      expect(events).toHaveLength(3);
+      expect(listUpcomingEvents).not.toHaveBeenCalled();
+      expect(fetchFeedEvents).toHaveBeenCalledWith(feed, expect.anything());
+    });
+
+    it("404s for an unknown feed", async () => {
+      const res = await GET(new Request("http://localhost/api/calendar/events?feedId=99"));
+      expect(res.status).toBe(404);
+    });
+
+    it("reports a feed fetch failure instead of an empty list", async () => {
+      listCalendarFeeds.mockResolvedValue([feed]);
+      fetchFeedEvents.mockRejectedValue(new Error("boom"));
+      const res = await GET(new Request("http://localhost/api/calendar/events?feedId=3"));
+      expect(res.status).toBe(502);
+    });
+  });
+
+  it("leaves feeds with their own tab out of the merged list", async () => {
+    listCalendarFeeds.mockResolvedValue([
+      { label: "Canvas", url: "https://x/c.ics", enabled: true, show_on_calendar: true, own_calendar: false },
+      { label: "Mine Studier", url: "https://x/ms.ics", enabled: true, show_on_calendar: true, own_calendar: true },
+    ]);
+    await GET(new Request("http://localhost/api/calendar/events"));
+    const [feeds] = fetchAllFeedEvents.mock.calls[0];
+    expect(feeds.map((f: { label: string }) => f.label)).toEqual(["Canvas"]);
   });
 });

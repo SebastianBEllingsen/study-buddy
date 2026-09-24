@@ -41,6 +41,7 @@ import { tileGridStyle } from "@/lib/dashboardGrid";
 import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
 import StudyHeatmap from "@/components/StudyHeatmap";
 import LinksWidget from "@/components/LinksWidget";
+import TimetableWidget from "@/components/calendar/TimetableWidget";
 import PomodoroWidget from "@/components/pomodoro/PomodoroWidget";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
@@ -838,7 +839,7 @@ function RecentActivityWidget({
     return (
       <Card
         elevation={transparent ? "flat" : "raised"}
-        className="h-full items-center justify-center gap-1 overflow-hidden p-2 text-center"
+        className={cn("h-full items-center justify-center gap-1 overflow-hidden p-2 text-center", transparent && "backdrop-legible")}
       >
         <Clock className="size-5 text-focus" />
         {error && <p className="text-xs text-destructive">{error}</p>}
@@ -855,7 +856,7 @@ function RecentActivityWidget({
   }
 
   return (
-    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "" : "bg-card ring-1 ring-foreground/10"}`}>
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl ${transparent ? "backdrop-legible" : "bg-card ring-1 ring-foreground/10"}`}>
       <div
         className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2.5 ${transparent ? "" : "border-b"}`}
       >
@@ -1114,6 +1115,10 @@ function HomePageContent() {
         );
       case "links":
         return <LinksWidget key="links" layout={layout} label={widget.label} transparent={transparentWidgets} />;
+      case "timetable":
+        return (
+          <TimetableWidget key="timetable" layout={layout} label={widget.label} transparent={transparentWidgets} />
+        );
     }
   }
 

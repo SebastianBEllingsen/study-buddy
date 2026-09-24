@@ -302,7 +302,16 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
         .values(stripNulBytes(feedRows))
         .onConflictDoUpdate({
           target: pgSchema.calendar_feeds.id,
-          set: upsertSet(["label", "url", "show_on_calendar", "show_in_widget", "enabled", "created_at"]),
+          set: upsertSet([
+            "label",
+            "url",
+            "show_on_calendar",
+            "show_in_widget",
+            "enabled",
+            "own_calendar",
+            "calendar_config",
+            "created_at",
+          ]),
         });
     }
     if (completedAssignmentRows.length > 0) {

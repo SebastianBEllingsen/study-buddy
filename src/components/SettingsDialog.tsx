@@ -8,7 +8,7 @@ import { SettingGroup, SettingSlider, SettingToggle } from "@/components/Setting
 import { MAX_BACKDROP_BLUR } from "@/lib/backdropBlur";
 import type { FolderChipSettings } from "@/lib/folderChips";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import {
   AlertTriangle,
   Calendar,
@@ -576,6 +576,7 @@ interface CalendarFeed {
   show_on_calendar: boolean;
   show_in_widget: boolean;
   enabled: boolean;
+  own_calendar: boolean;
 }
 
 // Read-only external ICS calendar subscriptions (a university student
@@ -585,6 +586,7 @@ interface CalendarFeed {
 // (label + URL) rather than named for any one provider, so it covers
 // whatever feed a viewer actually has.
 function CalendarFeedsSection() {
+  const { mutate: globalMutate } = useSWRConfig();
   const [feeds, setFeeds] = useState<CalendarFeed[] | null>(null);
   const [label, setLabel] = useState("");
   const [url, setUrl] = useState("");
@@ -632,7 +634,10 @@ function CalendarFeedsSection() {
     }
   }
 
-  async function toggleFeedField(feed: CalendarFeed, field: "show_on_calendar" | "show_in_widget" | "enabled") {
+  async function toggleFeedField(
+    feed: CalendarFeed,
+    field: "show_on_calendar" | "show_in_widget" | "enabled" | "own_calendar"
+  ) {
     const next = !feed[field];
     setFeeds((prev) => prev?.map((f) => (f.id === feed.id ? { ...f, [field]: next } : f)) ?? null);
     const res = await fetch(`/api/calendar-feeds/${feed.id}`, {
@@ -643,7 +648,11 @@ function CalendarFeedsSection() {
     if (!res.ok) {
       toast.error("Couldn't update that feed");
       loadFeeds();
+      return;
     }
+    // /calendar reads the same list through SWR — refresh it so a toggled
+    // tab/visibility shows up there without a reload.
+    globalMutate("/api/calendar-feeds");
   }
 
   return (
@@ -704,7 +713,7 @@ function CalendarFeedsSection() {
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Checkbox
                     checked={feed.show_on_calendar}
-                    disabled={!feed.enabled}
+                    disabled={!feed.enabled || feed.own_calendar}
                     onCheckedChange={() => toggleFeedField(feed, "show_on_calendar")}
                   />
                   On calendar
@@ -712,10 +721,22 @@ function CalendarFeedsSection() {
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Checkbox
                     checked={feed.show_in_widget}
-                    disabled={!feed.enabled}
+                    disabled={!feed.enabled || feed.own_calendar}
                     onCheckedChange={() => toggleFeedField(feed, "show_in_widget")}
                   />
                   In assignments widget
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={feed.own_calendar}
+                    disabled={!feed.enabled}
+                    onCheckedChange={() => toggleFeedField(feed, "own_calendar")}
+                  />
+                  Own tab
+                  <HelpTooltip>
+                    Gives this feed its own tab on the Calendar page: a week timetable with a colour per
+                    course. The feed is then kept out of My calendar, Assignments and the dashboard.
+                  </HelpTooltip>
                 </label>
               </div>
             </li>

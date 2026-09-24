@@ -150,6 +150,13 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
   -- hidden from one place. Pausing keeps its URL/label around, unlike
   -- deleting it.
   enabled INTEGER NOT NULL DEFAULT 1,
+  -- Gives this feed its own tab on /calendar (a week grid, see
+  -- components/calendar/FeedWeekView.tsx) instead of only being blended
+  -- into the shared views. calendar_config is that tab's JSON settings
+  -- (hour range, weekends, per-course colours/aliases) — see
+  -- parseFeedCalendarConfig in models.ts for the shape and defaults.
+  own_calendar INTEGER NOT NULL DEFAULT 0,
+  calendar_config TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

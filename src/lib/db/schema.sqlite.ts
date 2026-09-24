@@ -264,6 +264,9 @@ export const calendar_feeds = sqliteTable("calendar_feeds", {
   // hidden from one place the way show_on_calendar/show_in_widget are.
   // Pausing a feed like this keeps its URL/label around, unlike deleting it.
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  // Own /calendar tab + its JSON settings — see schema.sql's comment.
+  own_calendar: integer("own_calendar", { mode: "boolean" }).notNull().default(false),
+  calendar_config: text("calendar_config"),
   created_at: text("created_at").notNull(),
 });
 

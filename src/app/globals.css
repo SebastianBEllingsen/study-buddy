@@ -2269,6 +2269,21 @@ html[data-wallpaper] [data-slot="detached-page"] {
   text-shadow: none;
 }
 
+/* A stronger version of the halo above, for widgets that are mostly small
+   grey text (the timetable, recent activity) — the shared halo is too soft
+   for that over a bright patch of picture. Muted text sits closer to the
+   main text color and the shadow is denser — centered on the glyphs, no
+   offset, since an offset reads as a blocky drop shadow — so it reads
+   anywhere on the picture without boxing the widget into a card. Opt in
+   per widget, only in transparent-widget mode. */
+.backdrop-legible {
+  --muted-foreground: color-mix(in oklch, var(--foreground) 86%, var(--background));
+  text-shadow:
+    0 0 1px color-mix(in oklch, var(--background) 80%, transparent),
+    0 0 3px color-mix(in oklch, var(--background) 55%, transparent),
+    0 0 8px color-mix(in oklch, var(--background) 30%, transparent);
+}
+
 /* The header tinted by the page's backdrop picture (lib/useHeaderReflection.ts):
    a blurred, faded copy of it between the header's own background and its
    content, so the colors carry up into the header without the picture's
