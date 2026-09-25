@@ -1,4 +1,4 @@
-import { createFolder, CannotNestSubfolderError, InvalidDestinationFolderError } from "@/lib/models";
+import { createFolder, InvalidDestinationFolderError } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ courseId: string }> };
@@ -18,7 +18,7 @@ export async function POST(request: Request, { params }: Params) {
     const folder = await createFolder(id, name, parentFolderId);
     return Response.json(folder, { status: 201 });
   } catch (err) {
-    if (err instanceof CannotNestSubfolderError || err instanceof InvalidDestinationFolderError) {
+    if (err instanceof InvalidDestinationFolderError) {
       return Response.json({ error: err.message }, { status: 400 });
     }
     throw err;

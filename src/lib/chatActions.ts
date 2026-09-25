@@ -4,6 +4,7 @@ import type { ChatAction, ChatAttachment, ChatMessage, Folder } from "./models";
 import { parseDataUrlImage } from "./dataUrlImage";
 import { extFromMimeType } from "./aiBackends/cliWorkspace";
 import { ingestDocumentBytes } from "./documentIngest";
+import { folderPathLabel } from "./folderTree";
 
 export interface AvailableAttachment {
   // "m<messageId>-<attachmentIndex>" — a compact identifier the model can
@@ -124,7 +125,9 @@ export async function detectChatActions(params: {
   const availableRefs = new Set(params.availableAttachments.map((a) => a.ref));
 
   const folderList = params.folders.length
-    ? params.folders.map((f) => `- id ${f.id}: "${f.name}"`).join("\n")
+    ? // Full paths ("Parent / Child"), so same-named folders nested in
+      // different places stay distinguishable.
+      params.folders.map((f) => `- id ${f.id}: "${folderPathLabel(params.folders, f.id)}"`).join("\n")
     : "(none yet)";
   const attachmentList = params.availableAttachments.length
     ? params.availableAttachments.map((a) => `- ref "${a.ref}": ${a.type} "${a.filename}"`).join("\n")

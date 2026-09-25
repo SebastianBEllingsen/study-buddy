@@ -46,7 +46,8 @@ export default function HelpDialog() {
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
           <HelpSection title="Courses & material">
             Create a course, then upload PDFs (or paste text/images) into folders. Drag things
-            between folders to reorganize.
+            between folders to reorganize. Folders can hold subfolders as many levels deep as you
+            like — drop a folder onto another folder&apos;s name to nest it inside.
           </HelpSection>
           <HelpSection title="Generate">
             From a folder — or &quot;All course material&quot; — generate Notes, a Quiz, or

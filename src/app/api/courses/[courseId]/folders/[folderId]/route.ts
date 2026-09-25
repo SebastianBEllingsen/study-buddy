@@ -1,5 +1,5 @@
 import {
-  CannotNestSubfolderError,
+  CannotNestFolderError,
   deleteFolder,
   nestFolder,
   renameFolder,
@@ -21,7 +21,7 @@ export async function PATCH(request: Request, { params }: Params) {
     try {
       await nestFolder(id, body.parentFolderId as number | null);
     } catch (err) {
-      if (err instanceof CannotNestSubfolderError) {
+      if (err instanceof CannotNestFolderError) {
         return Response.json({ error: err.message }, { status: 400 });
       }
       throw err;

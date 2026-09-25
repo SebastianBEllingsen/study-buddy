@@ -135,11 +135,11 @@ export const folders = sqliteTable("folders", {
     .references(() => courses.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   position: integer("position").notNull().default(0),
-  // One level of nesting only — a subfolder's own parent_folder_id is
-  // always null. Cascades so deleting a parent takes its subfolders with
-  // it at the DB level too, as a backstop to models.ts's deleteFolder,
-  // which reassigns their documents/items to the course's master folder
-  // first (never relying on this cascade for that part).
+  // Nests to any depth (see lib/folderTree.ts). Cascades so deleting a
+  // parent takes its whole subtree with it at the DB level too, as a
+  // backstop to models.ts's deleteFolder, which moves every affected
+  // folder's documents/items/notes to the course page first (never relying
+  // on this cascade for that part).
   parent_folder_id: integer("parent_folder_id").references((): AnySQLiteColumn => folders.id, {
     onDelete: "cascade",
   }),

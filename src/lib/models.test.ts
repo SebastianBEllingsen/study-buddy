@@ -48,7 +48,9 @@ const {
   reconcileFlashcardScheduleAfterRemoval,
   reconcileFlashcardReviewsAfterRemoval,
   InvalidDestinationFolderError,
-  CannotNestSubfolderError,
+  CannotNestFolderError,
+  getNewDocumentsForItem,
+  markDocumentExtracted,
   listDueFlashcardItems,
   searchAll,
   createCanvas,
@@ -282,10 +284,51 @@ describe("cross-course create-path validation", () => {
     await expect(createFolder(courseA.id, "Sub", folderB.id)).rejects.toThrow(InvalidDestinationFolderError);
   });
 
-  it("createFolder still enforces the one-level nesting rule for a same-course parent", async () => {
+  it("createFolder nests subfolders to any depth", async () => {
     const { course, folder: top } = await makeCourseWithFolder();
     const sub = await createFolder(course.id, "Sub", top.id);
-    await expect(createFolder(course.id, "SubSub", sub.id)).rejects.toThrow(CannotNestSubfolderError);
+    const subSub = await createFolder(course.id, "SubSub", sub.id);
+    const subSubSub = await createFolder(course.id, "SubSubSub", subSub.id);
+    expect(subSub.parent_folder_id).toBe(sub.id);
+    expect(subSubSub.parent_folder_id).toBe(subSub.id);
+  });
+
+  it("nestFolder moves a folder that has its own subfolders under a subfolder, keeping its subtree", async () => {
+    const course = await createCourse("C");
+    const a = await createFolder(course.id, "A");
+    const aChild = await createFolder(course.id, "A child", a.id);
+    const b = await createFolder(course.id, "B");
+    const moving = await createFolder(course.id, "Moving");
+    const movingChild = await createFolder(course.id, "Moving child", moving.id);
+
+    await nestFolder(moving.id, aChild.id);
+
+    expect((await getFolder(moving.id))?.parent_folder_id).toBe(aChild.id);
+    expect((await getFolder(movingChild.id))?.parent_folder_id).toBe(moving.id);
+    // Unrelated folders untouched.
+    expect((await getFolder(b.id))?.parent_folder_id).toBeNull();
+  });
+
+  it("nestFolder refuses to nest a folder inside its own subtree", async () => {
+    const course = await createCourse("C");
+    const top = await createFolder(course.id, "Top");
+    const mid = await createFolder(course.id, "Mid", top.id);
+    const leaf = await createFolder(course.id, "Leaf", mid.id);
+
+    await expect(nestFolder(top.id, leaf.id)).rejects.toThrow(CannotNestFolderError);
+    await expect(nestFolder(top.id, mid.id)).rejects.toThrow(CannotNestFolderError);
+    expect((await getFolder(top.id))?.parent_folder_id).toBeNull();
+  });
+
+  it("nestFolder with null moves a deeply nested folder back to top level", async () => {
+    const course = await createCourse("C");
+    const top = await createFolder(course.id, "Top");
+    const mid = await createFolder(course.id, "Mid", top.id);
+    const leaf = await createFolder(course.id, "Leaf", mid.id);
+
+    await nestFolder(leaf.id, null);
+
+    expect((await getFolder(leaf.id))?.parent_folder_id).toBeNull();
   });
 
   it("nestFolder silently no-ops when the parent belongs to a different course, rather than cross-linking them", async () => {
@@ -331,6 +374,46 @@ describe("deleteFolder reassignment", () => {
     expect(movedNote?.folder_id).toBeNull();
     // The deleted folder itself is really gone.
     expect(await getFolder(folder.id)).toBeUndefined();
+  });
+
+  it("deletes every level of subfolder under it, moving all their contents to the course page", async () => {
+    const course = await createCourse("C");
+    const top = await createFolder(course.id, "Top");
+    const mid = await createFolder(course.id, "Mid", top.id);
+    const leaf = await createFolder(course.id, "Leaf", mid.id);
+    const sibling = await createFolder(course.id, "Sibling");
+    const deepDoc = await createDocument({
+      courseId: course.id,
+      folderId: leaf.id,
+      filename: "deep.pdf",
+      filePath: "/tmp/deep.pdf",
+      fileBase64: null,
+    });
+    const midNote = await createNote("Mid note", course.id, mid.id);
+    const siblingNote = await createNote("Sibling note", course.id, sibling.id);
+
+    await deleteFolder(top.id);
+
+    expect(await getFolder(top.id)).toBeUndefined();
+    expect(await getFolder(mid.id)).toBeUndefined();
+    expect(await getFolder(leaf.id)).toBeUndefined();
+    expect((await getDocument(deepDoc.id))?.folder_id).toBeNull();
+    expect((await getNote(midNote.id))?.folder_id).toBeNull();
+    // Outside the deleted subtree — untouched.
+    expect(await getFolder(sibling.id)).toBeDefined();
+    expect((await getNote(siblingNote.id))?.folder_id).toBe(sibling.id);
+  });
+
+  it("deleting a subfolder leaves its parent in place", async () => {
+    const course = await createCourse("C");
+    const top = await createFolder(course.id, "Top");
+    const mid = await createFolder(course.id, "Mid", top.id);
+    const leaf = await createFolder(course.id, "Leaf", mid.id);
+
+    await deleteFolder(mid.id);
+
+    expect(await getFolder(top.id)).toBeDefined();
+    expect(await getFolder(leaf.id)).toBeUndefined();
   });
 
   it("just deletes an empty folder with nothing to reassign", async () => {
@@ -828,5 +911,38 @@ describe("resilience to a corrupted content_json row", () => {
 
     const itemIds = results.filter((r) => r.kind === "item").map((r) => r.itemId);
     expect(itemIds).not.toContain(broken.id);
+  });
+});
+
+describe("getNewDocumentsForItem with nested folders", () => {
+  async function extractedDoc(courseId: number, folderId: number | null, filename: string) {
+    const doc = await createDocument({ courseId, folderId, filename, filePath: `/tmp/${filename}`, fileBase64: null });
+    await markDocumentExtracted({ id: doc.id, extractedText: "text", pageCount: 1, charCount: 4 });
+    return doc;
+  }
+
+  it("counts new documents anywhere in the source folder's subtree, but not outside it", async () => {
+    const course = await createCourse("C");
+    const top = await createFolder(course.id, "Top");
+    const mid = await createFolder(course.id, "Mid", top.id);
+    const leaf = await createFolder(course.id, "Leaf", mid.id);
+    const other = await createFolder(course.id, "Other");
+    const covered = await extractedDoc(course.id, top.id, "covered.pdf");
+    const item = await createGeneratedItem({
+      courseId: course.id,
+      folderId: top.id,
+      sourceFolderId: top.id,
+      sourceHandpicked: false,
+      mode: "notes",
+      title: "T",
+      contentJson: {},
+      sourceDocumentIds: [covered.id],
+    });
+    const deepNew = await extractedDoc(course.id, leaf.id, "deep.pdf");
+    await extractedDoc(course.id, other.id, "elsewhere.pdf");
+
+    const fresh = await getNewDocumentsForItem(item);
+
+    expect(fresh.map((d) => d.id)).toEqual([deepNew.id]);
   });
 });

@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { CourseSummary, Folder } from "@/lib/models";
+import { folderPathLabel } from "@/lib/folderTree";
+import { FolderSelectItems } from "@/components/FolderSelectItems";
 
 // Select needs a string value — this maps to `folderId: null` ("save
 // directly on the course page", the same destination a course-page upload
@@ -138,17 +140,17 @@ export default function SaveAttachmentToCourseDialog({
               <SelectTrigger className="w-full">
                 <SelectValue>
                   {(v: string) =>
-                    v === COURSE_PAGE_SENTINEL ? "This course page" : (folders.find((f) => String(f.id) === v)?.name ?? v)
+                    v === COURSE_PAGE_SENTINEL
+                      ? "This course page"
+                      : folders.some((f) => String(f.id) === v)
+                        ? folderPathLabel(folders, Number(v))
+                        : v
                   }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
-                {folders.map((f) => (
-                  <SelectItem key={f.id} value={String(f.id)}>
-                    {f.name}
-                  </SelectItem>
-                ))}
+                <FolderSelectItems folders={folders} />
               </SelectContent>
             </Select>
           </div>

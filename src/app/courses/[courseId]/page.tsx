@@ -19,6 +19,7 @@ import {
   Image as ImageIcon,
   Layers,
   ListChecks,
+  LoaderCircle,
   NotebookPen,
   Palette,
   Pencil,
@@ -52,6 +53,7 @@ import { shouldShowWallpaper } from "@/lib/appWallpaper";
 import { useHeaderReflection } from "@/lib/useHeaderReflection";
 import { parseFolderChipSettings, visibleFolderChips, type FolderChip } from "@/lib/folderChips";
 import { setDragPayload, readDragPayload } from "@/lib/dragDrop";
+import { descendantFolderIds, folderPathLabel, subtreeFolderIds, wouldCreateCycle } from "@/lib/folderTree";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import { useDocumentBadgeSettings } from "@/lib/useDocumentBadgeSettings";
@@ -59,6 +61,7 @@ import { useAiEnabled } from "@/lib/useAiEnabled";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
+import { FolderSelectItems } from "@/components/FolderSelectItems";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
 import { RowActionsMenu, type RowAction } from "@/components/RowActionsMenu";
 import { FOLDER_TOGGLED_EVENT, areAllFoldersOpen, collapseKey } from "@/lib/folderCollapse";
@@ -76,7 +79,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -125,9 +127,9 @@ interface CourseDetail {
 }
 
 const MODE_LABELS: Record<GenerationMode, string> = {
-  notes: "Generate Notes",
-  quiz: "Generate Quiz",
-  flashcards: "Generate Flashcards",
+  notes: "Notes",
+  quiz: "Quiz",
+  flashcards: "Flashcards",
 };
 
 // Distinct icon + accent per mode — quiet differentiation (a tinted bottom
@@ -135,10 +137,12 @@ const MODE_LABELS: Record<GenerationMode, string> = {
 // same icon/color reappears next to each generated item's title in
 // GeneratedItemList, so a quiz set looks like a quiz set at a glance
 // wherever it shows up on this page, not just on the generate buttons.
-const MODE_META: Record<GenerationMode, { icon: LucideIcon; borderClass: string; textClass: string }> = {
-  notes: { icon: NotebookPen, borderClass: "border-b-2 border-b-focus", textClass: "text-focus" },
-  quiz: { icon: HelpCircle, borderClass: "border-b-2 border-b-amber", textClass: "text-amber" },
-  flashcards: { icon: Layers, borderClass: "border-b-2 border-b-sage", textClass: "text-sage" },
+// tintClass: the mode's color as a soft chip behind its icon — the Practice
+// section's generate tiles.
+const MODE_META: Record<GenerationMode, { icon: LucideIcon; tintClass: string; textClass: string }> = {
+  notes: { icon: NotebookPen, tintClass: "bg-focus/12 text-focus", textClass: "text-focus" },
+  quiz: { icon: HelpCircle, tintClass: "bg-amber/15 text-amber", textClass: "text-amber" },
+  flashcards: { icon: Layers, tintClass: "bg-sage/15 text-sage", textClass: "text-sage" },
 };
 
 // What every "+" menu on this page offers — the Folders header's, each
@@ -228,17 +232,17 @@ function FolderSelect({
       <SelectTrigger size="sm" aria-label={ariaLabel}>
         <SelectValue>
           {(v: string) =>
-            v === COURSE_PAGE_SENTINEL ? "This course page" : (folders.find((f) => String(f.id) === v)?.name ?? v)
+            v === COURSE_PAGE_SENTINEL
+              ? "This course page"
+              : folders.some((f) => String(f.id) === v)
+                ? folderPathLabel(folders, Number(v))
+                : v
           }
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
-        {folders.map((folder) => (
-          <SelectItem key={folder.id} value={String(folder.id)}>
-            {folder.name}
-          </SelectItem>
-        ))}
+        <FolderSelectItems folders={folders} />
       </SelectContent>
     </Select>
   );
@@ -307,7 +311,9 @@ function DocumentPickerDialog({
             [...byFolder.entries()].map(([folderId, docs]) => (
               <div key={String(folderId)} className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">
-                  {folderId === null ? "This course page" : (folders.find((f) => f.id === folderId)?.name ?? "This course page")}
+                  {folderId === null || !folders.some((f) => f.id === folderId)
+                    ? "This course page"
+                    : folderPathLabel(folders, folderId)}
                 </p>
                 {docs.map((doc) => (
                   <label
@@ -770,7 +776,6 @@ function FolderCard({
   onNest,
   onCreateSubfolder,
   chips,
-  isSubfolder = false,
 }: {
   folder: Folder;
   folders: Folder[];
@@ -805,9 +810,6 @@ function FolderCard({
   onCreateSubfolder: (parentFolderId: number) => void;
   // Which count tags to show after the name — see lib/folderChips.ts.
   chips: Set<FolderChip>;
-  // True for a folder rendered inside its parent's card — hides subfolder-
-  // only actions (nesting, "+ Subfolder") since nesting is one level deep.
-  isSubfolder?: boolean;
 }) {
   const [open, onOpenChange] = useCollapsed(collapseKey(folder.id));
   const [renaming, setRenaming] = useState(false);
@@ -820,18 +822,15 @@ function FolderCard({
   const documents = docsByFolder(folder.id);
   const items = itemsByFolder(folder.id);
   const notes = notesByFolder(folder.id);
-  const subfolders = isSubfolder
-    ? []
-    : folders.filter((f) => f.parent_folder_id === folder.id);
+  const subfolders = folders.filter((f) => f.parent_folder_id === folder.id);
 
   // A pending "just generated" notification for an item filed directly in
-  // this folder — or, one level down, in one of its subfolders (subfolders
-  // render inside THIS card's own CollapsibleContent, so their content
-  // never even mounts, notification and all, while this card is collapsed).
-  const hasNotifiedHere = items.some((item) => notifiedItemIds.has(item.id));
-  const hasNotifiedSubtree =
-    hasNotifiedHere ||
-    subfolders.some((sub) => itemsByFolder(sub.id).some((item) => notifiedItemIds.has(item.id)));
+  // this folder — or anywhere below it (subfolders render inside THIS
+  // card's own CollapsibleContent, so their content never even mounts,
+  // notification and all, while this card is collapsed).
+  const hasNotifiedSubtree = subtreeFolderIds(folders, folder.id).some((id) =>
+    itemsByFolder(id).some((item) => notifiedItemIds.has(item.id))
+  );
 
   // Force this card open the moment its subtree has something to show for —
   // same "don't fight a manual re-collapse afterward" rule as
@@ -892,20 +891,16 @@ function FolderCard({
   // the card's normal handler so document/item moves and folder reordering
   // still work when dropped here too.
   function handleNameAreaDragOver(e: React.DragEvent) {
-    if (isSubfolder) return;
     e.preventDefault();
     e.stopPropagation();
     setNameDragOver(true);
   }
 
   function handleNameAreaDrop(e: React.DragEvent) {
-    if (isSubfolder) return;
     const payload = readDragPayload(e);
-    if (
-      payload?.kind === "folder" &&
-      payload.id !== folder.id &&
-      !folders.some((f) => f.parent_folder_id === payload.id)
-    ) {
+    // Any folder can nest under any other, except into itself or its own
+    // subtree (nestFolder in lib/models.ts rejects that too).
+    if (payload?.kind === "folder" && !wouldCreateCycle(folders, payload.id, folder.id)) {
       e.preventDefault();
       e.stopPropagation();
       setNameDragOver(false);
@@ -938,7 +933,7 @@ function FolderCard({
                   folder name for attention every time you just glance at
                   the list. */}
               <GripVertical className="size-4 shrink-0 text-muted-foreground/30 transition-colors group-focus-within:text-muted-foreground group-hover:text-muted-foreground [@media(hover:none)]:hidden" />
-              <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
+              <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
                 <ChevronRight
                   className={`size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-90" : ""}`}
                 />
@@ -1042,11 +1037,7 @@ function FolderCard({
                   triggerIcon={Plus}
                   actions={[
                     ...addContentActions((kind) => onAddToFolder(folder.id, kind)),
-                    // Nesting is one level deep — a subfolder can't have its
-                    // own subfolder, so this option only shows up top-level.
-                    ...(isSubfolder
-                      ? []
-                      : [{ label: "New subfolder", icon: FolderPlus, onSelect: () => onCreateSubfolder(folder.id) }]),
+                    { label: "New subfolder", icon: FolderPlus, onSelect: () => onCreateSubfolder(folder.id) },
                   ]}
                 />
               )}
@@ -1069,7 +1060,7 @@ function FolderCard({
           <div className="space-y-2 py-1 pl-[1.625rem]">
             {documents.length + items.length + notes.length + subfolders.length === 0 ? (
               <p className="py-1 text-sm text-muted-foreground">
-                Nothing here yet — use + to upload, paste text or add a note.
+                Nothing here yet
               </p>
             ) : (
               // One merged list instead of three always-expanded Documents/
@@ -1156,7 +1147,6 @@ function FolderCard({
                     onNest={onNest}
                     onCreateSubfolder={onCreateSubfolder}
                     chips={chips}
-                    isSubfolder
                   />
                 ))}
               </div>
@@ -1325,7 +1315,7 @@ export default function CoursePage() {
   // search, like an uploaded PDF. Note: opened straight into the wiki-style
   // note editor instead — not picked up as generation source material,
   // since generation reads from documents only (see generate/[mode]/route.ts).
-  const [pasteSaveAs, setPasteSaveAs] = useState<"document" | "note">("document");
+  const [pasteSaveAs, setPasteSaveAs] = useState<"document" | "note">("note");
   const [pasting, setPasting] = useState(false);
   const [tidyingPaste, setTidyingPaste] = useState(false);
   const [insertingImage, setInsertingImage] = useState(false);
@@ -1703,7 +1693,7 @@ export default function CoursePage() {
       setPasteOpen(false);
       setPasteTitle("");
       setPasteText("");
-      setPasteSaveAs("document");
+      setPasteSaveAs("note");
       setUploadNewFolderName("");
       refresh();
     } catch (err) {
@@ -2150,11 +2140,10 @@ export default function CoursePage() {
   const topLevelItems = itemsByFolder(null);
   const topLevelNotes = notesByFolder(null);
 
-  // Picking a parent folder as the generation scope pools it with its own
-  // subfolders — matches buildCourseContext's scoping in lib/context.ts.
-  const subfolderIdsOf = (folderId: number) =>
-    detail.folders.filter((f) => f.parent_folder_id === folderId).map((f) => f.id);
-  const pooledFolderIds = (folderId: number) => [folderId, ...subfolderIdsOf(folderId)];
+  // Picking a folder as the generation scope pools it with every subfolder
+  // nested under it — matches buildCourseContext's scoping in lib/context.ts.
+  const hasSubfolders = (folderId: number) => descendantFolderIds(detail.folders, folderId).length > 0;
+  const pooledFolderIds = (folderId: number) => subtreeFolderIds(detail.folders, folderId);
 
   const scopedHasExtracted =
     generationDocIds.size > 0
@@ -2446,7 +2435,7 @@ export default function CoursePage() {
                     </DialogTitle>
                     <DialogDescription>
                       {newFolderParentId != null
-                        ? "One level deep — e.g. \"Test 1\" inside a \"Tests\" folder."
+                        ? "Nests inside the folder you picked — subfolders can have their own subfolders too."
                         : "Organize one topic — e.g. a specific test or week's lectures."}
                     </DialogDescription>
                   </DialogHeader>
@@ -2500,17 +2489,13 @@ export default function CoursePage() {
                                 ? "+ Create new folder"
                                 : v === COURSE_PAGE_SENTINEL
                                   ? "This course page"
-                                  : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                                  : (detail.folders.some((f) => String(f.id) === v) ? folderPathLabel(detail.folders, Number(v)) : v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
-                          {detail.folders.map((folder) => (
-                            <SelectItem key={folder.id} value={String(folder.id)}>
-                              {folder.name}
-                            </SelectItem>
-                          ))}
+                          <FolderSelectItems folders={detail.folders} />
                           <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
                         </SelectContent>
                       </Select>
@@ -2580,17 +2565,13 @@ export default function CoursePage() {
                                 ? "+ Create new folder"
                                 : v === COURSE_PAGE_SENTINEL
                                   ? "This course page"
-                                  : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                                  : (detail.folders.some((f) => String(f.id) === v) ? folderPathLabel(detail.folders, Number(v)) : v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
-                          {detail.folders.map((folder) => (
-                            <SelectItem key={folder.id} value={String(folder.id)}>
-                              {folder.name}
-                            </SelectItem>
-                          ))}
+                          <FolderSelectItems folders={detail.folders} />
                           <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
                         </SelectContent>
                       </Select>
@@ -2736,17 +2717,13 @@ export default function CoursePage() {
                                 ? "+ Create new folder"
                                 : v === COURSE_PAGE_SENTINEL
                                   ? "This course page"
-                                  : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
+                                  : (detail.folders.some((f) => String(f.id) === v) ? folderPathLabel(detail.folders, Number(v)) : v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
-                          {detail.folders.map((folder) => (
-                            <SelectItem key={folder.id} value={String(folder.id)}>
-                              {folder.name}
-                            </SelectItem>
-                          ))}
+                          <FolderSelectItems folders={detail.folders} />
                           <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
                         </SelectContent>
                       </Select>
@@ -2843,13 +2820,7 @@ export default function CoursePage() {
               actions={addContentActions((kind) => openAddToFolder(null, kind))}
             />
           </div>
-          {topLevelDocuments.length + topLevelItems.length + topLevelNotes.length === 0 ? (
-            detail.folders.length > 0 && (
-              <p className="py-1 text-sm text-muted-foreground">
-                Nothing filed directly on the course page yet.
-              </p>
-            )
-          ) : (
+          {topLevelDocuments.length + topLevelItems.length + topLevelNotes.length > 0 && (
             <ul className="divide-y divide-border/60">
               {topLevelDocuments.length > 0 && (
                 <DocumentList
@@ -2914,7 +2885,7 @@ export default function CoursePage() {
             topLevelItems.length === 0 &&
             topLevelNotes.length === 0 && (
               <p className="py-1 text-sm text-muted-foreground">
-                Nothing here yet — use + to upload files, paste text or create a folder.
+                Nothing here yet
               </p>
             )}
           {detail.folders
@@ -2970,11 +2941,16 @@ export default function CoursePage() {
       <Card elevation="flat" className="gap-0 overflow-visible py-0">
         <Collapsible open={practiceOpen} onOpenChange={setPracticeOpen}>
           <div className="flex items-center rounded-lg hover:bg-muted/40">
-            <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 py-3 pl-4 text-left font-heading text-base font-semibold">
+            {/* The trigger spans the whole row, so the browser's default
+                square focus outline boxed the full width — a soft inset ring
+                with the row's own rounding instead. */}
+            <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-3 pl-4 text-left font-heading text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset">
               <Sparkles className="size-4 text-focus" />
               Practice
+              {/* Next to the title, turning the same way as the folder
+                  cards' chevrons. */}
               <ChevronRight
-                className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${practiceOpen ? "rotate-90" : ""}`}
+                className={`size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${practiceOpen ? "rotate-90" : ""}`}
               />
             </CollapsibleTrigger>
             <Button
@@ -2989,85 +2965,108 @@ export default function CoursePage() {
             </Button>
           </div>
           <CollapsibleContent>
-        <CardContent className="space-y-3 pb-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Label className="text-sm text-muted-foreground">From</Label>
-            {generationDocIds.size > 0 ? (
-              // A hand-picked document selection replaces the folder Select
-              // entirely rather than sitting alongside it — the two answer
-              // the same "From" question, so showing both would suggest
-              // they combine, which they don't (see generationDocIds' own
-              // comment above).
-              <>
-                <Badge variant="secondary" className="gap-1">
-                  {generationDocIds.size} document{generationDocIds.size === 1 ? "" : "s"} selected
-                </Badge>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setDocPickerOpen(true)}
-                >
-                  Change
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-7"
-                  aria-label="Clear document selection"
-                  onClick={() => setGenerationDocIds(new Set())}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </>
-            ) : (
-              <>
-                <Select value={scope} onValueChange={(v) => setScope(v ?? ALL_MATERIAL)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue>
-                      {(v: string) => {
-                        if (v === ALL_MATERIAL) return "All course material";
-                        const folder = detail.folders.find((f) => String(f.id) === v);
-                        if (!folder) return v;
-                        const hasSubfolders = subfolderIdsOf(folder.id).length > 0;
-                        return hasSubfolders ? `${folder.name} (incl. subfolders)` : folder.name;
-                      }}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL_MATERIAL}>All course material</SelectItem>
-                    {detail.folders
-                      .filter((folder) => folder.parent_folder_id == null)
-                      .map((folder) => {
-                        const subfolders = detail.folders.filter(
-                          (f) => f.parent_folder_id === folder.id
-                        );
-                        return (
-                          <SelectGroup key={folder.id}>
-                            <SelectItem value={String(folder.id)}>
-                              {folder.name}
-                              {subfolders.length > 0 ? " (incl. subfolders)" : ""}
-                            </SelectItem>
-                            {subfolders.map((sub) => (
-                              <SelectItem key={sub.id} value={String(sub.id)} className="pl-6">
-                                {sub.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        );
-                      })}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 text-xs text-muted-foreground"
-                  onClick={() => setDocPickerOpen(true)}
-                >
-                  or choose documents
-                </Button>
-              </>
-            )}
+        <CardContent className="space-y-4 pb-4">
+          {/* Labels share one column so both pickers start on the same
+              line, whatever the label widths. */}
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5">
+            <Label className="text-sm text-muted-foreground">Material</Label>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {generationDocIds.size > 0 ? (
+                // A hand-picked document selection replaces the folder Select
+                // entirely rather than sitting alongside it — the two answer
+                // the same "Material" question, so showing both would suggest
+                // they combine, which they don't (see generationDocIds' own
+                // comment above).
+                <>
+                  <Badge variant="secondary" className="gap-1">
+                    {generationDocIds.size} document{generationDocIds.size === 1 ? "" : "s"} selected
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setDocPickerOpen(true)}
+                  >
+                    Change
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7"
+                    aria-label="Clear document selection"
+                    onClick={() => setGenerationDocIds(new Set())}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Select value={scope} onValueChange={(v) => setScope(v ?? ALL_MATERIAL)}>
+                    <SelectTrigger size="sm">
+                      <SelectValue>
+                        {(v: string) => {
+                          if (v === ALL_MATERIAL) return "All course material";
+                          const folder = detail.folders.find((f) => String(f.id) === v);
+                          if (!folder) return v;
+                          const label = folderPathLabel(detail.folders, folder.id);
+                          return hasSubfolders(folder.id) ? `${label} (incl. subfolders)` : label;
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_MATERIAL}>All course material</SelectItem>
+                      <FolderSelectItems
+                        folders={detail.folders}
+                        suffix={(folder) => (hasSubfolders(folder.id) ? " (incl. subfolders)" : "")}
+                      />
+                    </SelectContent>
+                  </Select>
+                  {/* Same type size/weight as the folder Select beside it. */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-sm font-normal"
+                    onClick={() => setDocPickerOpen(true)}
+                  >
+                    <ListChecks className="text-muted-foreground" />
+                    Choose documents
+                  </Button>
+                </>
+              )}
+            </div>
+            <Label className="text-sm text-muted-foreground">Save to</Label>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Select value={generationDestination} onValueChange={(v) => v && setGenerationDestination(v)}>
+                <SelectTrigger size="sm">
+                  <SelectValue>
+                    {(v: string) =>
+                      v === AUTO_DESTINATION_SENTINEL
+                        ? "Same as source"
+                        : v === NEW_FOLDER_SENTINEL
+                          ? "+ Create new folder"
+                          : v === COURSE_PAGE_SENTINEL
+                            ? "This course page"
+                            : (detail.folders.some((f) => String(f.id) === v) ? folderPathLabel(detail.folders, Number(v)) : v)
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO_DESTINATION_SENTINEL}>Same as source</SelectItem>
+                  <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
+                  <FolderSelectItems folders={detail.folders} />
+                  <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
+                </SelectContent>
+              </Select>
+              {generationDestination === NEW_FOLDER_SENTINEL && (
+                <Input
+                  autoFocus
+                  value={generationNewFolderName}
+                  onChange={(e) => setGenerationNewFolderName(e.target.value)}
+                  placeholder="New folder name"
+                  className="h-8 w-40 text-xs"
+                />
+              )}
+            </div>
           </div>
           <DocumentPickerDialog
             open={docPickerOpen}
@@ -3077,68 +3076,54 @@ export default function CoursePage() {
             selected={generationDocIds}
             onApply={setGenerationDocIds}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <Label className="text-sm text-muted-foreground">Save to</Label>
-            <Select value={generationDestination} onValueChange={(v) => v && setGenerationDestination(v)}>
-              <SelectTrigger size="sm">
-                <SelectValue>
-                  {(v: string) =>
-                    v === AUTO_DESTINATION_SENTINEL
-                      ? "Same as source"
-                      : v === NEW_FOLDER_SENTINEL
-                        ? "+ Create new folder"
-                        : v === COURSE_PAGE_SENTINEL
-                          ? "This course page"
-                          : (detail.folders.find((f) => String(f.id) === v)?.name ?? v)
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={AUTO_DESTINATION_SENTINEL}>Same as source</SelectItem>
-                <SelectItem value={COURSE_PAGE_SENTINEL}>This course page</SelectItem>
-                {detail.folders.map((folder) => (
-                  <SelectItem key={folder.id} value={String(folder.id)}>
-                    {folder.name}
-                  </SelectItem>
-                ))}
-                <SelectItem value={NEW_FOLDER_SENTINEL}>+ Create new folder</SelectItem>
-              </SelectContent>
-            </Select>
-            {generationDestination === NEW_FOLDER_SENTINEL && (
-              <Input
-                autoFocus
-                value={generationNewFolderName}
-                onChange={(e) => setGenerationNewFolderName(e.target.value)}
-                placeholder="New folder name"
-                className="h-8 w-40 text-xs"
-              />
+          <div className="space-y-2 border-t border-border/60 pt-4">
+            <p className="text-sm font-medium">Generate</p>
+            {!scopedHasExtracted && (
+              <p className="text-sm text-muted-foreground">
+                Upload at least one document that extracts successfully in this scope before generating.
+              </p>
             )}
-          </div>
-          {!scopedHasExtracted && (
-            <p className="text-sm text-muted-foreground">
-              Upload at least one document that extracts successfully in this scope before generating.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(MODE_LABELS) as GenerationMode[]).map((mode) => {
-              const Icon = MODE_META[mode].icon;
-              return (
-                <Button
-                  key={mode}
-                  variant="outline"
-                  className={`bg-card ${MODE_META[mode].borderClass}`}
-                  onClick={() => (mode === "quiz" ? setQuizDialogOpen(true) : handleGenerate(mode))}
-                  disabled={
-                    !scopedHasExtracted ||
-                    generating !== null ||
-                    (generationDestination === NEW_FOLDER_SENTINEL && !generationNewFolderName.trim())
-                  }
-                >
-                  <Icon className={MODE_META[mode].textClass} />
-                  {generating === mode ? "Generating…" : MODE_LABELS[mode]}
-                </Button>
-              );
-            })}
+            {/* Capped so the tiles stay button-sized instead of stretching
+                across a wide card with nothing in them. */}
+            <div className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
+              {(Object.keys(MODE_LABELS) as GenerationMode[]).map((mode) => {
+                const Icon = MODE_META[mode].icon;
+                const busy = generating === mode;
+                return (
+                  <Button
+                    key={mode}
+                    variant="outline"
+                    // The running tile stays enabled (full strength, clicks
+                    // ignored) so it reads as busy, not switched off; only
+                    // the others dim.
+                    aria-busy={busy}
+                    className="h-auto justify-start gap-3 bg-card px-3 py-2.5 text-left"
+                    onClick={() => {
+                      if (generating !== null) return;
+                      if (mode === "quiz") setQuizDialogOpen(true);
+                      else handleGenerate(mode);
+                    }}
+                    disabled={
+                      !busy &&
+                      (!scopedHasExtracted ||
+                        generating !== null ||
+                        (generationDestination === NEW_FOLDER_SENTINEL && !generationNewFolderName.trim()))
+                    }
+                  >
+                    <span
+                      className={`flex size-8 shrink-0 items-center justify-center rounded-md ${MODE_META[mode].tintClass}`}
+                    >
+                      {busy ? (
+                        <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+                      ) : (
+                        <Icon />
+                      )}
+                    </span>
+                    {busy ? `Generating ${MODE_LABELS[mode].toLowerCase()}…` : MODE_LABELS[mode]}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
         </CardContent>
           </CollapsibleContent>

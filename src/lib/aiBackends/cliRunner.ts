@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { withCommonCliDirs } from "./cliPath";
 
 export class CliNotFoundError extends Error {}
 export class CliTimeoutError extends Error {}
@@ -69,7 +70,10 @@ export function runCli(params: RunCliParams): Promise<RunCliResult> {
       isWindows ? params.args.map(quoteForWindowsShell) : params.args,
       {
         cwd: params.cwd,
-        env: params.env,
+        // spawn resolves `command` against this env's PATH — widened so a
+        // CLI in a standard per-user install dir is still found when the
+        // app was launched with a minimal PATH (see cliPath.ts).
+        env: withCommonCliDirs(params.env) as NodeJS.ProcessEnv,
         shell: isWindows,
       }
     );

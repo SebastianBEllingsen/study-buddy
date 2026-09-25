@@ -2,6 +2,7 @@ import { getCourse, getFolder, listDocumentsForCourse, listFoldersForCourse } fr
 import type { DocumentRow } from "./models";
 import { estimateTokens, CHUNK_THRESHOLD_TOKENS, chunkText } from "./chunking";
 import { omitEmbeddedImages } from "./embeddedImages";
+import { descendantFolderIds, folderPathLabel } from "./folderTree";
 
 export function combineDocumentText(documents: DocumentRow[]): string {
   return documents
@@ -40,11 +41,9 @@ export interface CourseContext {
  * an id from a different course just silently drops it rather than leaking
  * that document's text in here.
  *
- * Picking a parent folder pools it with its own subfolders (documents filed
- * directly in the parent, plus every one of its subfolders) — picking a
- * subfolder itself stays an exact match, since subfolders have no children
- * of their own to pool. See the plan for the "Tests > Test1/Test2" example
- * this exists for.
+ * Picking a folder pools it with every subfolder nested under it, at any
+ * depth (documents filed directly in it, plus everything in its subtree) —
+ * a folder with no subfolders is just an exact match.
  */
 export async function buildCourseContext(
   courseId: number,
@@ -87,9 +86,7 @@ export async function buildCourseContext(
     if (!folder || folder.course_id !== courseId) {
       throw new Error(`Folder ${folderId} not found in course ${courseId}`);
     }
-    const subfolderIds = (await listFoldersForCourse(courseId))
-      .filter((f) => f.parent_folder_id === folderId)
-      .map((f) => f.id);
+    const subfolderIds = descendantFolderIds(await listFoldersForCourse(courseId), folderId);
     const folderIds = [folderId, ...subfolderIds];
     documents = extracted.filter((d) => d.folder_id !== null && folderIds.includes(d.folder_id));
     scopeLabel = subfolderIds.length > 0 ? `${folder.name} (incl. subfolders)` : folder.name;
@@ -141,10 +138,11 @@ export async function buildFullCourseContextText(
     listDocumentsForCourse(courseId),
     listFoldersForCourse(courseId),
   ]);
-  const folderName = new Map(folders.map((f) => [f.id, f.name]));
+  const folderIds = new Set(folders.map((f) => f.id));
 
   const sections = documents.map((d) => {
-    const location = d.folder_id != null ? (folderName.get(d.folder_id) ?? "Unfiled") : "Unfiled";
+    const location =
+      d.folder_id != null && folderIds.has(d.folder_id) ? folderPathLabel(folders, d.folder_id) : "Unfiled";
     if (d.status === "extracted" && d.extracted_text) {
       return `--- Document: ${d.filename} (${location}) ---\n${omitEmbeddedImages(d.extracted_text)}`;
     }

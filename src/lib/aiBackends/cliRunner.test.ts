@@ -33,6 +33,16 @@ beforeEach(() => {
 });
 
 describe("runCli", () => {
+  it("spawns with a PATH widened to the common per-user CLI install dirs", () => {
+    void runCli(baseParams({ env: { ...process.env, PATH: "/usr/bin" } }));
+    const options = spawn.mock.calls[0][2] as { env: NodeJS.ProcessEnv };
+    const pathKey = Object.keys(options.env).find((k) => k.toUpperCase() === "PATH")!;
+    const dirs = options.env[pathKey]!.split(process.platform === "win32" ? ";" : ":");
+    expect(dirs[0]).toBe("/usr/bin");
+    expect(dirs.length).toBeGreaterThan(1);
+    fakeChild.emit("close", 0);
+  });
+
   it("resolves with stdout/stderr on a clean exit", async () => {
     const promise = runCli(baseParams());
     fakeChild.stdout.emit("data", Buffer.from("out"));

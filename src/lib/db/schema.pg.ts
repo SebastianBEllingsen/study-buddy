@@ -180,7 +180,7 @@ export const folders = pgTable(
       .references(() => courses.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     position: integer("position").notNull().default(0),
-    // See schema.sqlite.ts — same one-level-nesting rule and cascade backstop.
+    // See schema.sqlite.ts — same any-depth nesting and cascade backstop.
     parent_folder_id: integer("parent_folder_id").references((): AnyPgColumn => folders.id, {
       onDelete: "cascade",
     }),

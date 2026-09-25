@@ -26,6 +26,7 @@ import {
 } from "./db";
 import { appendBelow } from "./dashboardGrid";
 import { nowUtc } from "./time";
+import { subtreeFolderIds, wouldCreateCycle } from "./folderTree";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
 import { deckDueCardIndices } from "./spacedRepetition";
 import {
@@ -78,19 +79,19 @@ export interface Folder {
   course_id: number;
   name: string;
   position: number;
-  // Non-null means this folder is a subfolder of another. One level of
-  // nesting only — a subfolder's own parent_folder_id is always null, and
-  // createFolder rejects nesting a subfolder under another subfolder.
+  // Non-null means this folder is a subfolder of another. Nesting can go
+  // to any depth — see lib/folderTree.ts for the subtree helpers, and
+  // nestFolder for the no-cycles rule.
   parent_folder_id: number | null;
   icon: string | null;
   color: string | null;
   created_at: string;
 }
 
-export class CannotNestSubfolderError extends Error {
+export class CannotNestFolderError extends Error {
   constructor() {
-    super("Subfolders can't contain their own subfolders.");
-    this.name = "CannotNestSubfolderError";
+    super("A folder can't be moved inside itself or one of its own subfolders.");
+    this.name = "CannotNestFolderError";
   }
 }
 
@@ -1724,9 +1725,6 @@ export async function createFolder(
       // a permanently invisible orphan.
       throw new InvalidDestinationFolderError();
     }
-    if (parent.parent_folder_id != null) {
-      throw new CannotNestSubfolderError();
-    }
   }
   const [{ next }] = await db
     .select({ next: sql<number>`COALESCE(MAX(${folders.position}), -1) + 1` })
@@ -1778,13 +1776,12 @@ export async function updateFolderCustomization(
 
 // Drag-and-drop "nest under this folder" — used by dropping one folder
 // onto another's header (see FolderCard in courses/[courseId]/page.tsx),
-// distinct from onReorder (dropping into the gap between cards). Enforces
-// the same one-level-nesting rule as createFolder's parentFolderId check,
-// in both directions: the target can't itself be a subfolder, and the
-// folder being moved can't already have subfolders of its own.
+// distinct from onReorder (dropping into the gap between cards). Nesting
+// can go to any depth, and a moved folder takes its whole subtree along;
+// the one rule is no cycles — a folder can't be nested inside itself or
+// anything already nested under it.
 // parentFolderId: null un-nests (moves a subfolder back to top level) — no
 // validation needed there, any folder can always become top-level again.
-// A non-null value nests, subject to the one-level rule below.
 export async function nestFolder(id: number, parentFolderId: number | null): Promise<void> {
   const folder = await getFolder(id);
   if (!folder) return;
@@ -1802,15 +1799,8 @@ export async function nestFolder(id: number, parentFolderId: number | null): Pro
   // with its own parent's course_id, same invisible-orphan risk createFolder
   // guards against on the create path.
   if (!parent || parent.course_id !== folder.course_id) return;
-  if (parent.parent_folder_id != null) {
-    throw new CannotNestSubfolderError();
-  }
-  const ownSubfolders = await db
-    .select()
-    .from(folders)
-    .where(eq(folders.parent_folder_id, id));
-  if (ownSubfolders.length > 0) {
-    throw new CannotNestSubfolderError();
+  if (wouldCreateCycle(await listFoldersForCourse(folder.course_id), id, parentFolderId)) {
+    throw new CannotNestFolderError();
   }
   await db.update(folders).set({ parent_folder_id: parentFolderId }).where(eq(folders.id, id));
 }
@@ -1841,15 +1831,10 @@ export async function deleteFolder(id: number): Promise<void> {
   const folder = await getFolder(id);
   if (!folder) return;
 
-  // Deleting a parent folder takes its subfolders with it (one level of
-  // nesting, so this is never recursive) — every one of them needs its own
-  // documents/items/notes moved to the course page first too, same as the
-  // parent.
-  const subfolders = await db
-    .select()
-    .from(folders)
-    .where(eq(folders.parent_folder_id, id));
-  const targetIds = [id, ...subfolders.map((f) => f.id)];
+  // Deleting a parent folder takes its whole subtree with it (every level
+  // of subfolder under it) — every one of them needs its own documents/
+  // items/notes moved to the course page first too, same as the parent.
+  const targetIds = subtreeFolderIds(await listFoldersForCourse(folder.course_id), id);
 
   await runTransaction(async (tx) => {
     await tx.update(documents).set({ folder_id: null }).where(inArray(documents.folder_id, targetIds));
@@ -2183,8 +2168,8 @@ export async function createGeneratedItem(params: {
 // - source_handpicked: a hand-picked "choose documents" selection has no
 //   single coherent folder (it can span several), so there's nothing
 //   sensible to check new uploads against — never offer to supplement these.
-// - source_folder_id set: that one folder, pooled with its immediate
-//   subfolders — matching how buildCourseContext itself collects documents
+// - source_folder_id set: that one folder, pooled with every subfolder
+//   nested under it, at any depth — matching how buildCourseContext itself collects documents
 //   for a folder-scoped generation (lib/context.ts), so a doc uploaded into
 //   a subfolder counts as "new" exactly when it would have been included
 //   had it existed at generation time.
@@ -2199,10 +2184,7 @@ export async function getNewDocumentsForItem(item: GeneratedItem): Promise<Docum
   if (item.source_folder_id == null) {
     docs = (await listDocumentsForCourse(item.course_id)).filter((d) => d.status === "extracted");
   } else {
-    const subfolderIds = (await listFoldersForCourse(item.course_id))
-      .filter((f) => f.parent_folder_id === item.source_folder_id)
-      .map((f) => f.id);
-    const folderIds = [item.source_folder_id, ...subfolderIds];
+    const folderIds = subtreeFolderIds(await listFoldersForCourse(item.course_id), item.source_folder_id);
     docs = (await db
       .select()
       .from(documents)
