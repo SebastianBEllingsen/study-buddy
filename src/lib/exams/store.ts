@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db, exam_profiles, mock_exam_attempts, mock_exams } from "../db";
 import type { AiBackend } from "../models";
 import { nowUtc } from "../time";
@@ -113,22 +113,24 @@ export async function listMockExams(courseId: number): Promise<MockExamSummary[]
     .from(mock_exams)
     .where(eq(mock_exams.course_id, courseId))
     .orderBy(desc(mock_exams.created_at), desc(mock_exams.id));
-  const out: MockExamSummary[] = [];
-  for (const row of rows) {
+  const attempts = rows.length
+    ? await db
+        .select({
+          mock_exam_id: mock_exam_attempts.mock_exam_id,
+          id: mock_exam_attempts.id,
+          status: mock_exam_attempts.status,
+          score: mock_exam_attempts.score,
+          started_at: mock_exam_attempts.started_at,
+        })
+        .from(mock_exam_attempts)
+        .where(inArray(mock_exam_attempts.mock_exam_id, rows.map((r) => r.id)))
+        .orderBy(desc(mock_exam_attempts.started_at), desc(mock_exam_attempts.id))
+    : [];
+  return rows.map((row) => {
     const { tasks, ...exam } = toExam(row);
-    const attempts = await db
-      .select({
-        id: mock_exam_attempts.id,
-        status: mock_exam_attempts.status,
-        score: mock_exam_attempts.score,
-        started_at: mock_exam_attempts.started_at,
-      })
-      .from(mock_exam_attempts)
-      .where(eq(mock_exam_attempts.mock_exam_id, row.id))
-      .orderBy(desc(mock_exam_attempts.started_at), desc(mock_exam_attempts.id));
-    out.push({ ...exam, taskCount: tasks.length, attempts });
-  }
-  return out;
+    const own = attempts.filter((a) => a.mock_exam_id === row.id).map((a) => ({ id: a.id, status: a.status, score: a.score, started_at: a.started_at }));
+    return { ...exam, taskCount: tasks.length, attempts: own };
+  });
 }
 
 export async function deleteMockExam(id: number): Promise<void> {

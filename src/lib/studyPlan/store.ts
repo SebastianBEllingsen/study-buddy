@@ -129,26 +129,26 @@ async function loadPractice(
     .where(inArray(generated_items.study_plan_chapter_id, chapterIds))
     .orderBy(asc(generated_items.created_at));
   const itemIds = items.map((i) => i.id);
-  const attempts = itemIds.length
-    ? await tx
-        .select({
-          item_id: quiz_attempts.generated_item_id,
-          score: quiz_attempts.score,
-          completed_at: quiz_attempts.completed_at,
-        })
-        .from(quiz_attempts)
-        .where(inArray(quiz_attempts.generated_item_id, itemIds))
-    : [];
-  const reviews = itemIds.length
-    ? await tx
-        .select({
-          item_id: flashcard_reviews.generated_item_id,
-          result: flashcard_reviews.last_result,
-          reviewed_at: flashcard_reviews.reviewed_at,
-        })
-        .from(flashcard_reviews)
-        .where(inArray(flashcard_reviews.generated_item_id, itemIds))
-    : [];
+  const [attempts, reviews] = itemIds.length
+    ? await Promise.all([
+        tx
+          .select({
+            item_id: quiz_attempts.generated_item_id,
+            score: quiz_attempts.score,
+            completed_at: quiz_attempts.completed_at,
+          })
+          .from(quiz_attempts)
+          .where(inArray(quiz_attempts.generated_item_id, itemIds)),
+        tx
+          .select({
+            item_id: flashcard_reviews.generated_item_id,
+            result: flashcard_reviews.last_result,
+            reviewed_at: flashcard_reviews.reviewed_at,
+          })
+          .from(flashcard_reviews)
+          .where(inArray(flashcard_reviews.generated_item_id, itemIds)),
+      ])
+    : [[], []];
 
   const chapterOfItem = new Map(items.map((i) => [i.id, i.chapter_id as number]));
   const activity = new Map<number, ChapterActivity>();
@@ -184,29 +184,35 @@ async function loadPractice(
 }
 
 async function loadPlan(row: PlanRow, tx: typeof db = db): Promise<StudyPlan> {
-  const chapterRows = await tx
-    .select()
-    .from(study_plan_chapters)
-    .where(eq(study_plan_chapters.plan_id, row.id))
-    .orderBy(asc(study_plan_chapters.position), asc(study_plan_chapters.id));
+  // Independent queries run together — each await is a network round trip
+  // on Postgres.
+  const [chapterRows, sessions] = await Promise.all([
+    tx
+      .select()
+      .from(study_plan_chapters)
+      .where(eq(study_plan_chapters.plan_id, row.id))
+      .orderBy(asc(study_plan_chapters.position), asc(study_plan_chapters.id)),
+    tx
+      .select()
+      .from(study_plan_sessions)
+      .where(eq(study_plan_sessions.plan_id, row.id))
+      .orderBy(asc(study_plan_sessions.date), asc(study_plan_sessions.id)),
+  ]);
   const chapterIds = chapterRows.map((c) => c.id);
-  const resourceRows = chapterIds.length
-    ? await tx
-        .select()
-        .from(study_plan_resources)
-        .where(inArray(study_plan_resources.chapter_id, chapterIds))
-        .orderBy(asc(study_plan_resources.position), asc(study_plan_resources.id))
-    : [];
+  const [resourceRows, practice] = await Promise.all([
+    chapterIds.length
+      ? tx
+          .select()
+          .from(study_plan_resources)
+          .where(inArray(study_plan_resources.chapter_id, chapterIds))
+          .orderBy(asc(study_plan_resources.position), asc(study_plan_resources.id))
+      : [],
+    loadPractice(chapterIds, tx),
+  ]);
   const byChapter = new Map<number, StudyPlanResource[]>();
   for (const r of resourceRows) {
     byChapter.set(r.chapter_id, [...(byChapter.get(r.chapter_id) ?? []), toResource(r)]);
   }
-  const practice = await loadPractice(chapterIds, tx);
-  const sessions = await tx
-    .select()
-    .from(study_plan_sessions)
-    .where(eq(study_plan_sessions.plan_id, row.id))
-    .orderBy(asc(study_plan_sessions.date), asc(study_plan_sessions.id));
   return {
     ...toSummary(row),
     chapters: chapterRows.map((c) => toChapter(c, byChapter.get(c.id) ?? [], practice.get(c.id))),

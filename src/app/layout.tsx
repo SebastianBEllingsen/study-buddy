@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import Link from "next/link";
 import {
   Geist,
@@ -41,6 +42,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { getAppSettings } from "@/lib/models";
 import { appThemeBootScript } from "@/lib/appThemes";
 import "./globals.css";
+
+// generateMetadata and RootLayout both need the settings — one fetch per request.
+const getLayoutSettings = cache(getAppSettings);
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -150,7 +154,7 @@ const bangers = Bangers({ variable: "--font-bangers", subsets: ["latin"], weight
 // shows its real title and favicon on the very first response — see
 // AppBranding.tsx for how the header wordmark stays live after that.
 export async function generateMetadata(): Promise<Metadata> {
-  const settings = await getAppSettings();
+  const settings = await getLayoutSettings();
   return {
     title: settings.appName || "Study Buddy",
     description: "Generate notes, quizzes, and flashcards from your course PDFs.",
@@ -159,7 +163,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const settings = await getAppSettings();
+  const settings = await getLayoutSettings();
   return (
     <html
       lang="en"

@@ -25,7 +25,7 @@ export async function createPostgresDb(connectionString: string) {
         "whatever credentials are in data/storage-config.json. Mock ./postgres or ./db instead."
     );
   }
-  const client = postgres(connectionString, { max: 1 });
+  const client = postgres(connectionString, { max: 10 });
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: path.join(process.cwd(), "drizzle", "pg") });
   // schema.sql seeds this same row for SQLite (`INSERT OR IGNORE INTO

@@ -61,12 +61,14 @@ export async function loadReviewQueue(options: {
   now?: Date;
   dayStart?: string;
   limit?: number;
+  // Already-loaded sources for the same course scope, to skip loading them again.
+  sources?: LoadedSource[];
 }) {
   const now = options.now ?? new Date();
   await ensureFsrsMigrated();
   const [{ newCardsPerDay }, sources, introduced] = await Promise.all([
     getAppSettings(),
-    loadQueueSources(options.courseId ?? null),
+    options.sources ?? loadQueueSources(options.courseId ?? null),
     countNewCardsIntroducedSince(options.dayStart ?? startOfUtcDay(now)),
   ]);
   return buildQueue(sources, {

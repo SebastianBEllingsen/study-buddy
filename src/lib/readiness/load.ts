@@ -1,5 +1,6 @@
-import { eq } from "drizzle-orm";
-import { db, exam_dates } from "../db";
+import { eq, inArray } from "drizzle-orm";
+import { db, exam_dates, exam_profiles, mock_exam_attempts, mock_exams, study_plan_chapters, study_plans } from "../db";
+import { parseStudyPlanOptions } from "../studyPlan/options";
 import { getAppSettings, listDocumentSummariesForCourse } from "../models";
 import { conceptKey } from "../conceptName";
 import { nowUtc } from "../time";
@@ -7,7 +8,7 @@ import { getStudyPlanForCourse } from "../studyPlan/store";
 import { listConceptsForCourse } from "../review/concepts";
 import { ensureFsrsMigrated } from "../review/legacyMigration";
 import { loadQueueSources } from "../review/queue";
-import { getExamProfile, listMockExams } from "../exams/store";
+import { listMockExams } from "../exams/store";
 import { buildForecast, daysUntil, type Forecast } from "./forecast";
 import { EXAM_MODE_DAYS, examMode, type ExamMode } from "./examMode";
 
@@ -44,31 +45,80 @@ function parseUtcDays(text: string, now: Date): number {
 }
 
 export async function loadCourseExamInfo(courseId: number, now = new Date()): Promise<CourseExamInfo> {
-  const [set, plan, profile, exams] = await Promise.all([
-    getExamDate(courseId),
-    getStudyPlanForCourse(courseId),
-    getExamProfile(courseId),
-    listMockExams(courseId),
+  return (await loadCoursesExamInfo([courseId], now)).get(courseId) as CourseExamInfo;
+}
+
+// Batched over courses (the Today autopilot checks every one): a few
+// narrow queries for the whole set instead of loading each course's full
+// plan and exams.
+export async function loadCoursesExamInfo(courseIds: number[], now = new Date()): Promise<Map<number, CourseExamInfo>> {
+  const result = new Map<number, CourseExamInfo>();
+  if (courseIds.length === 0) return result;
+  const [dates, plans, profiles, attempts] = await Promise.all([
+    db
+      .select({ course_id: exam_dates.course_id, date: exam_dates.date })
+      .from(exam_dates)
+      .where(inArray(exam_dates.course_id, courseIds)),
+    db
+      .select({ id: study_plans.id, course_id: study_plans.course_id, options_json: study_plans.options_json })
+      .from(study_plans)
+      .where(inArray(study_plans.course_id, courseIds)),
+    db
+      .select({ course_id: exam_profiles.course_id })
+      .from(exam_profiles)
+      .where(inArray(exam_profiles.course_id, courseIds)),
+    db
+      .select({ course_id: mock_exams.course_id, started_at: mock_exam_attempts.started_at })
+      .from(mock_exam_attempts)
+      .innerJoin(mock_exams, eq(mock_exams.id, mock_exam_attempts.mock_exam_id))
+      .where(inArray(mock_exams.course_id, courseIds)),
   ]);
-  const examDate = set ?? plan?.options.deadline ?? null;
-  const daysLeft = examDate ? daysUntil(examDate, now) : null;
-  const starts = exams.flatMap((e) => e.attempts.map((a) => a.started_at)).sort();
-  const lastMock = starts.length ? parseUtcDays(starts[starts.length - 1], now) : null;
-  // Without analysed past exams a skill check stands in (lib/exams/
-  // topicProfile.ts), as long as there's something to test. Only looked
-  // up inside the exam window, where it matters.
-  const inWindow = daysLeft !== null && daysLeft >= 0 && daysLeft <= EXAM_MODE_DAYS;
-  const canMock =
-    !!profile ||
-    (inWindow &&
-      (!!plan?.chapters.length ||
-        (await listConceptsForCourse(courseId)).length > 0 ||
-        (await listDocumentSummariesForCourse(courseId)).some((d) => d.status === "extracted")));
-  return {
-    examDate,
-    source: set ? "set" : examDate ? "plan" : null,
-    mode: examMode(daysLeft, lastMock, canMock),
-  };
+  const planIds = plans.map((p) => p.id);
+  const plansWithChapters = new Set(
+    planIds.length
+      ? (
+          await db
+            .selectDistinct({ plan_id: study_plan_chapters.plan_id })
+            .from(study_plan_chapters)
+            .where(inArray(study_plan_chapters.plan_id, planIds))
+        ).map((r) => r.plan_id)
+      : []
+  );
+  const dateOf = new Map(dates.map((d) => [d.course_id, d.date]));
+  const planOf = new Map(plans.map((p) => [p.course_id, p]));
+  const hasProfile = new Set(profiles.map((p) => p.course_id));
+  const lastStart = new Map<number, string>();
+  for (const a of attempts) {
+    const prev = lastStart.get(a.course_id);
+    if (!prev || a.started_at > prev) lastStart.set(a.course_id, a.started_at);
+  }
+
+  await Promise.all(
+    courseIds.map(async (courseId) => {
+      const set = dateOf.get(courseId) ?? null;
+      const plan = planOf.get(courseId);
+      const examDate = set ?? (plan ? parseStudyPlanOptions(plan.options_json).deadline : null) ?? null;
+      const daysLeft = examDate ? daysUntil(examDate, now) : null;
+      const last = lastStart.get(courseId);
+      const lastMock = last ? parseUtcDays(last, now) : null;
+      // Without analysed past exams a skill check stands in (lib/exams/
+      // topicProfile.ts), as long as there's something to test. Only looked
+      // up inside the exam window, where it matters.
+      const inWindow = daysLeft !== null && daysLeft >= 0 && daysLeft <= EXAM_MODE_DAYS;
+      const canMock =
+        hasProfile.has(courseId) ||
+        (inWindow &&
+          ((!!plan && plansWithChapters.has(plan.id)) ||
+            (await listConceptsForCourse(courseId)).length > 0 ||
+            (await listDocumentSummariesForCourse(courseId)).some((d) => d.status === "extracted")));
+      result.set(courseId, {
+        examDate,
+        source: set ? "set" : examDate ? "plan" : null,
+        mode: examMode(daysLeft, lastMock, canMock),
+      });
+    })
+  );
+  return result;
 }
 
 export interface Readiness extends CourseExamInfo {

@@ -7,9 +7,10 @@ import type { StudyPlan } from "../studyPlan/types";
 import { summarizeKnowledge } from "../review/knowledgeSummary";
 import { listMistakes } from "../review/mistakes";
 import { loadQueueSources, loadReviewQueue } from "../review/queue";
+import { ensureFsrsMigrated } from "../review/legacyMigration";
 import { getExamProfile } from "../exams/store";
 import { SKILL_CHECK_MINUTES } from "../exams/topicProfile";
-import { loadCourseExamInfo } from "../readiness/load";
+import { loadCoursesExamInfo } from "../readiness/load";
 import {
   nextChapterStep,
   planDay,
@@ -90,12 +91,15 @@ export async function loadToday(options: {
   const today = localToday(now);
   const courseId = options.courseId;
 
+  // Sources carry FSRS state, so the one-time migration has to finish first.
+  await ensureFsrsMigrated();
+  const sourcesLoad = loadQueueSources(courseId);
   const [queue, mistakes, allPlans, courses, sources] = await Promise.all([
-    loadReviewQueue({ courseId, dayStart: options.dayStart, now, limit: 1 }),
+    sourcesLoad.then((loaded) => loadReviewQueue({ courseId, dayStart: options.dayStart, now, limit: 1, sources: loaded })),
     listMistakes({ courseId, status: "open" }),
     listReadyStudyPlans(),
     courseId === null ? listCourses() : getCourse(courseId).then((c) => (c ? [c] : [])),
-    loadQueueSources(courseId),
+    sourcesLoad,
   ]);
   const courseNames = new Map(courses.map((c) => [c.id, c.name]));
   const plans = await Promise.all(
@@ -103,8 +107,9 @@ export async function loadToday(options: {
   );
   // Exam mode per course: no new chapters in an exam's final days, a mock
   // exam when one is due, more mixed practice.
-  const examInfo = new Map(
-    await Promise.all(courses.map(async (c) => [c.id, await loadCourseExamInfo(c.id, now)] as const))
+  const examInfo = await loadCoursesExamInfo(
+    courses.map((c) => c.id),
+    now
   );
   const profiles = new Map(
     await Promise.all(

@@ -504,8 +504,7 @@ export interface AppSettings {
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
-  const row = await getSettingsRow();
-  const feeds = await listCalendarFeeds();
+  const [row, feeds] = await Promise.all([getSettingsRow(), listCalendarFeeds()]);
   return {
     aiEnabled: row?.ai_enabled ?? true,
     aiBackend: row?.ai_provider ?? "api",
