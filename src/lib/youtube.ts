@@ -15,7 +15,7 @@ export function parseYouTubeTimestamp(value: string | null): number | null {
   return Number(h ?? 0) * 3600 + Number(min ?? 0) * 60 + Number(s ?? 0);
 }
 
-export function youTubeEmbedUrl(raw: string): string | null {
+function parseYouTubeUrl(raw: string): URL | null {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -23,7 +23,19 @@ export function youTubeEmbedUrl(raw: string): string | null {
     return null;
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-  const host = url.hostname.replace(/^(www|m|music)\./, "");
+  return url;
+}
+
+function youTubeHost(url: URL): string {
+  return url.hostname.replace(/^(www|m|music)\./, "");
+}
+
+// The 11-character video id of a YouTube watch/share/embed/shorts URL, or
+// null when it isn't one.
+export function youTubeVideoId(raw: string): string | null {
+  const url = parseYouTubeUrl(raw);
+  if (!url) return null;
+  const host = youTubeHost(url);
 
   let id: string | null = null;
   if (host === "youtu.be") {
@@ -33,7 +45,26 @@ export function youTubeEmbedUrl(raw: string): string | null {
     if (first === "watch") id = url.searchParams.get("v");
     else if (first === "embed" || first === "shorts" || first === "live" || first === "v") id = second ?? null;
   }
-  if (!id || !VIDEO_ID_RE.test(id)) return null;
+  return id && VIDEO_ID_RE.test(id) ? id : null;
+}
+
+const PLAYLIST_ID_RE = /^[A-Za-z0-9_-]{10,64}$/;
+
+// The playlist id (`list=`) of a YouTube playlist URL — youtube.com/playlist
+// or a watch URL that carries one — or null.
+export function youTubePlaylistId(raw: string): string | null {
+  const url = parseYouTubeUrl(raw);
+  if (!url) return null;
+  const host = youTubeHost(url);
+  if (host !== "youtube.com" && host !== "youtu.be") return null;
+  const list = url.searchParams.get("list");
+  return list && PLAYLIST_ID_RE.test(list) ? list : null;
+}
+
+export function youTubeEmbedUrl(raw: string): string | null {
+  const id = youTubeVideoId(raw);
+  if (!id) return null;
+  const url = new URL(raw.trim());
 
   const embed = new URL(`https://www.youtube-nocookie.com/embed/${id}`);
   const start = parseYouTubeTimestamp(url.searchParams.get("t") ?? url.searchParams.get("start"));

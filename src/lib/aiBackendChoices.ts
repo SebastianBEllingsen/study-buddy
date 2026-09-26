@@ -9,3 +9,10 @@ import type { AiBackend } from "./models";
 // without dragging in models.ts's DB layer (better-sqlite3 et al. don't
 // bundle for the browser).
 export const IMAGE_CAPABLE_BACKENDS: AiBackend[] = ["api", "openai", "gemini", "free"];
+
+// The backends with a real web search tool (see generateTextWithWebSearch in
+// each aiBackends/* module). Everything else suggests study-plan resources
+// from model knowledge alone — links still get verified either way (see
+// lib/linkVerifier.ts). Kept in sync by hand with those modules;
+// aiClient.test.ts checks the two agree.
+export const WEB_SEARCH_CAPABLE_BACKENDS: AiBackend[] = ["api", "claude_code", "openai", "gemini"];

@@ -69,17 +69,20 @@ function isBlockedIp(ip: string): boolean {
   return true; // couldn't even parse it as an IP — refuse rather than guess
 }
 
-// True only when `url` is http(s) and every address its hostname resolves
-// to is a public, non-reserved address. Rejects on any DNS failure too —
-// callers should treat "can't verify it's safe" the same as "unsafe".
-export async function isSafeExternalUrl(url: string): Promise<boolean> {
+export type ExternalUrlCheck = "ok" | "blocked" | "unresolvable";
+
+// isSafeExternalUrl's verdict with its reason kept: "unresolvable" (no such
+// host, or DNS failed) vs "blocked" (not http(s), unparseable, or resolves
+// to a reserved address). Link checking (lib/linkVerifier.ts) needs the
+// difference — a hostname that doesn't exist is a dead link, not an attack.
+export async function checkExternalUrl(url: string): Promise<ExternalUrlCheck> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return false;
+    return "blocked";
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "blocked";
 
   // URL's .hostname keeps the brackets for an IPv6 literal (e.g. "[::1]",
   // per the WHATWG URL spec) — net.isIP doesn't understand those, so
@@ -93,23 +96,39 @@ export async function isSafeExternalUrl(url: string): Promise<boolean> {
       ? parsed.hostname.slice(1, -1)
       : parsed.hostname;
   // A literal IP in the URL — no DNS involved, check it directly.
-  if (net.isIP(hostname)) return !isBlockedIp(hostname);
+  if (net.isIP(hostname)) return isBlockedIp(hostname) ? "blocked" : "ok";
 
   try {
     const records = await dns.lookup(hostname, { all: true, verbatim: true });
-    if (records.length === 0) return false;
-    return records.every((record) => !isBlockedIp(record.address));
+    if (records.length === 0) return "unresolvable";
+    return records.every((record) => !isBlockedIp(record.address)) ? "ok" : "blocked";
   } catch {
-    return false;
+    return "unresolvable";
   }
+}
+
+// True only when `url` is http(s) and every address its hostname resolves
+// to is a public, non-reserved address. Rejects on any DNS failure too —
+// callers should treat "can't verify it's safe" the same as "unsafe".
+export async function isSafeExternalUrl(url: string): Promise<boolean> {
+  return (await checkExternalUrl(url)) === "ok";
 }
 
 const MAX_REDIRECTS = 5;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
+class ResponseTooLargeError extends Error {
+  constructor(maxBytes: number) {
+    super(`Response exceeded ${maxBytes} byte limit`);
+  }
+}
+
+// Reads at most maxBytes of the body. `truncate` stops quietly at the cap
+// (a link check only needs the first few KB of a page); otherwise going
+// over throws ResponseTooLargeError.
+async function readCapped(res: Response, maxBytes: number, truncate = false): Promise<string> {
   const reader = res.body?.getReader();
-  if (!reader) return await res.text();
+  if (!reader) return (await res.text()).slice(0, truncate ? maxBytes : undefined);
   const decoder = new TextDecoder();
   let text = "";
   let total = 0;
@@ -120,7 +139,9 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel();
-        throw new Error(`Response exceeded ${maxBytes} byte limit`);
+        if (!truncate) throw new ResponseTooLargeError(maxBytes);
+        text += decoder.decode(value.subarray(0, value.byteLength - (total - maxBytes)), { stream: true });
+        break;
       }
       text += decoder.decode(value, { stream: true });
     }
@@ -131,53 +152,117 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
   return text;
 }
 
-// A validated fetch of a user-supplied URL, safe to use for the same class
-// of untrusted target isSafeExternalUrl guards (calendar feeds, and
-// anywhere else the server fetches a URL a user typed in). isSafeExternalUrl
-// alone isn't enough on its own: a `fetch()` with the default
-// `redirect: "follow"` would validate the URL the user gave, then blindly
-// follow a 30x response to wherever it points — including a loopback or
-// link-local address the check above exists specifically to block. This
-// re-validates every hop, refuses to follow more than MAX_REDIRECTS, and
-// caps how much of the response body it will read into memory.
-export async function safeFetch(
+export type SafeRequestResult =
+  | { ok: true; status: number; finalUrl: string; contentType: string | null; body: string }
+  | { ok: false; reason: "blocked" | "unresolvable" | "redirects" | "network"; error: string };
+
+// The shared core of safeFetch/safeProbe: a request to an untrusted URL
+// that re-validates every redirect hop (a plain fetch() with the default
+// `redirect: "follow"` would validate the URL given, then blindly follow a
+// 30x to wherever it points — including a loopback or link-local address
+// isSafeExternalUrl exists to block), refuses more than MAX_REDIRECTS, and
+// caps how much of the body it reads. Any final status comes back as-is;
+// callers decide what a 404 means.
+async function safeRequest(
   url: string,
-  init?: { timeoutMs?: number }
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  init: {
+    method?: "GET" | "HEAD";
+    headers?: Record<string, string>;
+    timeoutMs?: number;
+    maxBytes?: number;
+    truncateBody?: boolean;
+  }
+): Promise<SafeRequestResult> {
   let currentUrl = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    if (!(await isSafeExternalUrl(currentUrl))) {
-      return { ok: false, error: "URL does not resolve to a permitted address" };
+    const check = await checkExternalUrl(currentUrl);
+    if (check !== "ok") {
+      return {
+        ok: false,
+        reason: check,
+        error:
+          check === "unresolvable"
+            ? "Host could not be resolved"
+            : "URL does not resolve to a permitted address",
+      };
     }
 
     let res: Response;
     try {
       res = await fetch(currentUrl, {
+        method: init.method ?? "GET",
+        headers: init.headers,
         redirect: "manual",
-        signal: AbortSignal.timeout(init?.timeoutMs ?? 10_000),
+        signal: AbortSignal.timeout(init.timeoutMs ?? 10_000),
       });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : "Fetch failed" };
+      return { ok: false, reason: "network", error: err instanceof Error ? err.message : "Fetch failed" };
     }
 
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
-      if (!location) return { ok: false, error: `Redirect response (${res.status}) had no Location header` };
+      if (!location) {
+        return { ok: false, reason: "network", error: `Redirect response (${res.status}) had no Location header` };
+      }
       try {
         currentUrl = new URL(location, currentUrl).toString();
       } catch {
-        return { ok: false, error: "Redirect target is not a valid URL" };
+        return { ok: false, reason: "network", error: "Redirect target is not a valid URL" };
       }
+      // A redirect's own body is never needed — release it.
+      await res.body?.cancel().catch(() => {});
       continue;
     }
 
-    if (!res.ok) return { ok: false, error: `Responded with ${res.status}` };
-
-    try {
-      return { ok: true, text: await readCapped(res, MAX_RESPONSE_BYTES) };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : "Failed to read response" };
+    let body = "";
+    if (init.method !== "HEAD") {
+      try {
+        body = await readCapped(res, init.maxBytes ?? MAX_RESPONSE_BYTES, init.truncateBody);
+      } catch (err) {
+        return { ok: false, reason: "network", error: err instanceof Error ? err.message : "Failed to read response" };
+      }
     }
+    return {
+      ok: true,
+      status: res.status,
+      finalUrl: currentUrl,
+      contentType: res.headers.get("content-type"),
+      body,
+    };
   }
-  return { ok: false, error: "Too many redirects" };
+  return { ok: false, reason: "redirects", error: "Too many redirects" };
+}
+
+// A validated fetch of a user-supplied URL, safe to use for the same class
+// of untrusted target isSafeExternalUrl guards (calendar feeds, and
+// anywhere else the server fetches a URL a user typed in). See safeRequest
+// for the redirect/size handling; this variant wants a successful response
+// and its whole (capped) text.
+export async function safeFetch(
+  url: string,
+  init?: { timeoutMs?: number }
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const result = await safeRequest(url, { timeoutMs: init?.timeoutMs });
+  if (!result.ok) return { ok: false, error: result.error };
+  if (result.status < 200 || result.status >= 300) {
+    return { ok: false, error: `Responded with ${result.status}` };
+  }
+  return { ok: true, text: result.body };
+}
+
+// For checking whether a URL is alive (lib/linkVerifier.ts): any status
+// comes back rather than being treated as failure, along with where
+// redirects ended up and the first `maxBytes` of the body (truncated, not
+// an error, past that).
+export async function safeProbe(
+  url: string,
+  init?: { method?: "GET" | "HEAD"; headers?: Record<string, string>; timeoutMs?: number; maxBytes?: number }
+): Promise<SafeRequestResult> {
+  return safeRequest(url, {
+    method: init?.method,
+    headers: init?.headers,
+    timeoutMs: init?.timeoutMs,
+    maxBytes: init?.maxBytes ?? 64 * 1024,
+    truncateBody: true,
+  });
 }

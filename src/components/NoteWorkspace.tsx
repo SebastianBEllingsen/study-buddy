@@ -16,6 +16,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ICON_CHOICES } from "@/lib/pickerChoices";
 import { RowActionsMenu } from "@/components/RowActionsMenu";
+import { Explain } from "@/components/Explain";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { SourceTrust } from "@/lib/sources/types";
+
+const GENERATION_LABELS: Record<"off" | SourceTrust, string> = {
+  off: "Not used for generation",
+  official: "Generation: official material",
+  personal: "Generation: personal notes",
+};
 
 interface NoteDetail {
   note: Note;
@@ -196,6 +205,25 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
     });
   }
 
+  // Whether new cards, quizzes and notes for the course draw on this note,
+  // and how far to trust it: "official" for material copied from the
+  // authoritative source (course slides, a textbook, official docs),
+  // "personal" for the learner's own notes.
+  async function handleGenerationSourceChange(value: "off" | SourceTrust) {
+    if (!detail) return;
+    const generationSource = value === "off" ? null : value;
+    mutate({ ...detail, note: { ...detail.note, generation_source: generationSource } }, { revalidate: false });
+    const res = await fetch(`/api/notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ generationSource }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      toast.error("Couldn't save that");
+      void mutate();
+    }
+  }
+
   // Pops this note into its own browser window — e.g. so it can sit next to
   // the course page while browsing other material — then returns this tab
   // to the course, mirroring DocumentViewer's own Detach (the content has
@@ -277,6 +305,23 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
           <span className="mr-2 text-xs text-muted-foreground">
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
           </span>
+          <Explain id="note.generation">
+            <div>
+              <Select
+                value={detail.note.generation_source ?? "off"}
+                onValueChange={(v) => void handleGenerationSourceChange((v ?? "off") as "off" | SourceTrust)}
+              >
+                <SelectTrigger size="sm" className="h-7 border-none text-xs text-muted-foreground shadow-none" aria-label="Use in generation">
+                  <SelectValue>{(v: "off" | SourceTrust) => GENERATION_LABELS[v] ?? GENERATION_LABELS.off}</SelectValue>
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="off">Not used for generation</SelectItem>
+                  <SelectItem value="official">Use in generation — official (copied from a course, textbook or docs)</SelectItem>
+                  <SelectItem value="personal">Use in generation — my own notes (may contain mistakes)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </Explain>
           <NoteSyntaxHelp />
           <RowActionsMenu
             ariaLabel="Note actions"

@@ -97,6 +97,22 @@ export let generation_notifications = initial.schema.generation_notifications;
 export let chat_conversations = initial.schema.chat_conversations;
 export let chat_messages = initial.schema.chat_messages;
 export let quiz_generation_presets = initial.schema.quiz_generation_presets;
+export let study_plans = initial.schema.study_plans;
+export let study_plan_chapters = initial.schema.study_plan_chapters;
+export let study_plan_resources = initial.schema.study_plan_resources;
+export let study_plan_sessions = initial.schema.study_plan_sessions;
+export let concepts = initial.schema.concepts;
+export let review_items = initial.schema.review_items;
+export let review_logs = initial.schema.review_logs;
+export let mistakes = initial.schema.mistakes;
+export let exam_profiles = initial.schema.exam_profiles;
+export let mock_exams = initial.schema.mock_exams;
+export let mock_exam_attempts = initial.schema.mock_exam_attempts;
+export let exam_dates = initial.schema.exam_dates;
+export let explain_sessions = initial.schema.explain_sessions;
+export let problem_sets = initial.schema.problem_sets;
+export let source_checks = initial.schema.source_checks;
+export let code_sets = initial.schema.code_sets;
 
 // Re-resolves the active backend from the current on-disk/env config and
 // swaps every binding above in place. Called by
@@ -128,6 +144,22 @@ export async function reconnect(): Promise<{ ok: boolean; error: string | null }
     chat_conversations = next.schema.chat_conversations;
     chat_messages = next.schema.chat_messages;
     quiz_generation_presets = next.schema.quiz_generation_presets;
+    study_plans = next.schema.study_plans;
+    study_plan_chapters = next.schema.study_plan_chapters;
+    study_plan_resources = next.schema.study_plan_resources;
+    study_plan_sessions = next.schema.study_plan_sessions;
+    concepts = next.schema.concepts;
+    review_items = next.schema.review_items;
+    review_logs = next.schema.review_logs;
+    mistakes = next.schema.mistakes;
+    exam_profiles = next.schema.exam_profiles;
+    mock_exams = next.schema.mock_exams;
+    mock_exam_attempts = next.schema.mock_exam_attempts;
+    exam_dates = next.schema.exam_dates;
+    explain_sessions = next.schema.explain_sessions;
+    problem_sets = next.schema.problem_sets;
+    source_checks = next.schema.source_checks;
+    code_sets = next.schema.code_sets;
     return { ok: lastConnectionError === null, error: lastConnectionError };
   });
 }

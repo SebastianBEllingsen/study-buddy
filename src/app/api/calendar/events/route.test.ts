@@ -18,6 +18,11 @@ vi.mock("@/lib/calendarFeeds", () => ({
 const listCalendarFeeds = vi.fn();
 vi.mock("@/lib/models", () => ({ listCalendarFeeds: (...args: unknown[]) => listCalendarFeeds(...args) }));
 
+const listCalendarSessions = vi.fn();
+vi.mock("@/lib/studyPlan/store", () => ({
+  listCalendarSessions: (...args: unknown[]) => listCalendarSessions(...args),
+}));
+
 const { GET } = await import("./route");
 
 function makeEvents(n: number, startMs = Date.now()) {
@@ -35,6 +40,7 @@ beforeEach(() => {
   fetchAllFeedEvents.mockReset().mockResolvedValue([]);
   fetchFeedEvents.mockReset().mockResolvedValue([]);
   listCalendarFeeds.mockReset().mockResolvedValue([]);
+  listCalendarSessions.mockReset().mockResolvedValue([]);
 });
 
 describe("GET /api/calendar/events", () => {
@@ -148,5 +154,48 @@ describe("GET /api/calendar/events", () => {
     await GET(new Request("http://localhost/api/calendar/events"));
     const [feeds] = fetchAllFeedEvents.mock.calls[0];
     expect(feeds.map((f: { label: string }) => f.label)).toEqual(["Canvas"]);
+  });
+});
+
+describe("GET /api/calendar/events study-plan sessions", () => {
+  it("merges open study sessions in as all-day events", async () => {
+    listCalendarSessions.mockResolvedValue([
+      {
+        id: 7,
+        date: "2099-01-05",
+        minutes: 60,
+        kind: "study",
+        chapter_id: 3,
+        chapter_title: "Foundations",
+        course_id: 1,
+        course_name: "Sample Course",
+      },
+    ]);
+    const res = await GET(new Request("http://localhost/api/calendar/events"));
+    const { events } = await res.json();
+    expect(events).toEqual([
+      expect.objectContaining({
+        id: "study-plan:7",
+        title: "Study: Foundations",
+        start: "2099-01-05",
+        end: "2099-01-06",
+        allDay: true,
+        source: "study-plan",
+      }),
+    ]);
+  });
+
+  it("isn't part of a single feed's own tab", async () => {
+    listCalendarFeeds.mockResolvedValue([{ id: 1, label: "Feed", enabled: true }]);
+    await GET(new Request("http://localhost/api/calendar/events?feedId=1"));
+    expect(listCalendarSessions).not.toHaveBeenCalled();
+  });
+
+  it("still returns other events when sessions can't be listed", async () => {
+    listUpcomingEvents.mockResolvedValue(makeEvents(1));
+    listCalendarSessions.mockRejectedValue(new Error("db down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { events } = await (await GET(new Request("http://localhost/api/calendar/events"))).json();
+    expect(events).toHaveLength(1);
   });
 });

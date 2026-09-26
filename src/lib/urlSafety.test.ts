@@ -9,7 +9,7 @@ vi.mock("node:dns/promises", () => ({
   default: { lookup: (...args: unknown[]) => lookupMock(...args) },
 }));
 
-const { isSafeExternalUrl, safeFetch } = await import("./urlSafety");
+const { checkExternalUrl, isSafeExternalUrl, safeFetch, safeProbe } = await import("./urlSafety");
 
 beforeEach(() => {
   lookupMock.mockReset();
@@ -211,5 +211,70 @@ describe("safeFetch", () => {
     const result = await safeFetch("http://93.184.216.34/huge");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/exceeded/i);
+  });
+});
+
+describe("checkExternalUrl", () => {
+  it("tells an unresolvable host apart from a blocked one", async () => {
+    lookupMock.mockRejectedValueOnce(Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" }));
+    expect(await checkExternalUrl("https://no-such-host.example/")).toBe("unresolvable");
+    lookupMock.mockResolvedValueOnce([{ address: "10.1.2.3", family: 4 }]);
+    expect(await checkExternalUrl("https://internal.example/")).toBe("blocked");
+    expect(await checkExternalUrl("ftp://example.com/")).toBe("blocked");
+    lookupMock.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    expect(await checkExternalUrl("https://example.com/")).toBe("ok");
+  });
+});
+
+describe("safeProbe", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("returns any final status with the final URL instead of treating it as failure", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 301, headers: { Location: "/moved" } }))
+      .mockResolvedValueOnce(
+        new Response("<title>Gone</title>", { status: 404, headers: { "content-type": "text/html" } })
+      );
+    const result = await safeProbe("http://93.184.216.34/old");
+    expect(result).toEqual({
+      ok: true,
+      status: 404,
+      finalUrl: "http://93.184.216.34/moved",
+      contentType: "text/html",
+      body: "<title>Gone</title>",
+    });
+  });
+
+  it("passes method and headers through", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await safeProbe("http://93.184.216.34/", { method: "HEAD", headers: { "User-Agent": "test" } });
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "HEAD", headers: { "User-Agent": "test" }, redirect: "manual" });
+  });
+
+  it("truncates a large body at maxBytes instead of failing", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("x".repeat(5000), { status: 200 }));
+    const result = await safeProbe("http://93.184.216.34/", { maxBytes: 100 });
+    expect(result.ok && result.body.length).toBe(100);
+  });
+
+  it("re-validates redirects and reports a blocked hop", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { Location: "http://169.254.169.254/latest" } })
+    );
+    const result = await safeProbe("http://93.184.216.34/");
+    expect(result).toMatchObject({ ok: false, reason: "blocked" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unresolvable host without fetching", async () => {
+    lookupMock.mockRejectedValueOnce(new Error("ENOTFOUND"));
+    const result = await safeProbe("https://no-such-host.example/");
+    expect(result).toMatchObject({ ok: false, reason: "unresolvable" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

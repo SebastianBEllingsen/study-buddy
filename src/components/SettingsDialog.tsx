@@ -7,6 +7,9 @@ import { AppWallpaperSettings, CoursePageAppearanceSettings } from "@/components
 import { SettingGroup, SettingSlider, SettingToggle } from "@/components/SettingToggle";
 import { MAX_BACKDROP_BLUR } from "@/lib/backdropBlur";
 import type { FolderChipSettings } from "@/lib/folderChips";
+import { LANGUAGES, languageName } from "@/lib/languages";
+import { MAX_RETENTION, MIN_RETENTION } from "@/lib/review/types";
+import { setExplanationsEnabled, useExplanationsEnabled } from "@/components/Explain";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
 import useSWR, { useSWRConfig } from "swr";
 import {
@@ -117,6 +120,7 @@ function AiSection() {
   const [saving, setSaving] = useState(false);
   const [gradingSaving, setGradingSaving] = useState(false);
   const [efficiencySaving, setEfficiencySaving] = useState(false);
+  const [languageSaving, setLanguageSaving] = useState(false);
   const [cliTrustedModeSaving, setCliTrustedModeSaving] = useState(false);
   const [aiEnabledSaving, setAiEnabledSaving] = useState(false);
   const [imageBackendSaving, setImageBackendSaving] = useState(false);
@@ -228,6 +232,29 @@ function AiSection() {
       mutate((prev) => (prev ? { ...prev, aiEfficiencyMode: !next } : prev), { revalidate: false });
     } finally {
       setEfficiencySaving(false);
+    }
+  }
+
+  async function handleLanguageChange(next: string) {
+    if (!settings) return;
+    const previous = settings.preferredLanguage;
+    mutate({ ...settings, preferredLanguage: next }, { revalidate: false });
+    setLanguageSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferredLanguage: next }),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save AI settings");
+        mutate((prev) => (prev ? { ...prev, preferredLanguage: previous } : prev), { revalidate: false });
+      }
+    } catch {
+      toast.error("Couldn't save AI settings");
+      mutate((prev) => (prev ? { ...prev, preferredLanguage: previous } : prev), { revalidate: false });
+    } finally {
+      setLanguageSaving(false);
     }
   }
 
@@ -438,6 +465,35 @@ function AiSection() {
           onChange={(e) => handleEfficiencyToggle(e.target.checked)}
         />
       </label>
+
+      <div className="space-y-1.5 border-t pt-3">
+        <Label className="flex items-center gap-1.5">
+          Preferred language
+          <HelpTooltip>
+            The language AI-generated study plans are written in. Learning resources in this
+            language are preferred, with English used where little else exists.
+          </HelpTooltip>
+        </Label>
+        <Select
+          value={settings.preferredLanguage}
+          onValueChange={(v) => v && handleLanguageChange(v)}
+          disabled={languageSaving}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>{(v: string) => languageName(v)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {LANGUAGES.map((language) => (
+              <SelectItem key={language.code} value={language.code}>
+                {language.englishName}
+                {language.nativeName !== language.englishName && (
+                  <span className="text-muted-foreground"> · {language.nativeName}</span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
         </>
       )}
     </div>
@@ -1572,6 +1628,97 @@ function BackgroundsSection() {
   );
 }
 
+// Hover explanations (components/Explain.tsx) are a per-device preference:
+// handy while learning the app, noise once it's familiar.
+function HoverHelpSection() {
+  const enabled = useExplanationsEnabled();
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <SettingToggle
+        label="Explain buttons on hover"
+        help="Rest the pointer on a button for a moment to see what it does. Saved on this device."
+        checked={enabled}
+        onChange={setExplanationsEnabled}
+      />
+    </div>
+  );
+}
+
+// Spaced review: how much to remember (FSRS target retention) and how many
+// new cards a day the review session brings in.
+function ReviewSection() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  const [retentionDraft, setRetentionDraft] = useState<number | null>(null);
+  const [newCardsDraft, setNewCardsDraft] = useState<number | null>(null);
+
+  async function save(field: "reviewRetention" | "newCardsPerDay", value: number) {
+    if (!settings) return;
+    const previous = settings[field];
+    mutate({ ...settings, [field]: value }, { revalidate: false });
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.error("Couldn't save review settings");
+      mutate((prev) => (prev ? { ...prev, [field]: previous } : prev), { revalidate: false });
+    }
+  }
+
+  if (!settings) return null;
+  const retentionPercent = retentionDraft ?? Math.round(settings.reviewRetention * 100);
+  const newCards = newCardsDraft ?? settings.newCardsPerDay;
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+        Review
+        <HelpTooltip>
+          Cards and quiz questions are scheduled with FSRS spaced repetition: each comes back just before you&apos;d
+          likely forget it.
+        </HelpTooltip>
+      </h3>
+      <SettingGroup>
+        <SettingSlider
+          label="Target recall"
+          valueLabel={`${retentionPercent}%`}
+          min={Math.round(MIN_RETENTION * 100)}
+          max={Math.round(MAX_RETENTION * 100)}
+          value={retentionPercent}
+          onChange={setRetentionDraft}
+          onCommit={() => {
+            if (retentionDraft === null) return;
+            void save("reviewRetention", retentionDraft / 100);
+            setRetentionDraft(null);
+          }}
+        />
+        <p className="text-xs text-muted-foreground">
+          How likely you should be to still remember an item when it comes back. Higher means more reviews.
+        </p>
+        <SettingSlider
+          label="New cards a day"
+          valueLabel={newCards}
+          min={0}
+          max={100}
+          value={newCards}
+          onChange={setNewCardsDraft}
+          onCommit={() => {
+            if (newCardsDraft === null) return;
+            void save("newCardsPerDay", newCardsDraft);
+            setNewCardsDraft(null);
+          }}
+        />
+        <p className="text-xs text-muted-foreground">
+          How many never-seen cards a review session brings in each day. Decks you open directly aren&apos;t limited.
+        </p>
+      </SettingGroup>
+    </div>
+  );
+}
+
 function DisplaySection() {
   const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
   const [saving, setSaving] = useState(false);
@@ -1876,6 +2023,8 @@ export default function SettingsDialog() {
           </TabsPanel>
           <TabsPanel value="display">
             <DisplaySection />
+            <HoverHelpSection />
+            <ReviewSection />
             <CoursePageAppearanceSettings />
           </TabsPanel>
         </Tabs>

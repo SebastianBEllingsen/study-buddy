@@ -1,5 +1,13 @@
 import OpenAI from "openai";
-import type { GenerateStructuredParams, GenerateTextImage, GenerateTextParams } from "./types";
+import { stripCodeFences } from "./jsonText";
+import type {
+  GenerateStructuredParams,
+  GenerateTextImage,
+  GenerateTextParams,
+  WebSearchCitation,
+  WebSearchParams,
+  WebSearchResult,
+} from "./types";
 
 export interface OpenAiCompatibleConfig {
   apiKey: string;
@@ -27,11 +35,6 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
       );
     }
     return new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL });
-  }
-
-  function stripCodeFences(text: string): string {
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    return fenced ? fenced[1] : text;
   }
 
   async function complete(
@@ -83,6 +86,33 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
     async generateText(params: GenerateTextParams): Promise<string> {
       const { system, user, maxTokens = 8000, images } = params;
       return complete(system, user, maxTokens, false, images);
+    },
+
+    // OpenAI's Responses API web_search tool. Only the real OpenAI backend
+    // exposes this (see openai.ts) — OpenRouter's compatible endpoint has no
+    // Responses tools, so free.ts never calls it.
+    async generateTextWithWebSearch(params: WebSearchParams): Promise<WebSearchResult> {
+      const { system, user, maxTokens = 8000 } = params;
+      const response = await client().responses.create({
+        model: config.model,
+        instructions: system,
+        input: user,
+        max_output_tokens: maxTokens,
+        tools: [{ type: "web_search" }],
+      });
+      const citations: WebSearchCitation[] = [];
+      for (const item of response.output) {
+        if (item.type !== "message") continue;
+        for (const part of item.content) {
+          if (part.type !== "output_text") continue;
+          for (const annotation of part.annotations) {
+            if (annotation.type === "url_citation") {
+              citations.push({ url: annotation.url, title: annotation.title });
+            }
+          }
+        }
+      }
+      return { text: response.output_text, citations, searched: true };
     },
 
     describeError(err: unknown): string {

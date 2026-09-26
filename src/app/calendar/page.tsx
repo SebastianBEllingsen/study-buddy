@@ -40,6 +40,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { STUDY_PLAN_EVENT_SOURCE } from "@/lib/studyPlanDisplay";
 
 // "YYYY-MM-DDTHH:mm" in the viewer's own local time, for <input
 // type="datetime-local">, which has no timezone concept of its own — the
@@ -411,7 +412,8 @@ function CalendarPageContent() {
   // widget" toggles, which only govern the mixed personal view and the
   // dashboard checklist respectively.
   const assignmentEvents = useMemo(
-    () => events?.filter((event) => event.source !== "google") ?? null,
+    () =>
+      events?.filter((event) => event.source !== "google" && event.source !== STUDY_PLAN_EVENT_SOURCE) ?? null,
     [events]
   );
   const visibleEvents = currentView === "personal" ? personalEvents : currentView === "assignments" ? assignmentEvents : null;

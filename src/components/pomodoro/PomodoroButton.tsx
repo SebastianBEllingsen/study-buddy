@@ -17,6 +17,7 @@ import {
   type PomodoroSettings,
 } from "@/lib/pomodoro";
 import { usePomodoro } from "./PomodoroProvider";
+import { TodayMini } from "@/components/today/TodayMini";
 import { ProgressRing, SessionDots, TimerControls, phaseBgClass, phaseTextClass } from "./PomodoroParts";
 
 // Header entry point. Idle it's just an icon, like its Chat/Settings
@@ -120,6 +121,7 @@ function TimerView({ onSettings, onFocusMode }: { onSettings: () => void; onFocu
       </ProgressRing>
       <SessionDots />
       <TimerControls />
+      <TodayMini />
     </div>
   );
 }

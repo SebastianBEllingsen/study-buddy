@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseYouTubeTimestamp, youTubeEmbedUrl } from "./youtube";
+import { parseYouTubeTimestamp, youTubeEmbedUrl, youTubePlaylistId, youTubeVideoId } from "./youtube";
 
 const EMBED = "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ";
 
@@ -52,5 +52,40 @@ describe("parseYouTubeTimestamp", () => {
     expect(parseYouTubeTimestamp(null)).toBeNull();
     expect(parseYouTubeTimestamp("")).toBeNull();
     expect(parseYouTubeTimestamp("abc")).toBeNull();
+  });
+});
+
+describe("youTubeVideoId", () => {
+  it.each([
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["https://youtu.be/dQw4w9WgXcQ?t=5", "dQw4w9WgXcQ"],
+    ["https://m.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+  ])("reads the id from %s", (url, id) => {
+    expect(youTubeVideoId(url)).toBe(id);
+  });
+
+  it.each(["https://www.youtube.com/playlist?list=PL1234567890ab", "https://example.com/watch?v=dQw4w9WgXcQ", "nope"])(
+    "returns null for %s",
+    (url) => {
+      expect(youTubeVideoId(url)).toBeNull();
+    }
+  );
+});
+
+describe("youTubePlaylistId", () => {
+  it("reads a playlist page's list id", () => {
+    expect(youTubePlaylistId("https://www.youtube.com/playlist?list=PLabcdefghij123")).toBe("PLabcdefghij123");
+  });
+
+  it("reads the list id off a watch URL that carries one", () => {
+    expect(youTubePlaylistId("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabcdefghij123")).toBe(
+      "PLabcdefghij123"
+    );
+  });
+
+  it("returns null without a list, or off YouTube", () => {
+    expect(youTubePlaylistId("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBeNull();
+    expect(youTubePlaylistId("https://example.com/playlist?list=PLabcdefghij123")).toBeNull();
   });
 });

@@ -1,6 +1,37 @@
 import { listUpcomingEvents, createEvent, describeGoogleCalendarError } from "@/lib/googleCalendar";
 import { fetchAllFeedEvents, fetchFeedEvents } from "@/lib/calendarFeeds";
 import { listCalendarFeeds } from "@/lib/models";
+import type { CalendarEvent } from "@/lib/googleCalendar";
+import { listCalendarSessions } from "@/lib/studyPlan/store";
+import { localToday } from "@/lib/studyPlan/schedule";
+import { STUDY_PLAN_EVENT_SOURCE } from "@/lib/studyPlanDisplay";
+
+function nextDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// Study-plan sessions (lib/studyPlan/) as all-day events, so they show up
+// on the calendar page and dashboard alongside everything else. Sessions
+// the user pushed to Google Calendar arrive through the Google listing
+// instead, and listCalendarSessions leaves them out.
+async function studySessionEvents(range: { timeMin: Date; timeMax: Date } | null, now: Date): Promise<CalendarEvent[]> {
+  const from = range ? range.timeMin.toISOString().slice(0, 10) : localToday(now);
+  const to = new Date((range?.timeMax ?? new Date(now.getTime() + FEED_LOOKAHEAD_MS)).getTime()).toISOString().slice(0, 10);
+  const rows = await listCalendarSessions(from, to);
+  return rows.map((row) => ({
+    id: `${STUDY_PLAN_EVENT_SOURCE}:${row.id}`,
+    title: `${row.kind === "review" ? "Review" : "Study"}: ${row.chapter_title}`,
+    description: `${row.minutes} minutes · ${row.course_name} — from your study plan.`,
+    start: row.date,
+    end: nextDay(row.date),
+    allDay: true,
+    htmlLink: null,
+    location: null,
+    source: STUDY_PLAN_EVENT_SOURCE,
+  }));
+}
 
 // A year out comfortably covers "next exam"/"next assignment" without
 // fetching a whole multi-year ICS history for feeds that never expire old
@@ -96,7 +127,12 @@ export async function GET(request: Request) {
     range ?? { timeMin: now, timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) }
   );
 
-  const events = [...googleResult.events, ...feedEvents]
+  const sessionEvents = await studySessionEvents(range, now).catch((err) => {
+    console.error("Listing study-plan sessions failed:", err);
+    return [];
+  });
+
+  const events = [...googleResult.events, ...feedEvents, ...sessionEvents]
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
     .slice(0, maxResults ?? 20);
 

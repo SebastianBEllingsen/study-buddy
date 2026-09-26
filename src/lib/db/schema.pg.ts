@@ -7,6 +7,7 @@ import {
   boolean,
   primaryKey,
   index,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type {
@@ -16,6 +17,21 @@ import type {
   AiBackend,
   ChatRole,
 } from "../models";
+import type {
+  ChapterLevel,
+  LinkStatus,
+  ResourceKind,
+  ResourceOrigin,
+  StudyPlanPreset,
+  SessionKind,
+  StudyPlanStatus,
+} from "../studyPlan/types";
+import type { Confidence, ReviewItemKind, ReviewSource } from "../review/types";
+import type { AttemptStatus } from "../exams/types";
+import type { ExplainKind, ExplainStatus } from "../explain/types";
+import type { ProblemSetKind } from "../problems/types";
+import type { SourceTrust } from "../sources/types";
+import type { CodeLanguage } from "../code/types";
 
 // Postgres-flavored mirror of schema.sqlite.ts — same logical shape, same
 // snake_case field names (so rows are shaped exactly like this app's
@@ -168,6 +184,12 @@ export const app_settings = pgTable("app_settings", {
   // the claude_code/codex_cli backends' sandboxing (Bash/file/network tools,
   // confined to a dedicated workspace dir) when true.
   cli_trusted_mode_enabled: boolean("cli_trusted_mode_enabled").notNull().default(false),
+  // See the matching column in schema.sqlite.ts and lib/languages.ts.
+  preferred_language: text("preferred_language"),
+  // See the matching columns in schema.sqlite.ts.
+  review_retention: real("review_retention"),
+  new_cards_per_day: integer("new_cards_per_day"),
+  fsrs_migrated_at: text("fsrs_migrated_at"),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -216,7 +238,10 @@ export const documents = pgTable(
     char_count: integer("char_count"),
     status: text("status").notNull().default("pending").$type<DocumentStatus>(),
     error_message: text("error_message"),
-    created_at: text("created_at").notNull(),
+    // "official" (course material) or "personal" (the student's own notes) —
+  // see the matching comment in schema.sql.
+  trust: text("trust").notNull().default("official").$type<SourceTrust>(),
+  created_at: text("created_at").notNull(),
   },
   (table) => [
     index("idx_documents_course_id").on(table.course_id),
@@ -248,11 +273,16 @@ export const generated_items = pgTable(
     source_handpicked: boolean("source_handpicked").notNull().default(false),
     model_provider: text("model_provider").$type<AiBackend>(),
     model_name: text("model_name"),
+    // See the matching column in schema.sqlite.ts.
+    study_plan_chapter_id: integer("study_plan_chapter_id").references((): AnyPgColumn => study_plan_chapters.id, {
+      onDelete: "set null",
+    }),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
   },
   (table) => [
     index("idx_generated_items_course_id").on(table.course_id),
+    index("idx_generated_items_study_plan_chapter_id").on(table.study_plan_chapter_id),
     // Neither of these is indexed on the SQLite side either — added on both
     // backends together, since it's the same class of gap as
     // idx_documents_folder_id above and these columns are hit by the same
@@ -352,7 +382,9 @@ export const notes = pgTable(
     title: text("title").notNull(),
     markdown: text("markdown").notNull().default(""),
     icon: text("icon"),
-    created_at: text("created_at").notNull(),
+    // Null: not used for generation; otherwise included with that trust.
+  generation_source: text("generation_source").$type<SourceTrust>(),
+  created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
   },
   (table) => [
@@ -452,3 +484,341 @@ export const quiz_generation_presets = pgTable("quiz_generation_presets", {
   short_answer: boolean("short_answer").notNull().default(true),
   created_at: text("created_at").notNull(),
 });
+
+// AI-built learning roadmap for a course — see the matching comment in
+// schema.sql and lib/studyPlan/. One plan per course (unique course_id).
+export const study_plans = pgTable("study_plans", {
+  id: serial("id").primaryKey(),
+  course_id: integer("course_id")
+    .notNull()
+    .unique()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  status: text("status").notNull().$type<StudyPlanStatus>(),
+  preset: text("preset").notNull().$type<StudyPlanPreset>(),
+  options_json: text("options_json").notNull(),
+  syllabus_document_id: integer("syllabus_document_id").references(() => documents.id, {
+    onDelete: "set null",
+  }),
+  syllabus_text: text("syllabus_text"),
+  source_document_ids: text("source_document_ids").notNull(),
+  source_folder_id: integer("source_folder_id").references(() => folders.id, { onDelete: "set null" }),
+  source_handpicked: boolean("source_handpicked").notNull().default(false),
+  language: text("language").notNull(),
+  model_provider: text("model_provider").$type<AiBackend>(),
+  model_name: text("model_name"),
+  used_web_search: boolean("used_web_search").notNull().default(false),
+  error_message: text("error_message"),
+  links_checked_at: text("links_checked_at"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+export const study_plan_chapters = pgTable(
+  "study_plan_chapters",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => study_plans.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    stage: integer("stage").notNull().default(1),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    subtopics_json: text("subtopics_json").notNull().default("[]"),
+    prerequisite_ids_json: text("prerequisite_ids_json").notNull().default("[]"),
+    linked_document_ids_json: text("linked_document_ids_json").notNull().default("[]"),
+    current_level: text("current_level").$type<ChapterLevel>(),
+    estimated_minutes: integer("estimated_minutes"),
+    completed_at: text("completed_at"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_study_plan_chapters_plan_id").on(table.plan_id)]
+);
+
+export const study_plan_resources = pgTable(
+  "study_plan_resources",
+  {
+    id: serial("id").primaryKey(),
+    chapter_id: integer("chapter_id")
+      .notNull()
+      .references(() => study_plan_chapters.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    kind: text("kind").notNull().$type<ResourceKind>(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    provider: text("provider"),
+    language: text("language"),
+    note: text("note").notNull().default(""),
+    origin: text("origin").notNull().default("ai").$type<ResourceOrigin>(),
+    link_status: text("link_status").notNull().default("unchecked").$type<LinkStatus>(),
+    status_detail: text("status_detail"),
+    checked_at: text("checked_at"),
+    done_at: text("done_at"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_study_plan_resources_chapter_id").on(table.chapter_id)]
+);
+
+// One dated study session of a plan's schedule — see lib/studyPlan/schedule.ts.
+export const study_plan_sessions = pgTable(
+  "study_plan_sessions",
+  {
+    id: serial("id").primaryKey(),
+    plan_id: integer("plan_id")
+      .notNull()
+      .references(() => study_plans.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id")
+      .notNull()
+      .references(() => study_plan_chapters.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    minutes: integer("minutes").notNull(),
+    kind: text("kind").notNull().default("study").$type<SessionKind>(),
+    done_at: text("done_at"),
+    google_event_id: text("google_event_id"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_study_plan_sessions_plan_id").on(table.plan_id),
+    index("idx_study_plan_sessions_date").on(table.date),
+  ]
+);
+
+// See the matching tables in schema.sqlite.ts.
+export const concepts = pgTable(
+  "concepts",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_concepts_course_id").on(table.course_id)]
+);
+
+export const review_items = pgTable(
+  "review_items",
+  {
+    id: serial("id").primaryKey(),
+    generated_item_id: integer("generated_item_id")
+      .notNull()
+      .references(() => generated_items.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<ReviewItemKind>(),
+    item_index: integer("item_index").notNull(),
+    concept_id: integer("concept_id").references(() => concepts.id, { onDelete: "set null" }),
+    due_at: text("due_at").notNull(),
+    stability: real("stability").notNull().default(0),
+    difficulty: real("difficulty").notNull().default(0),
+    reps: integer("reps").notNull().default(0),
+    lapses: integer("lapses").notNull().default(0),
+    state: integer("state").notNull().default(0),
+    scheduled_days: integer("scheduled_days").notNull().default(0),
+    last_reviewed_at: text("last_reviewed_at"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_review_items_item_kind_index").on(table.generated_item_id, table.kind, table.item_index),
+    index("idx_review_items_due_at").on(table.due_at),
+  ]
+);
+
+export const review_logs = pgTable(
+  "review_logs",
+  {
+    id: serial("id").primaryKey(),
+    review_item_id: integer("review_item_id")
+      .notNull()
+      .references(() => review_items.id, { onDelete: "cascade" }),
+    rating: integer("rating").notNull(),
+    confidence: text("confidence").$type<Confidence>(),
+    source: text("source").notNull().$type<ReviewSource>(),
+    correct: boolean("correct").notNull(),
+    reviewed_at: text("reviewed_at").notNull(),
+    stability: real("stability").notNull(),
+    difficulty: real("difficulty").notNull(),
+    scheduled_days: integer("scheduled_days").notNull(),
+  },
+  (table) => [
+    index("idx_review_logs_review_item_id").on(table.review_item_id),
+    index("idx_review_logs_reviewed_at").on(table.reviewed_at),
+  ]
+);
+
+export const mistakes = pgTable(
+  "mistakes",
+  {
+    id: serial("id").primaryKey(),
+    generated_item_id: integer("generated_item_id")
+      .notNull()
+      .references(() => generated_items.id, { onDelete: "cascade" }),
+    review_item_id: integer("review_item_id").references(() => review_items.id, { onDelete: "set null" }),
+    concept_id: integer("concept_id").references(() => concepts.id, { onDelete: "set null" }),
+    kind: text("kind").notNull().$type<ReviewItemKind>(),
+    item_index: integer("item_index").notNull(),
+    prompt: text("prompt").notNull(),
+    given_answer: text("given_answer"),
+    correct_answer: text("correct_answer").notNull(),
+    confidence: text("confidence").$type<Confidence>(),
+    misconception: text("misconception"),
+    created_at: text("created_at").notNull(),
+    resolved_at: text("resolved_at"),
+  },
+  (table) => [index("idx_mistakes_generated_item_id").on(table.generated_item_id)]
+);
+
+// See the matching tables in schema.sqlite.ts.
+export const exam_profiles = pgTable("exam_profiles", {
+  id: serial("id").primaryKey(),
+  course_id: integer("course_id")
+    .notNull()
+    .unique()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  source_document_ids_json: text("source_document_ids_json").notNull().default("[]"),
+  profile_json: text("profile_json").notNull(),
+  model_provider: text("model_provider").$type<AiBackend>(),
+  model_name: text("model_name"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+// A generated mock exam (lib/exams/generate.ts). practice_item_id is the
+// quiz its graded tasks are reviewed through afterwards.
+export const mock_exams = pgTable(
+  "mock_exams",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    duration_minutes: integer("duration_minutes").notNull(),
+    total_points: real("total_points").notNull(),
+    tasks_json: text("tasks_json").notNull(),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    model_provider: text("model_provider").$type<AiBackend>(),
+    model_name: text("model_name"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_mock_exams_course_id").on(table.course_id)]
+);
+
+// One sitting of a mock exam: answers as typed text and/or photos of
+// handwritten work, then the step-by-step grading (lib/exams/grade.ts).
+export const mock_exam_attempts = pgTable(
+  "mock_exam_attempts",
+  {
+    id: serial("id").primaryKey(),
+    mock_exam_id: integer("mock_exam_id")
+      .notNull()
+      .references(() => mock_exams.id, { onDelete: "cascade" }),
+    status: text("status").notNull().$type<AttemptStatus>(),
+    answers_json: text("answers_json").notNull().default("[]"),
+    results_json: text("results_json"),
+    score: real("score"),
+    error_message: text("error_message"),
+    started_at: text("started_at").notNull(),
+    // Pausing stops the exam clock: paused_at is set while paused, and
+    // paused_seconds adds up earlier pauses.
+    paused_at: text("paused_at"),
+    paused_seconds: integer("paused_seconds").notNull().default(0),
+    submitted_at: text("submitted_at"),
+  },
+  (table) => [index("idx_mock_exam_attempts_exam_id").on(table.mock_exam_id)]
+);
+
+// A course's exam date (YYYY-MM-DD), for the readiness forecast and exam
+// mode (lib/readiness/).
+export const exam_dates = pgTable("exam_dates", {
+  id: serial("id").primaryKey(),
+  course_id: integer("course_id")
+    .notNull()
+    .unique()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+// Blurt and Feynman sessions (lib/explain/): explaining a topic from
+// memory, then the gaps the AI found. practice_item_id is the flashcard
+// deck the gaps were added to.
+export const explain_sessions = pgTable(
+  "explain_sessions",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    kind: text("kind").notNull().$type<ExplainKind>(),
+    topic: text("topic").notNull(),
+    status: text("status").notNull().$type<ExplainStatus>(),
+    messages_json: text("messages_json").notNull().default("[]"),
+    result_json: text("result_json"),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_explain_sessions_course_id").on(table.course_id)]
+);
+
+// Problem-solving practice (lib/problems/): a coached set (a worked example,
+// then a faded one, then problems to solve alone) or a mixed set across
+// concepts. progress_json holds the learner's work; practice_item_id is the
+// quiz its solved problems are reviewed through.
+export const problem_sets = pgTable(
+  "problem_sets",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    kind: text("kind").notNull().$type<ProblemSetKind>(),
+    title: text("title").notNull(),
+    content_json: text("content_json").notNull(),
+    progress_json: text("progress_json").notNull().default("[]"),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_problem_sets_course_id").on(table.course_id)]
+);
+
+// Source conflict checks — see the matching comment in schema.sql.
+export const source_checks = pgTable(
+  "source_checks",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    source_keys_json: text("source_keys_json").notNull().default("[]"),
+    result_json: text("result_json").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_source_checks_course_id").on(table.course_id)]
+);
+
+// Code exercises — see the matching comment in schema.sql.
+export const code_sets = pgTable(
+  "code_sets",
+  {
+    id: serial("id").primaryKey(),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    language: text("language").notNull().$type<CodeLanguage>(),
+    content_json: text("content_json").notNull(),
+    progress_json: text("progress_json").notNull().default("[]"),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_code_sets_course_id").on(table.course_id)]
+);

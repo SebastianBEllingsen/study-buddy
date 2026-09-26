@@ -1,8 +1,16 @@
 import os from "node:os";
 import { runCli, CliNotFoundError, CliTimeoutError } from "./cliRunner";
-import type { GenerateStructuredParams, GenerateTextImage, GenerateTextParams, GenerateWorkspaceScope } from "./types";
+import type {
+  GenerateStructuredParams,
+  GenerateTextImage,
+  GenerateTextParams,
+  GenerateWorkspaceScope,
+  WebSearchParams,
+  WebSearchResult,
+} from "./types";
 import { getAppSettings } from "../models";
 import { materializeCliWorkspace } from "./cliWorkspace";
+import { stripCodeFences } from "./jsonText";
 
 // claude -p one-shot output shape (confirmed empirically against the
 // installed CLI — this is not officially typed by the CLI itself).
@@ -37,6 +45,34 @@ const HARDENING_ARGS = [
   "Edit",
   "WebFetch",
   "WebSearch",
+  "Glob",
+  "Grep",
+  "NotebookEdit",
+  "Task",
+  "SlashCommand",
+];
+
+// Used for generateTextWithWebSearch only (finding study-plan resources):
+// HARDENING_ARGS with exactly one built-in tool switched back on. --tools
+// limits the available built-ins to WebSearch alone and --allowedTools lets
+// it run without a permission prompt; WebFetch (arbitrary URL fetches) and
+// every file/shell tool stay off, and --restricted/--strict-mcp-config stay
+// on. Independent of cliTrustedModeEnabled on purpose — the prompts sent
+// this way never embed document text (see WebSearchParams), so there's no
+// reason to open more than search.
+export const WEB_SEARCH_ARGS = [
+  "--restricted",
+  "--strict-mcp-config",
+  "--tools",
+  "WebSearch",
+  "--allowedTools",
+  "WebSearch",
+  "--disallowedTools",
+  "Bash",
+  "Read",
+  "Write",
+  "Edit",
+  "WebFetch",
   "Glob",
   "Grep",
   "NotebookEdit",
@@ -91,6 +127,8 @@ async function runClaude(params: {
   cliTrustedModeEnabled: boolean;
   workspaceScope?: GenerateWorkspaceScope;
   images?: GenerateTextImage[];
+  // Overrides the TRUSTED_ARGS/HARDENING_ARGS choice — see WEB_SEARCH_ARGS.
+  toolArgs?: string[];
 }): Promise<ClaudeResult> {
   // Only pay for materializing a workspace when trusted mode is on AND
   // there's actually something to put in it — otherwise cwd stays
@@ -120,7 +158,7 @@ async function runClaude(params: {
       params.efficient ? "haiku" : "sonnet",
       "--effort",
       params.effort,
-      ...(params.cliTrustedModeEnabled ? TRUSTED_ARGS : HARDENING_ARGS),
+      ...(params.toolArgs ?? (params.cliTrustedModeEnabled ? TRUSTED_ARGS : HARDENING_ARGS)),
     ];
 
     // Strip API-key auth from the child's environment: the shell inherits
@@ -156,11 +194,6 @@ async function runClaude(params: {
   } finally {
     await workspace?.cleanup();
   }
-}
-
-function stripCodeFences(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  return fenced ? fenced[1] : text;
 }
 
 export async function generateStructured<T>(
@@ -222,6 +255,24 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
     throw new Error(result.result || `claude -p failed (${result.subtype})`);
   }
   return result.result;
+}
+
+export async function generateTextWithWebSearch(params: WebSearchParams): Promise<WebSearchResult> {
+  const result = await runClaude({
+    userPrompt: params.user,
+    systemPrompt: params.system,
+    effort: params.efficient ? "low" : "medium",
+    efficient: params.efficient,
+    // Never a materialized workspace — see WEB_SEARCH_ARGS.
+    cliTrustedModeEnabled: false,
+    toolArgs: WEB_SEARCH_ARGS,
+  });
+  if (result.is_error) {
+    throw new Error(result.result || `claude -p failed (${result.subtype})`);
+  }
+  // `claude -p --output-format json` reports only the final text, not the
+  // search results it saw.
+  return { text: result.result, citations: [], searched: true };
 }
 
 export function describeError(err: unknown): string {

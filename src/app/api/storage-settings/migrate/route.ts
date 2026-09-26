@@ -135,6 +135,22 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
       messageRows,
       presetRows,
       settingsRows,
+      studyPlanRows,
+      studyPlanChapterRows,
+      studyPlanResourceRows,
+      studyPlanSessionRows,
+      conceptRows,
+      reviewItemRows,
+      reviewLogRows,
+      mistakeRows,
+      examProfileRows,
+      mockExamRows,
+      mockExamAttemptRows,
+      examDateRows,
+      explainSessionRows,
+      problemSetRows,
+      sourceCheckRows,
+      codeSetRows,
     ] = await Promise.all([
       sqliteDb.select().from(sqliteSchema.courses),
       sqliteDb.select().from(sqliteSchema.folders),
@@ -153,6 +169,22 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
       sqliteDb.select().from(sqliteSchema.chat_messages),
       sqliteDb.select().from(sqliteSchema.quiz_generation_presets),
       sqliteDb.select().from(sqliteSchema.app_settings),
+      sqliteDb.select().from(sqliteSchema.study_plans),
+      sqliteDb.select().from(sqliteSchema.study_plan_chapters),
+      sqliteDb.select().from(sqliteSchema.study_plan_resources),
+      sqliteDb.select().from(sqliteSchema.study_plan_sessions),
+      sqliteDb.select().from(sqliteSchema.concepts),
+      sqliteDb.select().from(sqliteSchema.review_items),
+      sqliteDb.select().from(sqliteSchema.review_logs),
+      sqliteDb.select().from(sqliteSchema.mistakes),
+      sqliteDb.select().from(sqliteSchema.exam_profiles),
+      sqliteDb.select().from(sqliteSchema.mock_exams),
+      sqliteDb.select().from(sqliteSchema.mock_exam_attempts),
+      sqliteDb.select().from(sqliteSchema.exam_dates),
+      sqliteDb.select().from(sqliteSchema.explain_sessions),
+      sqliteDb.select().from(sqliteSchema.problem_sets),
+      sqliteDb.select().from(sqliteSchema.source_checks),
+      sqliteDb.select().from(sqliteSchema.code_sets),
     ]);
 
     const documentRowsWithFiles = await backfillFileBase64(documentRows);
@@ -215,8 +247,97 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "char_count",
               "status",
               "error_message",
+              "trust",
               "created_at",
             ]),
+        });
+    }
+    // Study plans before generated_items: an item can point at a plan
+    // chapter (study_plan_chapter_id), and plans themselves only depend on
+    // the courses/folders/documents inserted above.
+    if (studyPlanRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.study_plans)
+        .values(stripNulBytes(studyPlanRows))
+        .onConflictDoUpdate({
+          target: pgSchema.study_plans.id,
+          set: upsertSet([
+            "course_id",
+            "title",
+            "status",
+            "preset",
+            "options_json",
+            "syllabus_document_id",
+            "syllabus_text",
+            "source_document_ids",
+            "source_folder_id",
+            "source_handpicked",
+            "language",
+            "model_provider",
+            "model_name",
+            "used_web_search",
+            "error_message",
+            "links_checked_at",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (studyPlanChapterRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.study_plan_chapters)
+        .values(stripNulBytes(studyPlanChapterRows))
+        .onConflictDoUpdate({
+          target: pgSchema.study_plan_chapters.id,
+          set: upsertSet([
+            "plan_id",
+            "position",
+            "stage",
+            "title",
+            "summary",
+            "subtopics_json",
+            "prerequisite_ids_json",
+            "linked_document_ids_json",
+            "current_level",
+            "estimated_minutes",
+            "completed_at",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (studyPlanResourceRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.study_plan_resources)
+        .values(stripNulBytes(studyPlanResourceRows))
+        .onConflictDoUpdate({
+          target: pgSchema.study_plan_resources.id,
+          set: upsertSet([
+            "chapter_id",
+            "position",
+            "kind",
+            "title",
+            "url",
+            "provider",
+            "language",
+            "note",
+            "origin",
+            "link_status",
+            "status_detail",
+            "checked_at",
+            "done_at",
+            "created_at",
+          ]),
+        });
+    }
+
+    if (studyPlanSessionRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.study_plan_sessions)
+        .values(stripNulBytes(studyPlanSessionRows))
+        .onConflictDoUpdate({
+          target: pgSchema.study_plan_sessions.id,
+          set: upsertSet(["plan_id", "chapter_id", "date", "minutes", "kind", "done_at", "google_event_id", "created_at"]),
         });
     }
     if (itemRows.length > 0) {
@@ -237,6 +358,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "source_handpicked",
               "model_provider",
               "model_name",
+              "study_plan_chapter_id",
               "created_at",
               "updated_at",
             ]),
@@ -269,6 +391,216 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
           set: upsertSet(["ease_factor", "interval_days", "repetitions", "due_at", "last_reviewed_at"]),
         });
     }
+    // Concepts reference courses and study plan chapters; review items
+    // reference generated items and concepts; logs and mistakes reference
+    // review items — all inserted above or in this order.
+    if (conceptRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.concepts)
+        .values(stripNulBytes(conceptRows))
+        .onConflictDoUpdate({
+          target: pgSchema.concepts.id,
+          set: upsertSet(["course_id", "chapter_id", "name", "created_at"]),
+        });
+    }
+    if (reviewItemRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.review_items)
+        .values(stripNulBytes(reviewItemRows))
+        .onConflictDoUpdate({
+          target: pgSchema.review_items.id,
+          set: upsertSet([
+            "generated_item_id",
+            "kind",
+            "item_index",
+            "concept_id",
+            "due_at",
+            "stability",
+            "difficulty",
+            "reps",
+            "lapses",
+            "state",
+            "scheduled_days",
+            "last_reviewed_at",
+            "created_at",
+          ]),
+        });
+    }
+    if (reviewLogRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.review_logs)
+        .values(stripNulBytes(reviewLogRows))
+        .onConflictDoUpdate({
+          target: pgSchema.review_logs.id,
+          set: upsertSet([
+            "review_item_id",
+            "rating",
+            "confidence",
+            "source",
+            "correct",
+            "reviewed_at",
+            "stability",
+            "difficulty",
+            "scheduled_days",
+          ]),
+        });
+    }
+    // Exam profiles and mock exams reference courses (and a practice quiz
+    // in generated_items); attempts reference mock exams.
+    if (examProfileRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.exam_profiles)
+        .values(stripNulBytes(examProfileRows))
+        .onConflictDoUpdate({
+          target: pgSchema.exam_profiles.id,
+          set: upsertSet([
+            "course_id",
+            "source_document_ids_json",
+            "profile_json",
+            "model_provider",
+            "model_name",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (mockExamRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.mock_exams)
+        .values(stripNulBytes(mockExamRows))
+        .onConflictDoUpdate({
+          target: pgSchema.mock_exams.id,
+          set: upsertSet([
+            "course_id",
+            "title",
+            "duration_minutes",
+            "total_points",
+            "tasks_json",
+            "practice_item_id",
+            "model_provider",
+            "model_name",
+            "created_at",
+          ]),
+        });
+    }
+    if (mockExamAttemptRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.mock_exam_attempts)
+        .values(stripNulBytes(mockExamAttemptRows))
+        .onConflictDoUpdate({
+          target: pgSchema.mock_exam_attempts.id,
+          set: upsertSet([
+            "mock_exam_id",
+            "status",
+            "answers_json",
+            "results_json",
+            "score",
+            "error_message",
+            "started_at",
+            "paused_at",
+            "paused_seconds",
+            "submitted_at",
+          ]),
+        });
+    }
+    if (examDateRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.exam_dates)
+        .values(stripNulBytes(examDateRows))
+        .onConflictDoUpdate({
+          target: pgSchema.exam_dates.id,
+          set: upsertSet(["course_id", "date", "updated_at"]),
+        });
+    }
+    if (explainSessionRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.explain_sessions)
+        .values(stripNulBytes(explainSessionRows))
+        .onConflictDoUpdate({
+          target: pgSchema.explain_sessions.id,
+          set: upsertSet([
+            "course_id",
+            "chapter_id",
+            "kind",
+            "topic",
+            "status",
+            "messages_json",
+            "result_json",
+            "practice_item_id",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (problemSetRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.problem_sets)
+        .values(stripNulBytes(problemSetRows))
+        .onConflictDoUpdate({
+          target: pgSchema.problem_sets.id,
+          set: upsertSet([
+            "course_id",
+            "chapter_id",
+            "kind",
+            "title",
+            "content_json",
+            "progress_json",
+            "practice_item_id",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (codeSetRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.code_sets)
+        .values(stripNulBytes(codeSetRows))
+        .onConflictDoUpdate({
+          target: pgSchema.code_sets.id,
+          set: upsertSet([
+            "course_id",
+            "chapter_id",
+            "title",
+            "language",
+            "content_json",
+            "progress_json",
+            "practice_item_id",
+            "created_at",
+            "updated_at",
+          ]),
+        });
+    }
+    if (sourceCheckRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.source_checks)
+        .values(stripNulBytes(sourceCheckRows))
+        .onConflictDoUpdate({
+          target: pgSchema.source_checks.id,
+          set: upsertSet(["course_id", "source_keys_json", "result_json", "created_at"]),
+        });
+    }
+    if (mistakeRows.length > 0) {
+      await pgDb
+        .insert(pgSchema.mistakes)
+        .values(stripNulBytes(mistakeRows))
+        .onConflictDoUpdate({
+          target: pgSchema.mistakes.id,
+          set: upsertSet([
+            "generated_item_id",
+            "review_item_id",
+            "concept_id",
+            "kind",
+            "item_index",
+            "prompt",
+            "given_answer",
+            "correct_answer",
+            "confidence",
+            "misconception",
+            "created_at",
+            "resolved_at",
+          ]),
+        });
+    }
     if (notificationRows.length > 0) {
       await pgDb
         .insert(pgSchema.generation_notifications)
@@ -291,6 +623,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
             "title",
             "markdown",
             "icon",
+            "generation_source",
             "created_at",
             "updated_at",
           ]),
@@ -409,11 +742,14 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "ai_efficiency_mode",
               "model_badge_detail",
               "ai_enabled",
+              "preferred_language",
+              "review_retention",
+              "new_cards_per_day",
+              "fsrs_migrated_at",
               "updated_at",
             ]),
         });
     }
-
     const withSerialId: [string, { id: number }[]][] = [
       ["courses", courseRows],
       ["folders", folderRows],
@@ -427,6 +763,22 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
       ["chat_conversations", conversationRows],
       ["chat_messages", messageRows],
       ["quiz_generation_presets", presetRows],
+      ["study_plans", studyPlanRows],
+      ["study_plan_chapters", studyPlanChapterRows],
+      ["study_plan_resources", studyPlanResourceRows],
+      ["study_plan_sessions", studyPlanSessionRows],
+      ["concepts", conceptRows],
+      ["review_items", reviewItemRows],
+      ["review_logs", reviewLogRows],
+      ["mistakes", mistakeRows],
+      ["exam_profiles", examProfileRows],
+      ["mock_exams", mockExamRows],
+      ["mock_exam_attempts", mockExamAttemptRows],
+      ["exam_dates", examDateRows],
+      ["explain_sessions", explainSessionRows],
+      ["problem_sets", problemSetRows],
+      ["source_checks", sourceCheckRows],
+      ["code_sets", codeSetRows],
     ];
     for (const [table, rows] of withSerialId) {
       if (rows.length > 0) {
@@ -453,6 +805,22 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
         chatConversations: conversationRows.length,
         chatMessages: messageRows.length,
         quizGenerationPresets: presetRows.length,
+        studyPlans: studyPlanRows.length,
+        studyPlanChapters: studyPlanChapterRows.length,
+        studyPlanResources: studyPlanResourceRows.length,
+        studyPlanSessions: studyPlanSessionRows.length,
+        concepts: conceptRows.length,
+        reviewItems: reviewItemRows.length,
+        reviewLogs: reviewLogRows.length,
+        mistakes: mistakeRows.length,
+        examProfiles: examProfileRows.length,
+        mockExams: mockExamRows.length,
+        mockExamAttempts: mockExamAttemptRows.length,
+        examDates: examDateRows.length,
+        explainSessions: explainSessionRows.length,
+        problemSets: problemSetRows.length,
+        sourceChecks: sourceCheckRows.length,
+        codeSets: codeSetRows.length,
       },
     });
   } catch (err) {

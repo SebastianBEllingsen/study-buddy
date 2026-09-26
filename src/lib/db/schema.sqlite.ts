@@ -4,6 +4,8 @@ import {
   text,
   real,
   primaryKey,
+  index,
+  uniqueIndex,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import type {
@@ -13,6 +15,21 @@ import type {
   AiBackend,
   ChatRole,
 } from "../models";
+import type {
+  ChapterLevel,
+  LinkStatus,
+  ResourceKind,
+  ResourceOrigin,
+  StudyPlanPreset,
+  SessionKind,
+  StudyPlanStatus,
+} from "../studyPlan/types";
+import type { Confidence, ReviewItemKind, ReviewSource } from "../review/types";
+import type { AttemptStatus } from "../exams/types";
+import type { ExplainKind, ExplainStatus } from "../explain/types";
+import type { ProblemSetKind } from "../problems/types";
+import type { SourceTrust } from "../sources/types";
+import type { CodeLanguage } from "../code/types";
 
 // Mirrors src/lib/schema.sql's tables. Field names are snake_case (matching
 // the DB columns 1:1, not Drizzle's usual camelCase convention) so the rows
@@ -125,6 +142,16 @@ export const app_settings = sqliteTable("app_settings", {
   cli_trusted_mode_enabled: integer("cli_trusted_mode_enabled", { mode: "boolean" })
     .notNull()
     .default(false),
+  // BCP-47 code (see lib/languages.ts); null == English. What AI-written
+  // study plans are written in and which language resources are preferred in.
+  preferred_language: text("preferred_language"),
+  // FSRS target retention (0.8–0.97); null == 0.9. See lib/fsrs.ts.
+  review_retention: real("review_retention"),
+  // How many never-seen cards the review queue introduces a day; null == 20.
+  new_cards_per_day: integer("new_cards_per_day"),
+  // Set once the old SM-2 flashcard history has been replayed into
+  // review_items (lib/review/legacyMigration.ts).
+  fsrs_migrated_at: text("fsrs_migrated_at"),
   updated_at: text("updated_at").notNull(),
 });
 
@@ -171,6 +198,9 @@ export const documents = sqliteTable("documents", {
   char_count: integer("char_count"),
   status: text("status").notNull().default("pending").$type<DocumentStatus>(),
   error_message: text("error_message"),
+  // "official" (course material) or "personal" (the student's own notes) —
+  // see the matching comment in schema.sql.
+  trust: text("trust").notNull().default("official").$type<SourceTrust>(),
   created_at: text("created_at").notNull(),
 });
 
@@ -199,6 +229,11 @@ export const generated_items = sqliteTable("generated_items", {
   // this column existed have neither.
   model_provider: text("model_provider").$type<AiBackend>(),
   model_name: text("model_name"),
+  // The study-plan chapter this was generated for (see lib/studyPlan/), so
+  // its quiz/flashcard results can count toward that chapter's mastery.
+  study_plan_chapter_id: integer("study_plan_chapter_id").references((): AnySQLiteColumn => study_plan_chapters.id, {
+    onDelete: "set null",
+  }),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
@@ -284,6 +319,8 @@ export const notes = sqliteTable("notes", {
   title: text("title").notNull(),
   markdown: text("markdown").notNull().default(""),
   icon: text("icon"),
+  // Null: not used for generation; otherwise included with that trust.
+  generation_source: text("generation_source").$type<SourceTrust>(),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
@@ -367,3 +404,334 @@ export const quiz_generation_presets = sqliteTable("quiz_generation_presets", {
   short_answer: integer("short_answer", { mode: "boolean" }).notNull().default(true),
   created_at: text("created_at").notNull(),
 });
+
+// AI-built learning roadmap for a course — see the matching comment in
+// schema.sql and lib/studyPlan/.
+export const study_plans = sqliteTable("study_plans", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  course_id: integer("course_id")
+    .notNull()
+    .unique()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  status: text("status").notNull().$type<StudyPlanStatus>(),
+  preset: text("preset").notNull().$type<StudyPlanPreset>(),
+  options_json: text("options_json").notNull(),
+  syllabus_document_id: integer("syllabus_document_id").references(() => documents.id, {
+    onDelete: "set null",
+  }),
+  syllabus_text: text("syllabus_text"),
+  source_document_ids: text("source_document_ids").notNull(),
+  source_folder_id: integer("source_folder_id").references(() => folders.id, { onDelete: "set null" }),
+  source_handpicked: integer("source_handpicked", { mode: "boolean" }).notNull().default(false),
+  language: text("language").notNull(),
+  model_provider: text("model_provider").$type<AiBackend>(),
+  model_name: text("model_name"),
+  used_web_search: integer("used_web_search", { mode: "boolean" }).notNull().default(false),
+  error_message: text("error_message"),
+  links_checked_at: text("links_checked_at"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+export const study_plan_chapters = sqliteTable("study_plan_chapters", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  plan_id: integer("plan_id")
+    .notNull()
+    .references(() => study_plans.id, { onDelete: "cascade" }),
+  position: integer("position").notNull().default(0),
+  stage: integer("stage").notNull().default(1),
+  title: text("title").notNull(),
+  summary: text("summary").notNull().default(""),
+  subtopics_json: text("subtopics_json").notNull().default("[]"),
+  prerequisite_ids_json: text("prerequisite_ids_json").notNull().default("[]"),
+  linked_document_ids_json: text("linked_document_ids_json").notNull().default("[]"),
+  current_level: text("current_level").$type<ChapterLevel>(),
+  estimated_minutes: integer("estimated_minutes"),
+  completed_at: text("completed_at"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+export const study_plan_resources = sqliteTable("study_plan_resources", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  chapter_id: integer("chapter_id")
+    .notNull()
+    .references(() => study_plan_chapters.id, { onDelete: "cascade" }),
+  position: integer("position").notNull().default(0),
+  kind: text("kind").notNull().$type<ResourceKind>(),
+  title: text("title").notNull(),
+  url: text("url").notNull(),
+  provider: text("provider"),
+  language: text("language"),
+  note: text("note").notNull().default(""),
+  origin: text("origin").notNull().default("ai").$type<ResourceOrigin>(),
+  link_status: text("link_status").notNull().default("unchecked").$type<LinkStatus>(),
+  status_detail: text("status_detail"),
+  checked_at: text("checked_at"),
+  done_at: text("done_at"),
+  created_at: text("created_at").notNull(),
+});
+
+// One dated study session of a plan's schedule — see lib/studyPlan/schedule.ts.
+export const study_plan_sessions = sqliteTable("study_plan_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  plan_id: integer("plan_id")
+    .notNull()
+    .references(() => study_plans.id, { onDelete: "cascade" }),
+  chapter_id: integer("chapter_id")
+    .notNull()
+    .references(() => study_plan_chapters.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  minutes: integer("minutes").notNull(),
+  kind: text("kind").notNull().default("study").$type<SessionKind>(),
+  done_at: text("done_at"),
+  google_event_id: text("google_event_id"),
+  created_at: text("created_at").notNull(),
+});
+
+// A named idea a course's cards and questions test — see lib/review/concepts.ts.
+// chapter_id links it to a study plan chapter when it came from the plan's
+// subtopics.
+export const concepts = sqliteTable(
+  "concepts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_concepts_course_id").on(table.course_id)]
+);
+
+// FSRS memory state for one flashcard ("card") or quiz question
+// ("question"), keyed by its position in the generated item's content —
+// see lib/review/store.ts.
+export const review_items = sqliteTable(
+  "review_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    generated_item_id: integer("generated_item_id")
+      .notNull()
+      .references(() => generated_items.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<ReviewItemKind>(),
+    item_index: integer("item_index").notNull(),
+    concept_id: integer("concept_id").references(() => concepts.id, { onDelete: "set null" }),
+    due_at: text("due_at").notNull(),
+    stability: real("stability").notNull().default(0),
+    difficulty: real("difficulty").notNull().default(0),
+    reps: integer("reps").notNull().default(0),
+    lapses: integer("lapses").notNull().default(0),
+    state: integer("state").notNull().default(0),
+    scheduled_days: integer("scheduled_days").notNull().default(0),
+    last_reviewed_at: text("last_reviewed_at"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_review_items_item_kind_index").on(table.generated_item_id, table.kind, table.item_index),
+    index("idx_review_items_due_at").on(table.due_at),
+  ]
+);
+
+// Append-only: one row per graded review of a review_items row.
+export const review_logs = sqliteTable(
+  "review_logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    review_item_id: integer("review_item_id")
+      .notNull()
+      .references(() => review_items.id, { onDelete: "cascade" }),
+    rating: integer("rating").notNull(),
+    confidence: text("confidence").$type<Confidence>(),
+    source: text("source").notNull().$type<ReviewSource>(),
+    correct: integer("correct", { mode: "boolean" }).notNull(),
+    reviewed_at: text("reviewed_at").notNull(),
+    stability: real("stability").notNull(),
+    difficulty: real("difficulty").notNull(),
+    scheduled_days: integer("scheduled_days").notNull(),
+  },
+  (table) => [
+    index("idx_review_logs_review_item_id").on(table.review_item_id),
+    index("idx_review_logs_reviewed_at").on(table.reviewed_at),
+  ]
+);
+
+// The mistake log — see lib/review/mistakes.ts.
+export const mistakes = sqliteTable(
+  "mistakes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    generated_item_id: integer("generated_item_id")
+      .notNull()
+      .references(() => generated_items.id, { onDelete: "cascade" }),
+    review_item_id: integer("review_item_id").references(() => review_items.id, { onDelete: "set null" }),
+    concept_id: integer("concept_id").references(() => concepts.id, { onDelete: "set null" }),
+    kind: text("kind").notNull().$type<ReviewItemKind>(),
+    item_index: integer("item_index").notNull(),
+    prompt: text("prompt").notNull(),
+    given_answer: text("given_answer"),
+    correct_answer: text("correct_answer").notNull(),
+    confidence: text("confidence").$type<Confidence>(),
+    misconception: text("misconception"),
+    created_at: text("created_at").notNull(),
+    resolved_at: text("resolved_at"),
+  },
+  (table) => [index("idx_mistakes_generated_item_id").on(table.generated_item_id)]
+);
+
+// Past-exam analysis per course (lib/exams/analyze.ts): the style,
+// weighting and task mix mock exams are generated to match.
+export const exam_profiles = sqliteTable("exam_profiles", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  course_id: integer("course_id")
+    .notNull()
+    .unique()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  source_document_ids_json: text("source_document_ids_json").notNull().default("[]"),
+  profile_json: text("profile_json").notNull(),
+  model_provider: text("model_provider").$type<AiBackend>(),
+  model_name: text("model_name"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+// A generated mock exam (lib/exams/generate.ts). practice_item_id is the
+// quiz its graded tasks are reviewed through afterwards.
+export const mock_exams = sqliteTable(
+  "mock_exams",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    duration_minutes: integer("duration_minutes").notNull(),
+    total_points: real("total_points").notNull(),
+    tasks_json: text("tasks_json").notNull(),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    model_provider: text("model_provider").$type<AiBackend>(),
+    model_name: text("model_name"),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_mock_exams_course_id").on(table.course_id)]
+);
+
+// One sitting of a mock exam: answers as typed text and/or photos of
+// handwritten work, then the step-by-step grading (lib/exams/grade.ts).
+export const mock_exam_attempts = sqliteTable(
+  "mock_exam_attempts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    mock_exam_id: integer("mock_exam_id")
+      .notNull()
+      .references(() => mock_exams.id, { onDelete: "cascade" }),
+    status: text("status").notNull().$type<AttemptStatus>(),
+    answers_json: text("answers_json").notNull().default("[]"),
+    results_json: text("results_json"),
+    score: real("score"),
+    error_message: text("error_message"),
+    started_at: text("started_at").notNull(),
+    // Pausing stops the exam clock: paused_at is set while paused, and
+    // paused_seconds adds up earlier pauses.
+    paused_at: text("paused_at"),
+    paused_seconds: integer("paused_seconds").notNull().default(0),
+    submitted_at: text("submitted_at"),
+  },
+  (table) => [index("idx_mock_exam_attempts_exam_id").on(table.mock_exam_id)]
+);
+
+// A course's exam date (YYYY-MM-DD), for the readiness forecast and exam
+// mode (lib/readiness/).
+export const exam_dates = sqliteTable("exam_dates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  course_id: integer("course_id")
+    .notNull()
+    .unique()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+// Blurt and Feynman sessions (lib/explain/): explaining a topic from
+// memory, then the gaps the AI found. practice_item_id is the flashcard
+// deck the gaps were added to.
+export const explain_sessions = sqliteTable(
+  "explain_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    kind: text("kind").notNull().$type<ExplainKind>(),
+    topic: text("topic").notNull(),
+    status: text("status").notNull().$type<ExplainStatus>(),
+    messages_json: text("messages_json").notNull().default("[]"),
+    result_json: text("result_json"),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_explain_sessions_course_id").on(table.course_id)]
+);
+
+// Problem-solving practice (lib/problems/): a coached set (a worked example,
+// then a faded one, then problems to solve alone) or a mixed set across
+// concepts. progress_json holds the learner's work; practice_item_id is the
+// quiz its solved problems are reviewed through.
+export const problem_sets = sqliteTable(
+  "problem_sets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    kind: text("kind").notNull().$type<ProblemSetKind>(),
+    title: text("title").notNull(),
+    content_json: text("content_json").notNull(),
+    progress_json: text("progress_json").notNull().default("[]"),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_problem_sets_course_id").on(table.course_id)]
+);
+
+// Source conflict checks — see the matching comment in schema.sql.
+export const source_checks = sqliteTable(
+  "source_checks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    source_keys_json: text("source_keys_json").notNull().default("[]"),
+    result_json: text("result_json").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_source_checks_course_id").on(table.course_id)]
+);
+
+// Code exercises — see the matching comment in schema.sql.
+export const code_sets = sqliteTable(
+  "code_sets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    course_id: integer("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    chapter_id: integer("chapter_id").references(() => study_plan_chapters.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    language: text("language").notNull().$type<CodeLanguage>(),
+    content_json: text("content_json").notNull(),
+    progress_json: text("progress_json").notNull().default("[]"),
+    practice_item_id: integer("practice_item_id").references(() => generated_items.id, { onDelete: "set null" }),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_code_sets_course_id").on(table.course_id)]
+);

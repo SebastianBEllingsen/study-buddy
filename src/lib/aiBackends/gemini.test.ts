@@ -41,3 +41,40 @@ describe("gemini describeError", () => {
     expect(describeError("a string, not an Error")).toBe("Generation failed.");
   });
 });
+
+describe("gemini generateTextWithWebSearch", () => {
+  it("turns on Google Search grounding without JSON mode and reports grounding URLs", async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      text: '{"resources":[]}',
+      candidates: [
+        {
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: "https://redirect.example/abc", title: "example.org" } }, {}],
+          },
+        },
+      ],
+    });
+    vi.resetModules();
+    vi.doMock("@google/genai", async () => {
+      const actual = await vi.importActual<typeof import("@google/genai")>("@google/genai");
+      return {
+        ...actual,
+        GoogleGenAI: class {
+          models = { generateContent };
+        },
+      };
+    });
+    vi.doMock("../models", () => ({ getProviderKey: vi.fn(async () => "test-key") }));
+    const { generateTextWithWebSearch } = await import("./gemini");
+
+    const result = await generateTextWithWebSearch({ system: "s", user: "u" });
+    const config = generateContent.mock.calls[0][0].config;
+    expect(config.tools).toEqual([{ googleSearch: {} }]);
+    expect(config.responseMimeType).toBeUndefined();
+    expect(result).toEqual({
+      text: '{"resources":[]}',
+      citations: [{ url: "https://redirect.example/abc", title: "example.org" }],
+      searched: true,
+    });
+  });
+});

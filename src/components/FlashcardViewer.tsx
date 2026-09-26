@@ -1,5 +1,6 @@
 "use client";
 
+import { Explain } from "@/components/Explain";
 import { useEffect, useRef, useState } from "react";
 import { PartyPopper, CalendarCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +11,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
 import { CardFace } from "@/components/CardFace";
 import { tap } from "@/lib/haptics";
+import { CONFIDENCES, type Confidence } from "@/lib/review/types";
+import { ConfidencePicker } from "@/components/review/ConfidencePicker";
+import { WhyPrompt } from "@/components/review/WhyPrompt";
+import { ReportWrongButton } from "@/components/sources/ReportWrongButton";
+import { SourceLink } from "@/components/sources/SourceLink";
 
 // Colors span the same recall-confidence gradient used everywhere else in
 // the app: Clay (forgot) → Amber (struggled) → Sage (got it) → Focus
@@ -26,11 +32,14 @@ export function handleFlashcardKeyDown({
   flipped,
   onFlip,
   onRate,
+  onConfidence,
 }: {
   event: KeyboardEvent;
   flipped: boolean;
   onFlip: () => void;
   onRate: (result: FlashcardResult) => void;
+  // Before the reveal, 1–3 pick a confidence (and reveal) when given.
+  onConfidence?: (confidence: Confidence) => void;
 }) {
   const target = event.target as HTMLElement | null;
   const isTypingTarget =
@@ -44,7 +53,13 @@ export function handleFlashcardKeyDown({
     return true;
   }
 
-  if (!flipped) return false;
+  if (!flipped) {
+    const confidence = CONFIDENCES[["1", "2", "3"].indexOf(event.key)];
+    if (!onConfidence || !confidence) return false;
+    event.preventDefault();
+    onConfidence(confidence);
+    return true;
+  }
 
   const index = ["1", "2", "3", "4"].indexOf(event.key);
   if (index === -1) return false;
@@ -57,10 +72,13 @@ export default function FlashcardViewer({
   itemId,
   cards,
   dueCardIndices,
+  onFlagged,
 }: {
   itemId: number;
   cards: Flashcard[];
   dueCardIndices: number[];
+  // A card was reported wrong (and so left this session).
+  onFlagged?: () => void;
 }) {
   // The queue of card indices for this session — due cards by default, or
   // every card if the student explicitly asks to cram ahead of schedule.
@@ -70,6 +88,8 @@ export default function FlashcardViewer({
   const [position, setPosition] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [logged, setLogged] = useState(0);
+  // Tapped before the reveal; sent with the rating, reset per card.
+  const [confidence, setConfidence] = useState<Confidence | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const done = queue !== null && position >= queue.length;
@@ -96,7 +116,7 @@ export default function FlashcardViewer({
       const res = await fetch(`/api/items/${itemId}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardIndex, result }),
+        body: JSON.stringify({ cardIndex, result, confidence }),
       });
       if (!res.ok) {
         toast.error("Couldn't save that review — try again");
@@ -108,10 +128,18 @@ export default function FlashcardViewer({
     }
     setLogged((n) => n + 1);
     setFlipped(false);
+    setConfidence(null);
     setPosition((p) => p + 1);
   }
 
-  // Space flips the card; 1-4 rate the revealed card (Again/Hard/Good/Easy,
+  function revealWith(value: Confidence) {
+    tap(10);
+    setConfidence(value);
+    setFlipped(true);
+  }
+
+  // Space flips the card; 1-3 before the reveal say how sure you are (and
+  // reveal); 1-4 after it rate the revealed card (Again/Hard/Good/Easy,
   // left to right — matches RESULT_LABELS). This keeps the card review loop
   // fast without hijacking text entry in forms or the Ask AI panel.
   useEffect(() => {
@@ -121,6 +149,7 @@ export default function FlashcardViewer({
         flipped,
         onFlip: () => setFlipped((f) => !f),
         onRate: handleResult,
+        onConfidence: revealWith,
       });
     }
     document.addEventListener("keydown", handleKeyDown);
@@ -144,11 +173,11 @@ export default function FlashcardViewer({
         <Button
           variant="outline"
           onClick={() => {
-            setQueue(cards.map((_, i) => i));
+            setQueue(cards.flatMap((c, i) => (c.flag ? [] : [i])));
             setPosition(0);
           }}
         >
-          Review all {cards.length} cards anyway
+          Review all {cards.filter((c) => !c.flag).length} cards anyway
         </Button>
       </Card>
     );
@@ -223,9 +252,12 @@ export default function FlashcardViewer({
           </CardContent>
         </Card>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {flipped ? "Click to see front" : "Click to reveal answer"}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {flipped ? "Click to see front" : "Click to reveal answer"}
+        </p>
+        <ConfidencePicker value={confidence} onChange={revealWith} disabled={flipped} shortcuts={!flipped} />
+      </div>
 
       <AskAiPanel
         endpoint={`/api/items/${itemId}/ask`}
@@ -234,20 +266,36 @@ export default function FlashcardViewer({
         showWholeButtons
       />
 
+      {flipped && cardIndex != null && <WhyPrompt key={cardIndex} itemId={itemId} cardIndex={cardIndex} />}
+
+      {flipped && cardIndex != null && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {card.source ? <SourceLink source={card.source} /> : <span />}
+          <ReportWrongButton
+            key={cardIndex}
+            itemId={itemId}
+            index={cardIndex}
+            onReported={() => {
+              setFlipped(false);
+              setConfidence(null);
+              setPosition((p) => p + 1);
+              onFlagged?.();
+            }}
+          />
+        </div>
+      )}
+
       {flipped && (
         <div className="flex flex-wrap gap-2">
           {RESULT_LABELS.map(({ result, label, className }, i) => (
-            <Button
-              key={result}
-              variant="ghost"
-              onClick={() => handleResult(result)}
-              className={className}
-            >
-              {label}
-              <kbd className="ml-1 rounded border border-current/30 px-1 font-sans text-[0.65rem] opacity-60">
-                {i + 1}
-              </kbd>
-            </Button>
+            <Explain key={result} id={`rating.${result}`}>
+              <Button variant="ghost" onClick={() => handleResult(result)} className={className}>
+                {label}
+                <kbd className="ml-1 rounded border border-current/30 px-1 font-sans text-[0.65rem] opacity-60">
+                  {i + 1}
+                </kbd>
+              </Button>
+            </Explain>
           ))}
         </div>
       )}

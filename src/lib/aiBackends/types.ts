@@ -45,8 +45,39 @@ export interface GenerateTextParams {
   workspaceScope?: GenerateWorkspaceScope;
 }
 
+// A text call that may search the web first — used to find learning
+// resources for a study plan (lib/studyPlan/). Only backends with a real
+// search tool implement generateTextWithWebSearch; aiClient.ts falls back to
+// plain generateText (model knowledge only) for the rest. The prompt must
+// never embed untrusted document text: a search-enabled call is the one
+// place a prompt-injection payload could reach the network.
+export interface WebSearchParams {
+  system: string;
+  user: string;
+  maxTokens?: number;
+  efficient?: boolean;
+  // Upper bound on searches this one call may run.
+  maxSearches?: number;
+}
+
+export interface WebSearchCitation {
+  url: string;
+  title?: string;
+}
+
+export interface WebSearchResult {
+  text: string;
+  // URLs the provider reports having actually seen in search results —
+  // informational; every suggested link is still verified independently.
+  citations: WebSearchCitation[];
+  // False when the backend has no search tool and answered from model
+  // knowledge alone.
+  searched: boolean;
+}
+
 export interface AiBackendImpl {
   generateStructured<T>(params: GenerateStructuredParams): Promise<T>;
   generateText(params: GenerateTextParams): Promise<string>;
+  generateTextWithWebSearch?(params: WebSearchParams): Promise<WebSearchResult>;
   describeError(err: unknown): string;
 }

@@ -1,7 +1,15 @@
 import { GoogleGenAI, ApiError } from "@google/genai";
 import { getProviderKey } from "../models";
-import type { GenerateStructuredParams, GenerateTextImage, GenerateTextParams } from "./types";
+import type {
+  GenerateStructuredParams,
+  GenerateTextImage,
+  GenerateTextParams,
+  WebSearchCitation,
+  WebSearchParams,
+  WebSearchResult,
+} from "./types";
 import { withRetry, isRetryableStatus } from "./retry";
+import { stripCodeFences } from "./jsonText";
 
 // Verify this against ai.google.dev/gemini-api/docs/models before relying on
 // it — exact model IDs drift and this wasn't confirmed against a first-party
@@ -16,11 +24,6 @@ async function client(): Promise<GoogleGenAI> {
     );
   }
   return new GoogleGenAI({ apiKey });
-}
-
-function stripCodeFences(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  return fenced ? fenced[1] : text;
 }
 
 async function complete(
@@ -81,6 +84,34 @@ export async function generateStructured<T>(
 export async function generateText(params: GenerateTextParams): Promise<string> {
   const { system, user, maxTokens = 8000, images } = params;
   return complete(system, user, maxTokens, false, images);
+}
+
+// Google Search grounding. Can't be combined with JSON mode
+// (responseMimeType), so the caller parses JSON out of plain text. The
+// grounding chunk URIs are Google redirect links, not the sources' own URLs
+// — they're only informational here; lib/linkVerifier.ts resolves whatever
+// URLs actually end up in the answer.
+export async function generateTextWithWebSearch(params: WebSearchParams): Promise<WebSearchResult> {
+  const { system, user, maxTokens = 8000 } = params;
+  const genAI = await client();
+  const response = await withRetry(
+    () =>
+      genAI.models.generateContent({
+        model: MODEL,
+        contents: user,
+        config: {
+          systemInstruction: system,
+          maxOutputTokens: maxTokens,
+          tools: [{ googleSearch: {} }],
+        },
+      }),
+    (err) => err instanceof ApiError && isRetryableStatus(err.status)
+  );
+  const citations: WebSearchCitation[] = [];
+  for (const chunk of response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []) {
+    if (chunk.web?.uri) citations.push({ url: chunk.web.uri, title: chunk.web.title ?? undefined });
+  }
+  return { text: response.text ?? "", citations, searched: true };
 }
 
 export function describeError(err: unknown): string {

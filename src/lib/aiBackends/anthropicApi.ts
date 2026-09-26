@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getProviderKey } from "../models";
-import type { GenerateStructuredParams, GenerateTextParams } from "./types";
+import type {
+  GenerateStructuredParams,
+  GenerateTextParams,
+  WebSearchCitation,
+  WebSearchParams,
+  WebSearchResult,
+} from "./types";
+import { stripCodeFences } from "./jsonText";
 
 // Model + effort chosen for cost/quality fit: generating quiz/flashcard/notes
 // content from supplied text is closer to structured extraction than deep
@@ -60,14 +67,6 @@ export function describeError(err: unknown): string {
     return `Anthropic API error (${err.status}) — check the server log for details.`;
   }
   return err instanceof Error ? err.message : "Generation failed.";
-}
-
-// Claude sometimes wraps JSON in markdown code fences despite instructions
-// not to; strip them defensively before parsing rather than failing/retrying
-// on a purely cosmetic mismatch.
-function stripCodeFences(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  return fenced ? fenced[1] : text;
 }
 
 /**
@@ -156,4 +155,56 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   });
 
   return extractText(response);
+}
+
+// Server-side web search. The dynamic-filtering variant needs a current
+// Sonnet/Opus model; efficiency mode's Haiku takes the basic one.
+function webSearchTool(efficient: boolean | undefined, maxUses: number): Anthropic.ToolUnion {
+  return efficient
+    ? { type: "web_search_20250305", name: "web_search", max_uses: maxUses }
+    : { type: "web_search_20260209", name: "web_search", max_uses: maxUses };
+}
+
+// A long search turn can come back with stop_reason "pause_turn" — resumed
+// by re-sending the paused assistant turn as-is (no extra user message).
+// Capped so a turn that keeps pausing can't loop forever.
+const MAX_PAUSE_CONTINUATIONS = 4;
+
+export function collectCitations(content: Anthropic.ContentBlock[]): WebSearchCitation[] {
+  const seen = new Map<string, WebSearchCitation>();
+  for (const block of content) {
+    if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
+      for (const result of block.content) {
+        if (!seen.has(result.url)) seen.set(result.url, { url: result.url, title: result.title });
+      }
+    } else if (block.type === "text" && block.citations) {
+      for (const citation of block.citations) {
+        if (citation.type === "web_search_result_location" && !seen.has(citation.url)) {
+          seen.set(citation.url, { url: citation.url, title: citation.title ?? undefined });
+        }
+      }
+    }
+  }
+  return [...seen.values()];
+}
+
+export async function generateTextWithWebSearch(params: WebSearchParams): Promise<WebSearchResult> {
+  const { system, user, maxTokens = 8000, efficient, maxSearches = 5 } = params;
+  const model = modelFor(efficient);
+  const anthropic = await client();
+  const tools = [webSearchTool(efficient, maxSearches)];
+
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: user }];
+  const content: Anthropic.ContentBlock[] = [];
+  let response = await anthropic.messages.create({ model, max_tokens: maxTokens, system, messages, tools });
+  content.push(...response.content);
+  for (let i = 0; response.stop_reason === "pause_turn" && i < MAX_PAUSE_CONTINUATIONS; i++) {
+    messages.push({ role: "assistant", content: response.content });
+    response = await anthropic.messages.create({ model, max_tokens: maxTokens, system, messages, tools });
+    content.push(...response.content);
+  }
+
+  // Only the final response's text is the answer — earlier (paused) turns'
+  // text is interim narration between searches.
+  return { text: extractText(response), citations: collectCitations(content), searched: true };
 }

@@ -146,4 +146,52 @@ describe("sanitizeFlashcardsContent", () => {
   it("throws InvalidAiResponseError for a malformed shape", () => {
     expect(() => sanitizeFlashcardsContent({} as FlashcardsContent)).toThrow(InvalidAiResponseError);
   });
+
+  it("keeps a card's concept tag, cleaned, and drops an unusable one", () => {
+    const content = {
+      cards: [
+        { front: "F1", back: "B1", concept: "  Hash   tables " },
+        { front: "F2", back: "B2", concept: 42 },
+        { front: "F3", back: "B3", concept: "" },
+      ],
+    } as unknown as FlashcardsContent;
+    expect(sanitizeFlashcardsContent(content).cards).toEqual([
+      { front: "F1", back: "B1", concept: "Hash tables" },
+      { front: "F2", back: "B2" },
+      { front: "F3", back: "B3" },
+    ]);
+  });
+});
+
+describe("sanitizeQuizContent concept tags", () => {
+  it("keeps a usable concept and drops a malformed one", () => {
+    const content = {
+      questions: [
+        { type: "short_answer", question: "Q", modelAnswer: "A", explanation: "E", concept: " Recursion " },
+        { type: "mcq", question: "Q", options: ["a", "b"], correctIndex: 0, explanation: "E", concept: ["x"] },
+      ],
+    } as unknown as QuizContent;
+    const [first, second] = sanitizeQuizContent(content).questions;
+    expect(first.concept).toBe("Recursion");
+    expect("concept" in second).toBe(false);
+  });
+});
+
+describe("source and flag on generated items", () => {
+  const source = { kind: "document" as const, id: 3, title: "sample.pdf" };
+  const flag = { by: "check" as const, issue: "Contradicts the lecture", at: "2026-01-01T00:00:00Z" };
+
+  it("keeps a valid source and flag on cards and questions", () => {
+    const cards = sanitizeFlashcardsContent({ cards: [{ front: "F", back: "B", source, flag }] });
+    expect(cards.cards[0]).toEqual({ front: "F", back: "B", source, flag });
+    const quiz = sanitizeQuizContent({
+      questions: [{ type: "short_answer", question: "Q", modelAnswer: "A", explanation: "E", source, flag }],
+    });
+    expect(quiz.questions[0]).toMatchObject({ source, flag });
+  });
+
+  it("drops a source that's still just a name", () => {
+    const cards = sanitizeFlashcardsContent({ cards: [{ front: "F", back: "B", source: "sample.pdf" }] } as unknown as FlashcardsContent);
+    expect(cards.cards[0]).toEqual({ front: "F", back: "B" });
+  });
 });

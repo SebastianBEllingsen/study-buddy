@@ -5,14 +5,14 @@ import {
   moveGeneratedItem,
   deleteGeneratedItem,
   getNewDocumentsForItem,
-  getFlashcardScheduleForItem,
   updateGeneratedItemContent,
-  reconcileFlashcardScheduleAfterRemoval,
   reconcileFlashcardReviewsAfterRemoval,
   InvalidDestinationFolderError,
   type GenerationMode,
 } from "@/lib/models";
 import { deckDueCardIndices } from "@/lib/spacedRepetition";
+import { cardDueRowsForItem, reconcileReviewItemsAfterRemoval } from "@/lib/review/store";
+import { ensureFsrsMigrated } from "@/lib/review/legacyMigration";
 import type { FlashcardsContent } from "@/lib/types";
 import { parseId } from "@/lib/routeParams";
 import { isValidCardMediaList } from "@/lib/cardMedia";
@@ -66,7 +66,9 @@ export async function GET(_request: Request, { params }: Params) {
       item.mode === "quiz" ? listRecentQuizAttemptsForItem(id) : Promise.resolve([]),
       item.mode === "quiz" ? getBestQuizScoreForItem(id) : Promise.resolve(null),
       getNewDocumentsForItem(item),
-      item.mode === "flashcards" ? getFlashcardScheduleForItem(id) : Promise.resolve([]),
+      item.mode === "flashcards"
+        ? ensureFsrsMigrated().then(() => cardDueRowsForItem(id))
+        : Promise.resolve([]),
     ]);
 
     return Response.json({
@@ -120,7 +122,8 @@ export async function PATCH(request: Request, { params }: Params) {
         const removedIndices = body.removedCardIndices.filter(
           (i: unknown): i is number => Number.isInteger(i)
         );
-        await reconcileFlashcardScheduleAfterRemoval(id, removedIndices);
+        await ensureFsrsMigrated();
+        await reconcileReviewItemsAfterRemoval(id, "card", removedIndices);
         await reconcileFlashcardReviewsAfterRemoval(id, removedIndices);
       }
       return Response.json({ item: updated });

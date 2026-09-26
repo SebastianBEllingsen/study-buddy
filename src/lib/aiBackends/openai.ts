@@ -1,6 +1,6 @@
 import { getProviderKey } from "../models";
 import { createOpenAiCompatibleBackend } from "./openaiCompatible";
-import type { GenerateStructuredParams, GenerateTextParams } from "./types";
+import type { GenerateStructuredParams, GenerateTextParams, WebSearchParams, WebSearchResult } from "./types";
 
 // Verify this against platform.openai.com/docs/models before relying on it —
 // exact model IDs drift and this wasn't confirmed against a first-party
@@ -27,6 +27,10 @@ export async function generateStructured<T>(
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
   return (await backend()).generateText(params);
+}
+
+export async function generateTextWithWebSearch(params: WebSearchParams): Promise<WebSearchResult> {
+  return (await backend()).generateTextWithWebSearch(params);
 }
 
 export async function describeError(err: unknown): Promise<string> {

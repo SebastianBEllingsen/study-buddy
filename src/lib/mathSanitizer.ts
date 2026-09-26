@@ -1,6 +1,16 @@
 import katex from "katex";
-import type { NotesContent, QuizContent, FlashcardsContent } from "./types";
+import type { Checked, NotesContent, QuizContent, FlashcardsContent } from "./types";
 import { assertQuizContentShape, assertFlashcardsContentShape } from "./aiResponseValidation";
+import { cleanConceptName } from "./conceptName";
+import { withCheckedMeta } from "./sources/itemMeta";
+
+// Keeps a usable `concept` tag, source and flag, and drops anything else
+// under those keys.
+function withConcept<T extends { concept?: unknown }>(item: T): T {
+  const { concept, ...rest } = withCheckedMeta(item as T & Checked) as T;
+  const name = cleanConceptName(concept);
+  return (name ? { ...rest, concept: name } : rest) as T;
+}
 
 // Shared with MathText.tsx and NoteEditor.tsx's live in-editor concealment —
 // the one definition of "what counts as a complete, matched math span," used
@@ -77,14 +87,14 @@ export function sanitizeQuizContent(content: QuizContent): QuizContent {
     questions: content.questions.map((q) => {
       if (q.type === "mcq" || q.type === "multi_select") {
         return {
-          ...q,
+          ...withConcept(q),
           question: stripOrphanMathDelimiters(q.question),
           explanation: stripOrphanMathDelimiters(q.explanation),
           options: q.options.map(stripOrphanMathDelimiters),
         };
       }
       return {
-        ...q,
+        ...withConcept(q),
         question: stripOrphanMathDelimiters(q.question),
         explanation: stripOrphanMathDelimiters(q.explanation),
         modelAnswer: stripOrphanMathDelimiters(q.modelAnswer),
@@ -96,9 +106,16 @@ export function sanitizeQuizContent(content: QuizContent): QuizContent {
 export function sanitizeFlashcardsContent(content: FlashcardsContent): FlashcardsContent {
   assertFlashcardsContentShape(content);
   return {
-    cards: content.cards.map((c) => ({
-      front: stripOrphanMathDelimiters(c.front),
-      back: stripOrphanMathDelimiters(c.back),
-    })),
+    cards: content.cards.map((c) => {
+      const concept = cleanConceptName(c.concept);
+      const { source, flag } = withCheckedMeta({ source: c.source, flag: c.flag });
+      return {
+        front: stripOrphanMathDelimiters(c.front),
+        back: stripOrphanMathDelimiters(c.back),
+        ...(concept && { concept }),
+        ...(source && { source }),
+        ...(flag && { flag }),
+      };
+    }),
   };
 }

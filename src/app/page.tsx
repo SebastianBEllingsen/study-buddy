@@ -46,6 +46,7 @@ import PomodoroWidget from "@/components/pomodoro/PomodoroWidget";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { DashboardCustomizeDialog } from "@/components/DashboardCustomizeDialog";
 import { DueFlashcardsDialog } from "@/components/DueFlashcardsDialog";
+import { TodayCard } from "@/components/today/TodayCard";
 import { RowActionsMenu } from "@/components/RowActionsMenu";
 import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { Button } from "@/components/ui/button";
@@ -1258,6 +1259,7 @@ function HomePageContent() {
   // see stackedContent/remainderContent below.
   const backdropContent = (
     <>
+      <TodayCard courseId={null} />
       {dashboardSection}
       {coursesSection}
       {fullPageBackdrop && bottomWidgetsSection}
@@ -1370,6 +1372,7 @@ function HomePageContent() {
           data-on-backdrop={hasBanner || undefined}
           className={hasBanner ? "relative -mt-12 space-y-6 sm:-mt-16" : "space-y-6"}
         >
+          <TodayCard courseId={null} />
           {dashboardSection}
           {coursesSection}
           {bottomWidgetsSection}

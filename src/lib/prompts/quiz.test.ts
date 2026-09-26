@@ -26,3 +26,19 @@ describe("distributeCount", () => {
     expect(distributeCount(2, 5)).toEqual([1, 1, 0, 0, 0]);
   });
 });
+
+describe("concept tags", () => {
+  it("asks every quiz and flashcard generation to tag items with a concept", async () => {
+    const { quizSystemPrompt, retryQuizSystemPrompt, CONCEPT_RULE } = await import("./quiz");
+    const { flashcardsSystemPrompt } = await import("./flashcards");
+    for (const prompt of [
+      quizSystemPrompt("Sample Course"),
+      quizSystemPrompt("Sample Course", { singleChoice: true, multipleChoice: true, shortAnswer: true }),
+      retryQuizSystemPrompt("Sample Course"),
+      flashcardsSystemPrompt("Sample Course"),
+    ]) {
+      expect(prompt).toContain(CONCEPT_RULE);
+      expect(prompt).toContain('"concept": "..."');
+    }
+  });
+});

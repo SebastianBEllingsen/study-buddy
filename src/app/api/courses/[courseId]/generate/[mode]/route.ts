@@ -2,26 +2,13 @@ import { generateForCourse, NoDocumentsError, DestinationFolderNotFoundError } f
 import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
-import type { QuizGenerationSettings } from "@/lib/types";
+import { parseQuizSettings } from "@/lib/quizSettings";
 import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
 
 type Params = { params: Promise<{ courseId: string; mode: string }> };
 
 const VALID_MODES: GenerationMode[] = ["notes", "quiz", "flashcards"];
-
-function parseQuizSettings(value: unknown): QuizGenerationSettings | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const v = value as Record<string, unknown>;
-  const singleChoice = !!v.singleChoice;
-  const multipleChoice = !!v.multipleChoice;
-  const shortAnswer = !!v.shortAnswer;
-  // Falls back to "no settings" (generateQuiz's own unrestricted default)
-  // rather than a request with every type off, which would leave the
-  // prompt with nothing to ask for.
-  if (!singleChoice && !multipleChoice && !shortAnswer) return undefined;
-  return { singleChoice, multipleChoice, shortAnswer };
-}
 
 export async function POST(request: Request, { params }: Params) {
   const { courseId, mode } = await params;
@@ -41,6 +28,8 @@ export async function POST(request: Request, { params }: Params) {
     ? body.documentIds.filter((id: unknown): id is number => typeof id === "number" && Number.isInteger(id))
     : null;
   const quizSettings = parseQuizSettings(body?.quizSettings);
+  // Only used when the scope has no material — see generateForCourse.
+  const topic = typeof body?.topic === "string" ? body.topic.trim().slice(0, 200) || null : null;
   // undefined (key omitted): keep generateForCourse's own default (file
   // alongside the source folder, or the course default folder). null: force
   // the course default folder. A number: an explicit destination — see
@@ -58,6 +47,7 @@ export async function POST(request: Request, { params }: Params) {
       documentIds,
       quizSettings,
       destinationFolderId,
+      topic,
     });
     // Only when the user has opted out of being taken straight there —
     // otherwise there's nothing left to notify about by the time they'd see it.

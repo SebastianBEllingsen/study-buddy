@@ -10,6 +10,8 @@ import type { GeneratedItem, QuizAttempt } from "@/lib/models";
 import type { QuizContent, FlashcardsContent, NotesContent } from "@/lib/types";
 import QuizRunner from "@/components/QuizRunner";
 import FlashcardViewer from "@/components/FlashcardViewer";
+import { FlaggedItemsPanel } from "@/components/sources/FlaggedItemsPanel";
+import { flaggedEntries } from "@/lib/sources/flags";
 import EditFlashcardsDialog from "@/components/EditFlashcardsDialog";
 import NoteEditor, { type NoteEditorHandle } from "@/components/NoteEditor";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
@@ -460,10 +462,15 @@ export default function ItemPage() {
               <span>Last {completedAttempts[0].score!.toFixed(0)}%</span>
             </p>
           )}
+          <FlaggedItemsPanel
+            flags={flaggedEntries("quiz", content as QuizContent).map((f) => ({ ...f, itemId: item.id, mode: "quiz" }))}
+            onChanged={() => void mutateItem()}
+          />
           <QuizRunner
             itemId={item.id}
             questions={(content as QuizContent).questions}
             onSubmitted={() => mutateItem()}
+            onFlagged={() => void mutateItem()}
             highlightQuery={highlight ?? undefined}
           />
           {attempts.length > 0 && (
@@ -487,10 +494,19 @@ export default function ItemPage() {
 
       {item.mode === "flashcards" && (
         <>
+          <FlaggedItemsPanel
+            flags={flaggedEntries("flashcards", content as FlashcardsContent).map((f) => ({
+              ...f,
+              itemId: item.id,
+              mode: "flashcards",
+            }))}
+            onChanged={() => void mutateItem()}
+          />
           <FlashcardViewer
             itemId={item.id}
             cards={(content as FlashcardsContent).cards}
             dueCardIndices={detail.dueCardIndices}
+            onFlagged={() => void mutateItem()}
           />
           <EditFlashcardsDialog
             open={editingCards}

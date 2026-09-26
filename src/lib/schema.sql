@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS documents (
   char_count INTEGER,
   status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'extracted' | 'failed' | 'image'
   error_message TEXT,
+  -- 'official' (authoritative: a course's own material, a textbook,
+  -- official documentation) or
+  -- 'personal' (the student's own notes) — generation trusts official
+  -- sources over personal ones where they disagree.
+  trust TEXT NOT NULL DEFAULT 'official',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -191,6 +196,9 @@ CREATE TABLE IF NOT EXISTS notes (
   position INTEGER NOT NULL DEFAULT 0,
   title TEXT NOT NULL,
   markdown TEXT NOT NULL DEFAULT '',
+  -- NULL: not used for generation. 'official' / 'personal': included in
+  -- generation from this course, with that trust level (see documents.trust).
+  generation_source TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -304,3 +312,283 @@ CREATE TABLE IF NOT EXISTS quiz_generation_presets (
   short_answer INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- AI-built learning roadmap for a course (lib/studyPlan/): an ordered list
+-- of chapters, each with a subtopic checklist and web resources to study in
+-- order. One plan per course — regenerating replaces it (see
+-- replaceStudyPlan in lib/studyPlan/store.ts). Normalized into three tables
+-- rather than one JSON blob because a plan takes many small edits (ticking
+-- a subtopic, a link check updating one resource's status) and link
+-- checking works per row.
+CREATE TABLE IF NOT EXISTS study_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL UNIQUE REFERENCES courses(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL, -- 'draft_topics' | 'generating' | 'ready' | 'failed'
+  preset TEXT NOT NULL, -- 'roadmap' | 'guided'
+  options_json TEXT NOT NULL,
+  syllabus_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  syllabus_text TEXT,
+  source_document_ids TEXT NOT NULL,
+  source_folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  source_handpicked INTEGER NOT NULL DEFAULT 0,
+  language TEXT NOT NULL,
+  model_provider TEXT,
+  model_name TEXT,
+  used_web_search INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  links_checked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- stage: chapters sharing a stage can be studied in parallel. JSON columns
+-- hold small per-chapter lists always edited together with their chapter.
+CREATE TABLE IF NOT EXISTS study_plan_chapters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  stage INTEGER NOT NULL DEFAULT 1,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  subtopics_json TEXT NOT NULL DEFAULT '[]',
+  prerequisite_ids_json TEXT NOT NULL DEFAULT '[]',
+  linked_document_ids_json TEXT NOT NULL DEFAULT '[]',
+  current_level TEXT,
+  estimated_minutes INTEGER,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_study_plan_chapters_plan_id ON study_plan_chapters(plan_id);
+
+-- position is the "study in order" sequence within a chapter. origin 'user'
+-- rows are hand-added and survive "regenerate resources".
+CREATE TABLE IF NOT EXISTS study_plan_resources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chapter_id INTEGER NOT NULL REFERENCES study_plan_chapters(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  provider TEXT,
+  language TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT 'ai',
+  link_status TEXT NOT NULL DEFAULT 'unchecked',
+  status_detail TEXT,
+  checked_at TEXT,
+  done_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_study_plan_resources_chapter_id ON study_plan_resources(chapter_id);
+
+-- A plan's schedule: one row per dated study session (lib/studyPlan/
+-- schedule.ts). `date` is a plain YYYY-MM-DD day. google_event_id is set
+-- once the session has been pushed to the user's Google Calendar.
+CREATE TABLE IF NOT EXISTS study_plan_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+  chapter_id INTEGER NOT NULL REFERENCES study_plan_chapters(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  minutes INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'study',
+  done_at TEXT,
+  google_event_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_study_plan_sessions_plan_id ON study_plan_sessions(plan_id);
+CREATE INDEX IF NOT EXISTS idx_study_plan_sessions_date ON study_plan_sessions(date);
+
+-- Concepts: the named ideas a course's cards and questions test (lib/review/
+-- concepts.ts). chapter_id is set when the concept is a study plan subtopic.
+CREATE TABLE IF NOT EXISTS concepts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  chapter_id INTEGER REFERENCES study_plan_chapters(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_concepts_course_id ON concepts(course_id);
+
+-- FSRS memory state per flashcard ('card') or quiz question ('question'),
+-- keyed by its index in the item's content like flashcard_schedule was
+-- (lib/review/store.ts reconciles indexes when cards are removed). state is
+-- ts-fsrs's State enum: 0 new, 1 learning, 2 review, 3 relearning.
+-- Replaces flashcard_schedule, which is kept only for old data.
+CREATE TABLE IF NOT EXISTS review_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  generated_item_id INTEGER NOT NULL REFERENCES generated_items(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  item_index INTEGER NOT NULL,
+  concept_id INTEGER REFERENCES concepts(id) ON DELETE SET NULL,
+  due_at TEXT NOT NULL,
+  stability REAL NOT NULL DEFAULT 0,
+  difficulty REAL NOT NULL DEFAULT 0,
+  reps INTEGER NOT NULL DEFAULT 0,
+  lapses INTEGER NOT NULL DEFAULT 0,
+  state INTEGER NOT NULL DEFAULT 0,
+  scheduled_days INTEGER NOT NULL DEFAULT 0,
+  last_reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_items_item_kind_index ON review_items(generated_item_id, kind, item_index);
+CREATE INDEX IF NOT EXISTS idx_review_items_due_at ON review_items(due_at);
+
+-- Append-only log of graded reviews (rating is ts-fsrs's Rating, 1-4).
+-- source is where the answer was given: 'deck' (a flashcard set), 'quiz'
+-- (a quiz attempt), 'queue' (the review session), 'exam' (a graded mock
+-- exam task) or 'legacy' (replayed
+-- from the old SM-2 history).
+CREATE TABLE IF NOT EXISTS review_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_item_id INTEGER NOT NULL REFERENCES review_items(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL,
+  confidence TEXT,
+  source TEXT NOT NULL,
+  correct INTEGER NOT NULL,
+  reviewed_at TEXT NOT NULL,
+  stability REAL NOT NULL,
+  difficulty REAL NOT NULL,
+  scheduled_days INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_review_logs_review_item_id ON review_logs(review_item_id);
+CREATE INDEX IF NOT EXISTS idx_review_logs_reviewed_at ON review_logs(reviewed_at);
+
+-- The mistake log (lib/review/mistakes.ts): wrong quiz answers and cards
+-- rated "Again", resolved once recalled correctly on two later days.
+CREATE TABLE IF NOT EXISTS mistakes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  generated_item_id INTEGER NOT NULL REFERENCES generated_items(id) ON DELETE CASCADE,
+  review_item_id INTEGER REFERENCES review_items(id) ON DELETE SET NULL,
+  concept_id INTEGER REFERENCES concepts(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  item_index INTEGER NOT NULL,
+  prompt TEXT NOT NULL,
+  given_answer TEXT,
+  correct_answer TEXT NOT NULL,
+  confidence TEXT,
+  misconception TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mistakes_generated_item_id ON mistakes(generated_item_id);
+
+-- Mock exams from past exams (lib/exams/). exam_profiles holds the analysis
+-- of a course's past exams (one per course); mock_exams the generated
+-- exams, each with tasks, rubrics and model solutions in tasks_json, and
+-- the practice quiz its tasks are reviewed through; mock_exam_attempts one
+-- sitting each: answers (typed and/or photos), status 'in_progress' |
+-- 'grading' | 'graded' | 'failed', and the graded results.
+CREATE TABLE IF NOT EXISTS exam_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL UNIQUE REFERENCES courses(id) ON DELETE CASCADE,
+  source_document_ids_json TEXT NOT NULL DEFAULT '[]',
+  profile_json TEXT NOT NULL,
+  model_provider TEXT,
+  model_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS mock_exams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  duration_minutes INTEGER NOT NULL,
+  total_points REAL NOT NULL,
+  tasks_json TEXT NOT NULL,
+  practice_item_id INTEGER REFERENCES generated_items(id) ON DELETE SET NULL,
+  model_provider TEXT,
+  model_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mock_exams_course_id ON mock_exams(course_id);
+
+CREATE TABLE IF NOT EXISTS mock_exam_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mock_exam_id INTEGER NOT NULL REFERENCES mock_exams(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  answers_json TEXT NOT NULL DEFAULT '[]',
+  results_json TEXT,
+  score REAL,
+  error_message TEXT,
+  started_at TEXT NOT NULL,
+  paused_at TEXT,
+  paused_seconds INTEGER NOT NULL DEFAULT 0,
+  submitted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mock_exam_attempts_exam_id ON mock_exam_attempts(mock_exam_id);
+
+-- A course's exam date (lib/readiness/).
+CREATE TABLE IF NOT EXISTS exam_dates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL UNIQUE REFERENCES courses(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Blurt / Feynman sessions (lib/explain/): kind 'blurt' | 'feynman',
+-- status 'open' | 'done'; messages_json is the conversation, result_json
+-- the gaps found, practice_item_id the flashcard deck gaps were added to.
+CREATE TABLE IF NOT EXISTS explain_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  chapter_id INTEGER REFERENCES study_plan_chapters(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  status TEXT NOT NULL,
+  messages_json TEXT NOT NULL DEFAULT '[]',
+  result_json TEXT,
+  practice_item_id INTEGER REFERENCES generated_items(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_explain_sessions_course_id ON explain_sessions(course_id);
+
+-- Problem-solving practice (lib/problems/): kind 'coach' (worked → faded →
+-- independent) or 'mixed' (interleaved across concepts).
+CREATE TABLE IF NOT EXISTS problem_sets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  chapter_id INTEGER REFERENCES study_plan_chapters(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  progress_json TEXT NOT NULL DEFAULT '[]',
+  practice_item_id INTEGER REFERENCES generated_items(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_problem_sets_course_id ON problem_sets(course_id);
+
+-- Source conflict checks (lib/sources/conflicts.ts): the latest findings
+-- of comparing a course's documents and generation notes with each other.
+-- source_keys_json lists the sources checked ("doc:ID" / "note:ID") so the
+-- page can tell when new material has arrived since.
+CREATE TABLE IF NOT EXISTS source_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  source_keys_json TEXT NOT NULL DEFAULT '[]',
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_source_checks_course_id ON source_checks(course_id);
+
+-- Code exercises (lib/code/): programming practice whose tests run in the
+-- learner's browser. content_json holds the exercises, progress_json the
+-- learner's code and results; practice_item_id is the quiz its finished
+-- exercises are reviewed through.
+CREATE TABLE IF NOT EXISTS code_sets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  chapter_id INTEGER REFERENCES study_plan_chapters(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  language TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  progress_json TEXT NOT NULL DEFAULT '[]',
+  practice_item_id INTEGER REFERENCES generated_items(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_code_sets_course_id ON code_sets(course_id);

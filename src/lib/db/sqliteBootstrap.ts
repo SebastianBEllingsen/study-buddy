@@ -537,6 +537,40 @@ export function migrate(database: Database.Database) {
       "ALTER TABLE app_settings ADD COLUMN cli_trusted_mode_enabled INTEGER NOT NULL DEFAULT 0"
     );
   }
+  // Created after study_plan_chapters exists (schema.sql runs first), so
+  // the reference resolves.
+  if (!hasColumn("generated_items", "study_plan_chapter_id")) {
+    database.exec(
+      "ALTER TABLE generated_items ADD COLUMN study_plan_chapter_id INTEGER REFERENCES study_plan_chapters(id) ON DELETE SET NULL"
+    );
+  }
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_generated_items_study_plan_chapter_id ON generated_items(study_plan_chapter_id)"
+  );
+  if (!hasColumn("app_settings", "preferred_language")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN preferred_language TEXT");
+  }
+  if (!hasColumn("app_settings", "review_retention")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN review_retention REAL");
+  }
+  if (!hasColumn("app_settings", "new_cards_per_day")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN new_cards_per_day INTEGER");
+  }
+  if (!hasColumn("mock_exam_attempts", "paused_at")) {
+    database.exec("ALTER TABLE mock_exam_attempts ADD COLUMN paused_at TEXT");
+  }
+  if (!hasColumn("mock_exam_attempts", "paused_seconds")) {
+    database.exec("ALTER TABLE mock_exam_attempts ADD COLUMN paused_seconds INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("documents", "trust")) {
+    database.exec("ALTER TABLE documents ADD COLUMN trust TEXT NOT NULL DEFAULT 'official'");
+  }
+  if (!hasColumn("notes", "generation_source")) {
+    database.exec("ALTER TABLE notes ADD COLUMN generation_source TEXT");
+  }
+  if (!hasColumn("app_settings", "fsrs_migrated_at")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN fsrs_migrated_at TEXT");
+  }
   if (!hasColumn("chat_messages", "attachments")) {
     database.exec("ALTER TABLE chat_messages ADD COLUMN attachments TEXT");
   }

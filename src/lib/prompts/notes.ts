@@ -1,8 +1,11 @@
+import { SOURCE_TRUST_RULE } from "./sources";
+
 export function notesSystemPrompt(courseName: string): string {
   return `You are a study assistant generating condensed study notes strictly from the course material provided by the user. This is for the course "${courseName}".
 
 Rules:
 - Use ONLY the provided material. Do not invent facts or rely on outside knowledge beyond trivial clarification.
+- ${SOURCE_TRUST_RULE}
 - Organize by topic/lecture with clear markdown headings.
 - Call out key definitions and terms explicitly (e.g. bold the term, then define it).
 - Use concise bullet points, not long paragraphs.

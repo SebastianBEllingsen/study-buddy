@@ -7,7 +7,9 @@ import {
   InvalidDestinationFolderError,
   moveDocument,
   renameDocument,
+  setDocumentTrust,
 } from "@/lib/models";
+import { parseTrust } from "@/lib/sources/requests";
 import { parseId } from "@/lib/routeParams";
 import { previewPdfPath } from "@/lib/uploads";
 import { CONTENT_TYPES, extensionOf, isSupportedExtension, needsLibreOfficeConversion } from "@/lib/documentFormats";
@@ -87,7 +89,8 @@ export async function DELETE(_request: Request, { params }: Params) {
 }
 
 // Moves and/or renames — a plain move (drag-and-drop) sends only folderId,
-// a rename sends only filename, either can be sent together.
+// a rename sends only filename, either can be sent together. { trust }
+// marks it official (authoritative) material or personal notes.
 export async function PATCH(request: Request, { params }: Params) {
   const { documentId } = await params;
   const id = parseId(documentId);
@@ -98,12 +101,21 @@ export async function PATCH(request: Request, { params }: Params) {
   }
   const hasFolderId = body?.folderId !== undefined;
   const hasFilename = body?.filename !== undefined;
+  const hasTrust = body?.trust !== undefined;
 
-  if (!hasFolderId && !hasFilename) {
-    return Response.json({ error: "folderId or filename is required" }, { status: 400 });
+  if (!hasFolderId && !hasFilename && !hasTrust) {
+    return Response.json({ error: "folderId, filename or trust is required" }, { status: 400 });
   }
+  const trust = hasTrust ? parseTrust(body.trust) : null;
+  if (hasTrust && !trust) return Response.json({ error: "Invalid trust" }, { status: 400 });
 
   try {
+    if (trust) {
+      const doc = await getDocument(id);
+      if (!doc) return Response.json({ error: "Document not found" }, { status: 404 });
+      await setDocumentTrust(id, trust);
+    }
+
     if (hasFolderId) {
       if (body.folderId !== null && !Number.isInteger(body.folderId)) {
         return Response.json({ error: "Invalid folder" }, { status: 400 });

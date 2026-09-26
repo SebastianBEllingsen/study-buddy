@@ -6,12 +6,14 @@ import {
   InvalidDestinationFolderError,
   moveNote,
   renameNote,
+  setNoteGenerationSource,
   updateNoteIcon,
   updateNoteMarkdown,
 } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 import { isValidIcon } from "@/lib/fieldValidation";
 import { parseJsonObjectBody } from "@/lib/requestBody";
+import { parseGenerationSource } from "@/lib/sources/requests";
 
 type Params = { params: Promise<{ noteId: string }> };
 
@@ -50,6 +52,12 @@ export async function PATCH(request: Request, { params }: Params) {
         return Response.json({ error: "Invalid icon" }, { status: 400 });
       }
       await updateNoteIcon(id, body.icon as string | null);
+    }
+    // null: not used for generation; "official" / "personal": included.
+    if ("generationSource" in body) {
+      const source = parseGenerationSource(body.generationSource);
+      if (source === undefined) return Response.json({ error: "Invalid generation source" }, { status: 400 });
+      await setNoteGenerationSource(id, source);
     }
   } catch (err) {
     if (err instanceof InvalidDestinationFolderError) {

@@ -1,14 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const logFlashcardReview = vi.fn();
-const getFlashcardSchedule = vi.fn();
-const upsertFlashcardSchedule = vi.fn();
+const recordCardAnswer = vi.fn();
 const getGeneratedItem = vi.fn();
 vi.mock("@/lib/models", () => ({
-  logFlashcardReview: (...args: unknown[]) => logFlashcardReview(...args),
-  getFlashcardSchedule: (...args: unknown[]) => getFlashcardSchedule(...args),
-  upsertFlashcardSchedule: (...args: unknown[]) => upsertFlashcardSchedule(...args),
   getGeneratedItem: (...args: unknown[]) => getGeneratedItem(...args),
+}));
+vi.mock("@/lib/review/answers", () => ({
+  recordCardAnswer: (...args: unknown[]) => recordCardAnswer(...args),
 }));
 
 const { POST } = await import("./route");
@@ -26,9 +24,7 @@ const flashcardItem = {
 };
 
 beforeEach(() => {
-  logFlashcardReview.mockReset().mockResolvedValue(undefined);
-  getFlashcardSchedule.mockReset().mockResolvedValue(null);
-  upsertFlashcardSchedule.mockReset().mockResolvedValue(undefined);
+  recordCardAnswer.mockReset().mockResolvedValue({ index: 1, scheduled: true, dueAt: "2026-01-02 06:00:00" });
   getGeneratedItem.mockReset();
 });
 
@@ -37,21 +33,38 @@ describe("POST /api/items/[itemId]/review", () => {
     getGeneratedItem.mockResolvedValue(flashcardItem);
     const res = await POST(req({ cardIndex: 1, result: "good" }), { params });
     expect(res.status).toBe(200);
-    expect(logFlashcardReview).toHaveBeenCalledWith({ generatedItemId: 1, cardIndex: 1, result: "good" });
+    expect(recordCardAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({ cardIndex: 1, result: "good", confidence: null, source: "deck", card: { front: "c", back: "d" } })
+    );
+    expect(await res.json()).toMatchObject({ dueAt: "2026-01-02 06:00:00", scheduled: true });
+  });
+
+  it("passes the confidence tapped before the answer was shown", async () => {
+    getGeneratedItem.mockResolvedValue(flashcardItem);
+    const res = await POST(req({ cardIndex: 0, result: "again", confidence: "sure" }), { params });
+    expect(res.status).toBe(200);
+    expect(recordCardAnswer).toHaveBeenCalledWith(expect.objectContaining({ confidence: "sure" }));
+  });
+
+  it("rejects an unknown confidence value", async () => {
+    getGeneratedItem.mockResolvedValue(flashcardItem);
+    const res = await POST(req({ cardIndex: 0, result: "good", confidence: "very" }), { params });
+    expect(res.status).toBe(400);
+    expect(recordCardAnswer).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the item doesn't exist", async () => {
     getGeneratedItem.mockResolvedValue(undefined);
     const res = await POST(req({ cardIndex: 0, result: "good" }), { params });
     expect(res.status).toBe(404);
-    expect(logFlashcardReview).not.toHaveBeenCalled();
+    expect(recordCardAnswer).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the item exists but isn't a flashcards item", async () => {
     getGeneratedItem.mockResolvedValue({ ...flashcardItem, mode: "quiz" });
     const res = await POST(req({ cardIndex: 0, result: "good" }), { params });
     expect(res.status).toBe(404);
-    expect(logFlashcardReview).not.toHaveBeenCalled();
+    expect(recordCardAnswer).not.toHaveBeenCalled();
   });
 
   // Regression coverage: cardIndex was previously only checked for being an
@@ -63,20 +76,20 @@ describe("POST /api/items/[itemId]/review", () => {
     getGeneratedItem.mockResolvedValue(flashcardItem); // 2 cards: valid indices 0, 1
     const res = await POST(req({ cardIndex: 2, result: "good" }), { params });
     expect(res.status).toBe(400);
-    expect(logFlashcardReview).not.toHaveBeenCalled();
+    expect(recordCardAnswer).not.toHaveBeenCalled();
   });
 
   it("rejects a negative cardIndex", async () => {
     getGeneratedItem.mockResolvedValue(flashcardItem);
     const res = await POST(req({ cardIndex: -1, result: "good" }), { params });
     expect(res.status).toBe(400);
-    expect(logFlashcardReview).not.toHaveBeenCalled();
+    expect(recordCardAnswer).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid result value", async () => {
     getGeneratedItem.mockResolvedValue(flashcardItem);
     const res = await POST(req({ cardIndex: 0, result: "amazing" }), { params });
     expect(res.status).toBe(400);
-    expect(logFlashcardReview).not.toHaveBeenCalled();
+    expect(recordCardAnswer).not.toHaveBeenCalled();
   });
 });

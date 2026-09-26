@@ -20,16 +20,18 @@ vi.mock("./context", () => ({
   combineDocumentText: vi.fn(),
 }));
 
+const createGeneratedItem = vi.fn(async (params: Record<string, unknown>) => ({ id: 1, ...params }));
+const getCourse = vi.fn();
 vi.mock("./models", () => ({
-  createGeneratedItem: vi.fn(async (params: Record<string, unknown>) => ({ id: 1, ...params })),
-  getCourse: vi.fn(),
+  createGeneratedItem: (params: Record<string, unknown>) => createGeneratedItem(params),
+  getCourse: (...args: unknown[]) => getCourse(...args),
   getFolder: vi.fn(),
   getNewDocumentsForItem: vi.fn(),
   updateGeneratedItemContent: vi.fn(),
   getAppSettings: vi.fn().mockResolvedValue({ aiEfficiencyMode: false }),
 }));
 
-const { generateForCourse } = await import("./generate");
+const { generateForCourse, chapterTopicText, topicText, NoDocumentsError } = await import("./generate");
 
 function fakeContext(chunkCount: number): CourseContext {
   return {
@@ -39,6 +41,8 @@ function fakeContext(chunkCount: number): CourseContext {
     handpicked: false,
     scopeLabel: "All material",
     documentIds: [1],
+    noteIds: [],
+    sources: [{ kind: "document", id: 1, title: "sample.pdf" }],
     combinedText: Array.from({ length: chunkCount }, (_, i) => `chunk ${i}`).join("|"),
     estimatedTokens: 999_999,
     needsChunking: true,
@@ -113,5 +117,150 @@ describe("generateForCourse — chunked flashcard generation", () => {
     );
     expect(totals.every((n) => !Number.isNaN(n))).toBe(true);
     expect(totals.reduce((a, b) => a + b, 0)).toBe(20);
+  });
+});
+
+describe("generateForCourse for a study-plan chapter", () => {
+  const chapter = { id: 42, title: "Foundations", summary: "The basics.", subtopics: ["Idea A", "Idea B"] };
+
+  beforeEach(() => {
+    createGeneratedItem.mockClear();
+    getCourse.mockResolvedValue({ id: 1, name: "Test Course" });
+    generateStructured.mockResolvedValue({ cards: [{ front: "Q", back: "A" }] });
+  });
+
+  it("uses the chapter's documents, titles the item after the chapter, and links it", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), needsChunking: false, combinedText: "doc text" });
+    await generateForCourse(1, "flashcards", { documentIds: [7], studyPlanChapter: chapter });
+    expect(buildCourseContext).toHaveBeenCalledWith(1, expect.objectContaining({ documentIds: [7] }));
+    expect(createGeneratedItem).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Flashcards — Foundations", studyPlanChapterId: 42 })
+    );
+  });
+
+  it("teaches from the chapter's topics when it has no documents", async () => {
+    buildCourseContext.mockClear();
+    await generateForCourse(1, "flashcards", { documentIds: null, studyPlanChapter: chapter });
+    expect(buildCourseContext).not.toHaveBeenCalled();
+    const { user } = generateStructured.mock.calls.at(-1)![0];
+    expect(user).toContain("no course documents");
+    expect(user).toContain("- Idea B");
+    expect(createGeneratedItem).toHaveBeenCalledWith(expect.objectContaining({ sourceDocumentIds: [] }));
+  });
+
+  it("falls back to the topics when the linked documents have gone", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), documentIds: [], combinedText: "", needsChunking: false });
+    await generateForCourse(1, "flashcards", { documentIds: [7], studyPlanChapter: chapter });
+    expect(generateStructured.mock.calls.at(-1)![0].user).toContain("Chapter: Foundations");
+  });
+
+  it("still refuses an ordinary generation with no documents", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), documentIds: [], combinedText: "" });
+    await expect(generateForCourse(1, "flashcards")).rejects.toBeInstanceOf(NoDocumentsError);
+  });
+
+  it("writes the topic text with the no-documents note first", () => {
+    expect(chapterTopicText({ title: "T", summary: "", subtopics: [] }).split("\n")[0]).toMatch(/no course documents/);
+  });
+});
+
+describe("generateForCourse — sources and fact-check", () => {
+  beforeEach(() => {
+    createGeneratedItem.mockClear();
+    getCourse.mockResolvedValue({ id: 1, name: "Test Course" });
+  });
+
+  it("links each card to the section it names and flags what the check finds", async () => {
+    buildCourseContext.mockResolvedValue({
+      ...fakeContext(1),
+      needsChunking: false,
+      combinedText: "--- Document: sample.pdf [authoritative material] ---\ntext",
+      noteIds: [3],
+      sources: [
+        { kind: "document", id: 1, title: "sample.pdf" },
+        { kind: "note", id: 3, title: "My summary" },
+      ],
+    });
+    generateStructured
+      .mockResolvedValueOnce({
+        cards: [
+          { front: "Q1", back: "A1", source: "sample.pdf" },
+          { front: "Q2", back: "A2", source: "my summary" },
+          { front: "Q3", back: "A3", source: "unknown.pdf" },
+        ],
+      })
+      .mockResolvedValueOnce({ issues: [{ index: 1, issue: "The answer should be B." }] });
+
+    await generateForCourse(1, "flashcards");
+
+    expect(generateStructured).toHaveBeenCalledTimes(2);
+    const check = generateStructured.mock.calls[1][0];
+    expect(check.user).toContain("Front: Q2");
+    expect(check.user).toContain("sample.pdf");
+    const { contentJson } = createGeneratedItem.mock.calls.at(-1)![0] as { contentJson: { cards: Record<string, unknown>[] } };
+    expect(contentJson.cards[0].source).toEqual({ kind: "document", id: 1, title: "sample.pdf" });
+    expect(contentJson.cards[1].source).toEqual({ kind: "note", id: 3, title: "My summary" });
+    expect(contentJson.cards[2].source).toBeUndefined();
+    expect(contentJson.cards[1].flag).toMatchObject({ by: "check", issue: "The answer should be B." });
+    expect(contentJson.cards[0].flag).toBeUndefined();
+  });
+
+  it("keeps the items unflagged when the check itself fails", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), needsChunking: false, combinedText: "text" });
+    generateStructured
+      .mockResolvedValueOnce({ cards: [{ front: "Q", back: "A" }] })
+      .mockRejectedValueOnce(new Error("provider down"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await generateForCourse(1, "flashcards");
+
+    const { contentJson } = createGeneratedItem.mock.calls.at(-1)![0] as { contentJson: { cards: Record<string, unknown>[] } };
+    expect(contentJson.cards[0].flag).toBeUndefined();
+    error.mockRestore();
+  });
+
+  it("generates from marked notes even when the scope has no documents", async () => {
+    buildCourseContext.mockResolvedValue({
+      ...fakeContext(1),
+      documentIds: [],
+      noteIds: [3],
+      needsChunking: false,
+      combinedText: "--- Note: My summary [authoritative material] ---\ntext",
+    });
+    generateStructured.mockResolvedValue({ cards: [] });
+    await expect(generateForCourse(1, "flashcards")).resolves.toBeTruthy();
+  });
+});
+
+describe("generateForCourse from a typed topic", () => {
+  beforeEach(() => {
+    createGeneratedItem.mockClear();
+    getCourse.mockResolvedValue({ id: 1, name: "Test Course" });
+    generateStructured.mockResolvedValue({ cards: [] });
+  });
+
+  it("generates from the topic when the scope has no material", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), documentIds: [], combinedText: "", needsChunking: false });
+    await generateForCourse(1, "flashcards", { topic: "  Recursion " });
+    expect(generateStructured.mock.calls[0][0].user).toContain("Topic: Recursion");
+    expect(createGeneratedItem).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Flashcards — Recursion", sourceDocumentIds: [] })
+    );
+  });
+
+  it("ignores the topic when there is material", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), needsChunking: false, combinedText: "doc text" });
+    await generateForCourse(1, "flashcards", { topic: "Recursion" });
+    expect(generateStructured.mock.calls[0][0].user).toContain("doc text");
+    expect(generateStructured.mock.calls[0][0].user).not.toContain("Topic: Recursion");
+  });
+
+  it("still refuses an empty scope with a blank topic", async () => {
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), documentIds: [], combinedText: "" });
+    await expect(generateForCourse(1, "flashcards", { topic: "   " })).rejects.toBeInstanceOf(NoDocumentsError);
+  });
+
+  it("tells the model to teach from established knowledge", () => {
+    expect(topicText("Recursion")).toMatch(/well-established knowledge/);
   });
 });

@@ -12,11 +12,31 @@ vi.mock("./models", () => ({ getAiBackend, getImageAiBackend, isAiEnabled }));
 
 // Each backend module wraps a real SDK/subprocess/HTTP call — mocked so
 // dispatch can be tested without any of that.
-const anthropicApi = { generateStructured: vi.fn(), generateText: vi.fn(), describeError: vi.fn() };
-const claudeCode = { generateStructured: vi.fn(), generateText: vi.fn(), describeError: vi.fn() };
+const anthropicApi = {
+  generateStructured: vi.fn(),
+  generateText: vi.fn(),
+  generateTextWithWebSearch: vi.fn(),
+  describeError: vi.fn(),
+};
+const claudeCode = {
+  generateStructured: vi.fn(),
+  generateText: vi.fn(),
+  generateTextWithWebSearch: vi.fn(),
+  describeError: vi.fn(),
+};
 const codexCli = { generateStructured: vi.fn(), generateText: vi.fn(), describeError: vi.fn() };
-const openai = { generateStructured: vi.fn(), generateText: vi.fn(), describeError: vi.fn() };
-const gemini = { generateStructured: vi.fn(), generateText: vi.fn(), describeError: vi.fn() };
+const openai = {
+  generateStructured: vi.fn(),
+  generateText: vi.fn(),
+  generateTextWithWebSearch: vi.fn(),
+  describeError: vi.fn(),
+};
+const gemini = {
+  generateStructured: vi.fn(),
+  generateText: vi.fn(),
+  generateTextWithWebSearch: vi.fn(),
+  describeError: vi.fn(),
+};
 const free = { generateStructured: vi.fn(), generateText: vi.fn(), describeError: vi.fn() };
 vi.mock("./aiBackends/anthropicApi", () => anthropicApi);
 vi.mock("./aiBackends/claudeCode", () => claudeCode);
@@ -25,8 +45,17 @@ vi.mock("./aiBackends/openai", () => openai);
 vi.mock("./aiBackends/gemini", () => gemini);
 vi.mock("./aiBackends/free", () => free);
 
-const { generateStructured, generateText, describeAiError, getModelInfo, AiDisabledError } =
-  await import("./aiClient");
+const {
+  generateStructured,
+  generateText,
+  generateWithWebSearch,
+  backendSupportsWebSearch,
+  WEB_SEARCH_IMPLS,
+  describeAiError,
+  getModelInfo,
+  AiDisabledError,
+} = await import("./aiClient");
+const { WEB_SEARCH_CAPABLE_BACKENDS } = await import("./aiBackendChoices");
 
 const BACKENDS = { api: anthropicApi, claude_code: claudeCode, codex_cli: codexCli, openai, gemini, free };
 
@@ -211,5 +240,36 @@ describe("getModelInfo", () => {
     getAiBackend.mockResolvedValue("openai");
     expect((await getModelInfo()).model).toBe("gpt-custom");
     delete process.env.OPENAI_MODEL;
+  });
+});
+
+describe("generateWithWebSearch", () => {
+  const params = { system: "sys", user: "find resources" };
+
+  it("uses the backend's own web search when it has one", async () => {
+    getAiBackend.mockResolvedValue("gemini");
+    gemini.generateTextWithWebSearch.mockResolvedValue({ text: "{}", citations: [], searched: true });
+    expect(await generateWithWebSearch(params)).toEqual({ text: "{}", citations: [], searched: true });
+    expect(gemini.generateTextWithWebSearch).toHaveBeenCalledWith(params);
+    expect(gemini.generateText).not.toHaveBeenCalled();
+  });
+
+  it("falls back to plain text generation, reported as not searched", async () => {
+    getAiBackend.mockResolvedValue("free");
+    expect(await generateWithWebSearch(params)).toEqual({ text: "text result", citations: [], searched: false });
+    expect(free.generateText).toHaveBeenCalledWith(expect.objectContaining({ system: "sys", user: "find resources" }));
+  });
+
+  it("is gated by the AI-enabled setting like every other call", async () => {
+    isAiEnabled.mockResolvedValue(false);
+    await expect(generateWithWebSearch(params)).rejects.toBeInstanceOf(AiDisabledError);
+  });
+
+  it("agrees with the client-safe list of search-capable backends", async () => {
+    expect(Object.keys(WEB_SEARCH_IMPLS).sort()).toEqual([...WEB_SEARCH_CAPABLE_BACKENDS].sort());
+    getAiBackend.mockResolvedValue("codex_cli");
+    expect(await backendSupportsWebSearch()).toBe(false);
+    getAiBackend.mockResolvedValue("openai");
+    expect(await backendSupportsWebSearch()).toBe(true);
   });
 });

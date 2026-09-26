@@ -29,7 +29,13 @@ export function DueFlashcardsDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Cards due</DialogTitle>
-          <DialogDescription>Pick a set to study.</DialogDescription>
+          <DialogDescription>
+            Pick a set to study, or{" "}
+            <Link href="/review" onClick={() => onOpenChange(false)} className="text-foreground underline">
+              review everything that&apos;s due
+            </Link>{" "}
+            in one mixed session.
+          </DialogDescription>
         </DialogHeader>
         <ul className="max-h-[60vh] space-y-1 overflow-y-auto">
           {items.map((item) => (

@@ -1,5 +1,6 @@
 "use client";
 
+import { Explain } from "@/components/Explain";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, CircleAlert, XCircle } from "lucide-react";
@@ -19,6 +20,12 @@ import { MathText } from "@/components/MathText";
 import { tap } from "@/lib/haptics";
 import { scrollToHighlight } from "@/lib/scrollToHighlight";
 import { useAiEnabled } from "@/lib/useAiEnabled";
+import type { Confidence } from "@/lib/review/types";
+import { calibrationMessage, summarizeCalibration } from "@/lib/review/calibration";
+import { ConfidencePicker } from "@/components/review/ConfidencePicker";
+import { ReportWrongButton } from "@/components/sources/ReportWrongButton";
+import { SourceLink } from "@/components/sources/SourceLink";
+import { ShieldAlert } from "lucide-react";
 
 interface ResultEntry {
   index: number;
@@ -35,17 +42,23 @@ function QuestionCard({
   index,
   question: q,
   answer,
+  confidence,
   result,
   disabled,
   onAnswerChange,
+  onConfidenceChange,
+  onFlagged,
 }: {
   itemId: number;
   index: number;
   question: QuizQuestion;
+  onFlagged?: () => void;
   answer: number | string | number[];
+  confidence: Confidence | null;
   result?: ResultEntry;
   disabled: boolean;
   onAnswerChange: (value: number | string | number[]) => void;
+  onConfidenceChange: (value: Confidence) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -72,6 +85,15 @@ function QuestionCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {q.flag && (
+          <p className="flex gap-1.5 rounded-md bg-amber/10 px-2.5 py-1.5 text-xs">
+            <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-amber" />
+            <span>
+              Possibly wrong, so it&apos;s held out of your reviews and your answer isn&apos;t scheduled:{" "}
+              <MathText text={q.flag.issue} />
+            </span>
+          </p>
+        )}
         {q.type === "mcq" ? (
           <RadioGroup
             value={typeof answer === "number" ? String(answer) : ""}
@@ -116,6 +138,10 @@ function QuestionCard({
             value={String(answer ?? "")}
             onChange={(e) => onAnswerChange(e.target.value)}
           />
+        )}
+
+        {(!disabled || confidence) && (
+          <ConfidencePicker value={confidence} onChange={onConfidenceChange} disabled={disabled} />
         )}
 
         {result && (
@@ -171,6 +197,13 @@ function QuestionCard({
           </Alert>
         )}
 
+        {result && (q.source || !q.flag) && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {q.source ? <SourceLink source={q.source} /> : <span />}
+            {!q.flag && <ReportWrongButton itemId={itemId} index={index} onReported={onFlagged} />}
+          </div>
+        )}
+
         <AskAiPanel
           endpoint={`/api/items/${itemId}/ask`}
           containerRef={containerRef}
@@ -186,11 +219,14 @@ export default function QuizRunner({
   itemId,
   questions,
   onSubmitted,
+  onFlagged,
   highlightQuery,
 }: {
   itemId: number;
   questions: QuizQuestion[];
   onSubmitted?: () => void;
+  // A question was reported wrong.
+  onFlagged?: () => void;
   // A search-result snippet to scroll to and flash on first render — see
   // items/[itemId]/page.tsx's `?highlight=`.
   highlightQuery?: string;
@@ -200,6 +236,7 @@ export default function QuizRunner({
   const [answers, setAnswers] = useState<(number | string | number[])[]>(
     questions.map((q) => (q.type === "multi_select" ? [] : ""))
   );
+  const [confidences, setConfidences] = useState<(Confidence | null)[]>(questions.map(() => null));
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<{ score: number; results: ResultEntry[] } | null>(
     null
@@ -222,7 +259,7 @@ export default function QuizRunner({
       const res = await fetch(`/api/items/${itemId}/attempt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers }),
+        body: JSON.stringify({ answers, confidences }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -247,6 +284,12 @@ export default function QuizRunner({
     // from a static URL param, not something that changes mid-session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const calibration = outcome
+    ? calibrationMessage(
+        summarizeCalibration(outcome.results.map((r) => ({ confidence: confidences[r.index] ?? null, correct: r.correct })))
+      )
+    : null;
 
   const missedIndices = outcome?.results.filter((r) => !r.correct).map((r) => r.index) ?? [];
 
@@ -279,17 +322,14 @@ export default function QuizRunner({
           <AlertTitle className="flex items-center justify-between gap-3">
             <span>Score: {outcome.score.toFixed(0)}%</span>
             {aiEnabled && missedIndices.length > 0 && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleRetry}
-                disabled={retrying}
-              >
-                {retrying ? "Generating…" : `Retry what you got wrong (${missedIndices.length})`}
-              </Button>
+              <Explain id="quiz.retry">
+                <Button type="button" size="sm" variant="outline" onClick={handleRetry} disabled={retrying}>
+                  {retrying ? "Generating…" : `Retry what you got wrong (${missedIndices.length})`}
+                </Button>
+              </Explain>
             )}
           </AlertTitle>
+          {calibration && <AlertDescription>{calibration}</AlertDescription>}
         </Alert>
       )}
 
@@ -300,9 +340,14 @@ export default function QuizRunner({
           index={index}
           question={q}
           answer={answers[index]}
+          confidence={confidences[index]}
+          onConfidenceChange={(value) =>
+            setConfidences((prev) => prev.map((c, i) => (i === index ? value : c)))
+          }
           result={outcome?.results.find((r) => r.index === index)}
           disabled={!!outcome}
           onAnswerChange={(value) => setAnswer(index, value)}
+          onFlagged={onFlagged}
         />
       ))}
 

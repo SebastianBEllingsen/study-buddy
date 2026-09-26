@@ -15,6 +15,9 @@ import {
   setDashboardLinks,
   setCoursePageDisplay,
   setAiEfficiencyMode,
+  setPreferredLanguage,
+  setReviewSettings,
+  MAX_NEW_CARDS_PER_DAY,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
   setAiEnabled,
@@ -35,6 +38,8 @@ import { isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage
 import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
 import { isValidIcon } from "@/lib/fieldValidation";
 import { parseJsonObjectBody } from "@/lib/requestBody";
+import { isSupportedLanguage } from "@/lib/languages";
+import { MAX_RETENTION, MIN_RETENTION } from "@/lib/fsrs";
 
 const VALID_BACKENDS: AiBackend[] = [
   "api",
@@ -205,6 +210,35 @@ export async function POST(request: Request) {
       return Response.json({ error: "aiEfficiencyMode must be a boolean" }, { status: 400 });
     }
     await setAiEfficiencyMode(body.aiEfficiencyMode);
+  }
+
+  if (body?.preferredLanguage !== undefined) {
+    if (!isSupportedLanguage(body.preferredLanguage)) {
+      return Response.json({ error: "preferredLanguage must be a supported language code" }, { status: 400 });
+    }
+    await setPreferredLanguage(body.preferredLanguage);
+  }
+
+  if (body?.reviewRetention !== undefined) {
+    const r = body.reviewRetention;
+    if (typeof r !== "number" || !(r >= MIN_RETENTION && r <= MAX_RETENTION)) {
+      return Response.json(
+        { error: `reviewRetention must be a number from ${MIN_RETENTION} to ${MAX_RETENTION}` },
+        { status: 400 }
+      );
+    }
+    await setReviewSettings({ retention: r });
+  }
+
+  if (body?.newCardsPerDay !== undefined) {
+    const n = body.newCardsPerDay;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > MAX_NEW_CARDS_PER_DAY) {
+      return Response.json(
+        { error: `newCardsPerDay must be a whole number from 0 to ${MAX_NEW_CARDS_PER_DAY}` },
+        { status: 400 }
+      );
+    }
+    await setReviewSettings({ newCardsPerDay: n });
   }
 
   if (body?.cliTrustedModeEnabled !== undefined) {

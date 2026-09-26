@@ -16,7 +16,7 @@ vi.mock("./cliRunner", async () => {
   return { ...actual, runCli: (...args: unknown[]) => runCli(...args) };
 });
 
-const { describeError, generateText } = await import("./claudeCode");
+const { describeError, generateText, generateTextWithWebSearch, WEB_SEARCH_ARGS } = await import("./claudeCode");
 
 function claudeResult(overrides: Partial<{ is_error: boolean; result: string }> = {}) {
   return JSON.stringify({
@@ -111,5 +111,30 @@ describe("claudeCode trusted mode toggle", () => {
     expect(materializeCliWorkspace).not.toHaveBeenCalled();
     const [call] = runCli.mock.calls;
     expect(call[0].cwd).toBe(os.tmpdir());
+  });
+});
+
+describe("claudeCode generateTextWithWebSearch", () => {
+  it("runs with only WebSearch switched on and file/shell/fetch tools still off", async () => {
+    getAppSettings.mockResolvedValue({ cliTrustedModeEnabled: true });
+    runCli.mockResolvedValue({ stdout: claudeResult({ result: '{"resources":[]}' }), stderr: "" });
+    const result = await generateTextWithWebSearch({ system: "s", user: "u" });
+    expect(result).toEqual({ text: '{"resources":[]}', citations: [], searched: true });
+
+    const { args, cwd } = runCli.mock.calls[0][0];
+    expect(args).toEqual(expect.arrayContaining(WEB_SEARCH_ARGS));
+    expect(args).toContain("--restricted");
+    const tools = args[args.indexOf("--tools") + 1];
+    expect(tools).toBe("WebSearch");
+    const disallowed = args.slice(args.indexOf("--disallowedTools") + 1);
+    expect(disallowed).toEqual(expect.arrayContaining(["Bash", "Read", "Write", "WebFetch"]));
+    // Never a materialized course workspace, even with trusted mode on.
+    expect(materializeCliWorkspace).not.toHaveBeenCalled();
+    expect(cwd).toBe(os.tmpdir());
+  });
+
+  it("throws when the CLI reports an error", async () => {
+    runCli.mockResolvedValue({ stdout: claudeResult({ is_error: true, result: "search failed" }), stderr: "" });
+    await expect(generateTextWithWebSearch({ system: "s", user: "u" })).rejects.toThrow("search failed");
   });
 });

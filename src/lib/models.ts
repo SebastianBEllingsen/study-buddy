@@ -13,7 +13,6 @@ import {
   chat_conversations,
   chat_messages,
   flashcard_reviews,
-  flashcard_schedule,
   folders,
   generated_items,
   generation_notifications,
@@ -21,14 +20,21 @@ import {
   quiz_attempts,
   quiz_generation_presets,
   recent_views,
+  review_items,
+  review_logs,
   runTransaction,
   uploaded_images,
 } from "./db";
 import { appendBelow } from "./dashboardGrid";
 import { nowUtc } from "./time";
+import { normalizeLanguage } from "./languages";
+import { clampRetention, DEFAULT_RETENTION } from "./fsrs";
 import { subtreeFolderIds, wouldCreateCycle } from "./folderTree";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
 import { deckDueCardIndices } from "./spacedRepetition";
+import type { SourceTrust } from "./sources/types";
+import { listAllCardDueRows } from "./review/store";
+import { ensureFsrsMigrated } from "./review/legacyMigration";
 import {
   DEFAULT_FOLDER_CHIPS,
   parseFolderChipSettings,
@@ -110,6 +116,8 @@ export interface DocumentRow {
   char_count: number | null;
   status: DocumentStatus;
   error_message: string | null;
+  // See SourceTrust in lib/sources/types.ts.
+  trust: SourceTrust;
   created_at: string;
 }
 
@@ -134,6 +142,9 @@ export interface GeneratedItem {
   // before this was tracked. See lib/aiClient.ts's getModelInfo().
   model_provider: AiBackend | null;
   model_name: string | null;
+  // The study-plan chapter this was generated for, if any — see
+  // lib/studyPlan/store.ts, which counts its results toward that chapter.
+  study_plan_chapter_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -198,6 +209,9 @@ interface SettingsRow {
   model_badge_detail: string | null;
   ai_enabled: boolean;
   cli_trusted_mode_enabled: boolean;
+  preferred_language: string | null;
+  review_retention: number | null;
+  new_cards_per_day: number | null;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -241,6 +255,9 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       model_badge_detail: app_settings.model_badge_detail,
       ai_enabled: app_settings.ai_enabled,
       cli_trusted_mode_enabled: app_settings.cli_trusted_mode_enabled,
+      preferred_language: app_settings.preferred_language,
+      review_retention: app_settings.review_retention,
+      new_cards_per_day: app_settings.new_cards_per_day,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -475,6 +492,15 @@ export interface AppSettings {
   // just a convenience flag — a malicious PDF/prompt could try to abuse the
   // unlocked tools, so it's opt-in and off by default.
   cliTrustedModeEnabled: boolean;
+  // BCP-47 code from lib/languages.ts — "en" when never set. What AI-written
+  // study plans are written in, and which language learning resources are
+  // preferred in (falling back to English where little exists).
+  preferredLanguage: string;
+  // FSRS target retention — the recall probability reviews are scheduled
+  // to keep each card/question at (lib/fsrs.ts). Higher means more reviews.
+  reviewRetention: number;
+  // How many never-reviewed cards the review session introduces a day.
+  newCardsPerDay: number;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -520,6 +546,9 @@ export async function getAppSettings(): Promise<AppSettings> {
     aiEfficiencyMode: row?.ai_efficiency_mode ?? false,
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
+    preferredLanguage: normalizeLanguage(row?.preferred_language),
+    reviewRetention: clampRetention(row?.review_retention ?? DEFAULT_RETENTION),
+    newCardsPerDay: clampNewCardsPerDay(row?.new_cards_per_day ?? DEFAULT_NEW_CARDS_PER_DAY),
   };
 }
 
@@ -625,6 +654,32 @@ export async function setCliTrustedModeEnabled(enabled: boolean): Promise<void> 
   await db
     .update(app_settings)
     .set({ cli_trusted_mode_enabled: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setPreferredLanguage(code: string): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ preferred_language: normalizeLanguage(code), updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export const DEFAULT_NEW_CARDS_PER_DAY = 20;
+export const MAX_NEW_CARDS_PER_DAY = 200;
+
+export function clampNewCardsPerDay(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_NEW_CARDS_PER_DAY;
+  return Math.min(MAX_NEW_CARDS_PER_DAY, Math.max(0, Math.round(value)));
+}
+
+export async function setReviewSettings(settings: { retention?: number; newCardsPerDay?: number }): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({
+      ...(settings.retention !== undefined && { review_retention: clampRetention(settings.retention) }),
+      ...(settings.newCardsPerDay !== undefined && { new_cards_per_day: clampNewCardsPerDay(settings.newCardsPerDay) }),
+      updated_at: nowUtc(),
+    })
     .where(eq(app_settings.id, 1));
 }
 
@@ -1088,6 +1143,8 @@ export interface Note {
   title: string;
   markdown: string;
   icon: string | null;
+  // Null: not used for generation; otherwise included with that trust.
+  generation_source: SourceTrust | null;
   created_at: string;
   updated_at: string;
 }
@@ -1182,6 +1239,16 @@ export async function updateNoteMarkdown(id: number, markdown: string): Promise<
 
 export async function updateNoteIcon(id: number, icon: string | null): Promise<void> {
   await db.update(notes).set({ icon, updated_at: nowUtc() }).where(eq(notes.id, id));
+}
+
+// Doesn't touch updated_at: whether a note feeds generation isn't an edit
+// to the note itself.
+export async function setNoteGenerationSource(id: number, source: SourceTrust | null): Promise<void> {
+  await db.update(notes).set({ generation_source: source }).where(eq(notes.id, id));
+}
+
+export async function setDocumentTrust(id: number, trust: SourceTrust): Promise<void> {
+  await db.update(documents).set({ trust }).where(eq(documents.id, id));
 }
 
 // Lands at the end of the destination folder (or the course's top-level
@@ -1989,6 +2056,7 @@ const documentListColumns = {
   char_count: documents.char_count,
   status: documents.status,
   error_message: documents.error_message,
+  trust: documents.trust,
   created_at: documents.created_at,
 };
 
@@ -2134,6 +2202,7 @@ export async function createGeneratedItem(params: {
   contentJson: unknown;
   sourceDocumentIds: number[];
   model?: { provider: AiBackend; model: string };
+  studyPlanChapterId?: number | null;
 }): Promise<GeneratedItem> {
   const now = nowUtc();
   // Same atomicity concern as createDocument — see its comment.
@@ -2152,6 +2221,7 @@ export async function createGeneratedItem(params: {
         source_document_ids: JSON.stringify(params.sourceDocumentIds),
         model_provider: params.model?.provider ?? null,
         model_name: params.model?.model ?? null,
+        study_plan_chapter_id: params.studyPlanChapterId ?? null,
         created_at: now,
         updated_at: now,
       })
@@ -2307,6 +2377,7 @@ export async function listGeneratedItemSummariesForCourse(
       source_handpicked: generated_items.source_handpicked,
       model_provider: generated_items.model_provider,
       model_name: generated_items.model_name,
+      study_plan_chapter_id: generated_items.study_plan_chapter_id,
       created_at: generated_items.created_at,
       updated_at: generated_items.updated_at,
     })
@@ -2425,120 +2496,13 @@ export async function listFlashcardReviewsForItem(generatedItemId: number) {
 // see schema.sql. A card with no row here has never been reviewed and is
 // due immediately.
 
-export interface FlashcardScheduleRow {
-  generated_item_id: number;
-  card_index: number;
-  ease_factor: number;
-  interval_days: number;
-  repetitions: number;
-  due_at: string;
-  last_reviewed_at: string | null;
-}
-
-export async function getFlashcardSchedule(
-  generatedItemId: number,
-  cardIndex: number
-): Promise<FlashcardScheduleRow | undefined> {
-  const rows = await db
-    .select()
-    .from(flashcard_schedule)
-    .where(
-      and(
-        eq(flashcard_schedule.generated_item_id, generatedItemId),
-        eq(flashcard_schedule.card_index, cardIndex)
-      )
-    )
-    .limit(1);
-  return rows[0];
-}
-
-export async function getFlashcardScheduleForItem(
-  generatedItemId: number
-): Promise<FlashcardScheduleRow[]> {
-  return db
-    .select()
-    .from(flashcard_schedule)
-    .where(eq(flashcard_schedule.generated_item_id, generatedItemId));
-}
-
-export async function upsertFlashcardSchedule(params: {
-  generatedItemId: number;
-  cardIndex: number;
-  easeFactor: number;
-  intervalDays: number;
-  repetitions: number;
-  dueAt: string;
-}): Promise<void> {
-  const last_reviewed_at = nowUtc();
-  await db
-    .insert(flashcard_schedule)
-    .values({
-      generated_item_id: params.generatedItemId,
-      card_index: params.cardIndex,
-      ease_factor: params.easeFactor,
-      interval_days: params.intervalDays,
-      repetitions: params.repetitions,
-      due_at: params.dueAt,
-      last_reviewed_at,
-    })
-    .onConflictDoUpdate({
-      target: [flashcard_schedule.generated_item_id, flashcard_schedule.card_index],
-      set: {
-        ease_factor: params.easeFactor,
-        interval_days: params.intervalDays,
-        repetitions: params.repetitions,
-        due_at: params.dueAt,
-        last_reviewed_at,
-      },
-    });
-}
-
-// flashcard_schedule rows are keyed by positional card_index into the
-// FlashcardsContent.cards array, not a stable per-card id. Removing a card
-// via EditFlashcardsDialog shifts every later card's index down by one —
-// without this, each of those cards would silently inherit whatever
-// schedule state (due date, ease factor, streak) used to belong to a
-// different card at that index. Rebuilds every row for the item in one
-// pass (delete + reinsert) rather than shifting in place, since an
-// in-place UPDATE walking indices downward could momentarily collide with
-// the (generated_item_id, card_index) unique constraint.
-export async function reconcileFlashcardScheduleAfterRemoval(
-  generatedItemId: number,
-  removedIndices: number[]
-): Promise<void> {
-  if (removedIndices.length === 0) return;
-  const removed = [...new Set(removedIndices)].sort((a, b) => a - b);
-
-  const rows = await db
-    .select()
-    .from(flashcard_schedule)
-    .where(eq(flashcard_schedule.generated_item_id, generatedItemId));
-  if (rows.length === 0) return;
-
-  const remapped = rows
-    .filter((r) => !removed.includes(r.card_index))
-    .map((r) => ({
-      ...r,
-      card_index: r.card_index - removed.filter((i) => i < r.card_index).length,
-    }));
-
-  await runTransaction(async (tx) => {
-    await tx
-      .delete(flashcard_schedule)
-      .where(eq(flashcard_schedule.generated_item_id, generatedItemId));
-    if (remapped.length > 0) {
-      await tx.insert(flashcard_schedule).values(remapped);
-    }
-  });
-}
-
-// Same card_index-shift problem as reconcileFlashcardScheduleAfterRemoval
-// above, but for the append-only flashcard_reviews log instead of the
-// per-card schedule state — nothing currently reads this log by index (see
+// review_items are keyed by positional card_index (see
+// reconcileReviewItemsAfterRemoval in lib/review/store.ts); this does the
+// same for the append-only flashcard_reviews log — nothing currently reads this log by index (see
 // items/[itemId]/route.ts's GET, which drops it entirely), but leaving it
 // unreconciled would mean any future feature that does (a per-card review
 // history view, say) silently reads a stale card's history under a
-// different card's current index. Unlike flashcard_schedule, there's no
+// different card's current index. Unlike review_items, there's no
 // (generated_item_id, card_index) uniqueness here — multiple review rows
 // legitimately share a card_index over time — so this shifts each
 // surviving row's index in place instead of delete-and-reinsert.
@@ -2891,7 +2855,7 @@ export interface StudyActivity {
 // date set and the activity heatmap's per-day counts.
 export async function listStudyActivity(): Promise<StudyActivity> {
   const cutoff = oneYearAgoUtc();
-  const [quizRows, reviewRows] = await Promise.all([
+  const [quizRows, reviewRows, questionRows] = await Promise.all([
     db
       .select({ completed_at: quiz_attempts.completed_at })
       .from(quiz_attempts)
@@ -2900,6 +2864,16 @@ export async function listStudyActivity(): Promise<StudyActivity> {
       .select({ reviewed_at: flashcard_reviews.reviewed_at })
       .from(flashcard_reviews)
       .where(gte(flashcard_reviews.reviewed_at, cutoff)),
+    // Quiz questions answered one at a time in the review session. (Cards
+    // reviewed there are already in flashcard_reviews, and questions from a
+    // quiz attempt are counted by the attempt.)
+    db
+      .select({ reviewed_at: review_logs.reviewed_at })
+      .from(review_logs)
+      .innerJoin(review_items, eq(review_items.id, review_logs.review_item_id))
+      .where(
+        and(eq(review_logs.source, "queue"), eq(review_items.kind, "question"), gte(review_logs.reviewed_at, cutoff))
+      ),
   ]);
   const dates = new Set<string>();
   const counts: Record<string, number> = {};
@@ -2909,7 +2883,7 @@ export async function listStudyActivity(): Promise<StudyActivity> {
     dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
   }
-  for (const row of reviewRows) {
+  for (const row of [...reviewRows, ...questionRows]) {
     const day = row.reviewed_at.slice(0, 10);
     dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
@@ -2937,17 +2911,11 @@ export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
       .from(generated_items)
       .innerJoin(courses, eq(courses.id, generated_items.course_id))
       .where(eq(generated_items.mode, "flashcards")),
-    // Every row, not just the ones already due: a card with no row counts
-    // as never reviewed and therefore due, so dropping the not-yet-due rows
-    // here made every card reviewed ahead of time look due again. Only the
-    // three columns deckDueCardIndices needs, to keep the egress down.
-    db
-      .select({
-        generated_item_id: flashcard_schedule.generated_item_id,
-        card_index: flashcard_schedule.card_index,
-        due_at: flashcard_schedule.due_at,
-      })
-      .from(flashcard_schedule),
+    // Every reviewed card, not just the ones already due: a card with no
+    // row counts as never reviewed and therefore due, so dropping the
+    // not-yet-due rows here would make every card reviewed ahead of time
+    // look due again.
+    ensureFsrsMigrated().then(listAllCardDueRows),
   ]);
 
   const scheduleByItem = new Map<number, { card_index: number; due_at: string }[]>();

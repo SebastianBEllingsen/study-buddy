@@ -1,7 +1,7 @@
 /**
  * Consecutive days of study activity, counting backward from today.
  * studyDates are "YYYY-MM-DD" strings (UTC, matching this app's other
- * datetime handling — see dueAtFromInterval in spacedRepetition.ts).
+ * datetime handling — see lib/time.ts).
  *
  * If today isn't in studyDates yet, counting starts from yesterday instead
  * of returning 0 — the streak doesn't visually break until the UTC day is

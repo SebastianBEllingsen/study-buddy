@@ -17,6 +17,7 @@ import { parseId } from "@/lib/routeParams";
 import { courseUploadsDirPath } from "@/lib/uploads";
 import { isValidIcon, isValidColor } from "@/lib/fieldValidation";
 import { parseJsonObjectBody } from "@/lib/requestBody";
+import { getStudyPlanForCourse } from "@/lib/studyPlan/store";
 
 type Params = { params: Promise<{ courseId: string }> };
 
@@ -28,14 +29,15 @@ export async function GET(_request: Request, { params }: Params) {
   if (!course) {
     return Response.json({ error: "Course not found" }, { status: 404 });
   }
-  const [folders, documents, items, notes, canvases] = await Promise.all([
+  const [folders, documents, items, notes, canvases, studyPlan] = await Promise.all([
     listFoldersForCourse(id),
     listDocumentSummariesForCourse(id),
     listGeneratedItemSummariesForCourse(id),
     listNotesForCourse(id),
     listCanvasesForCourse(id),
+    getStudyPlanForCourse(id),
   ]);
-  return Response.json({ course, folders, documents, items, notes, canvases });
+  return Response.json({ course, folders, documents, items, notes, canvases, studyPlan: studyPlan ?? null });
 }
 
 export async function PATCH(request: Request, { params }: Params) {

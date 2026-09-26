@@ -41,11 +41,8 @@ const {
   moveGeneratedItem,
   recordUploadedImage,
   isUploadedImageReferencedInContent,
-  upsertFlashcardSchedule,
   logFlashcardReview,
-  getFlashcardScheduleForItem,
   listFlashcardReviewsForItem,
-  reconcileFlashcardScheduleAfterRemoval,
   reconcileFlashcardReviewsAfterRemoval,
   InvalidDestinationFolderError,
   CannotNestFolderError,
@@ -77,6 +74,7 @@ const {
   isImageUrlReferenced,
   setCoursePageDisplay,
   setAppBranding,
+  setPreferredLanguage,
 } = await import("./models");
 
 beforeEach(() => {
@@ -666,7 +664,7 @@ describe("canvases", () => {
   });
 });
 
-describe("reconcileFlashcardScheduleAfterRemoval / reconcileFlashcardReviewsAfterRemoval", () => {
+describe("reconcileFlashcardReviewsAfterRemoval", () => {
   async function makeItemWithCards() {
     const { folder } = await makeCourseWithFolder();
     return createGeneratedItem({
@@ -681,28 +679,7 @@ describe("reconcileFlashcardScheduleAfterRemoval / reconcileFlashcardReviewsAfte
     });
   }
 
-  it("shifts surviving schedule rows' card_index down and drops the removed card's row", async () => {
-    const item = await makeItemWithCards();
-    for (let i = 0; i < 4; i++) {
-      await upsertFlashcardSchedule({
-        generatedItemId: item.id,
-        cardIndex: i,
-        easeFactor: 2.5,
-        intervalDays: 1,
-        repetitions: 1,
-        dueAt: "2026-01-01 00:00:00",
-      });
-    }
-
-    // Remove card index 1 — cards 2 and 3 should shift down to 1 and 2.
-    await reconcileFlashcardScheduleAfterRemoval(item.id, [1]);
-
-    const remaining = await getFlashcardScheduleForItem(item.id);
-    const indices = remaining.map((r) => r.card_index).sort((a, b) => a - b);
-    expect(indices).toEqual([0, 1, 2]);
-  });
-
-  it("shifts surviving review-log rows' card_index the same way, and drops the removed card's rows", async () => {
+  it("shifts surviving review-log rows' card_index down, and drops the removed card's rows", async () => {
     const item = await makeItemWithCards();
     await logFlashcardReview({ generatedItemId: item.id, cardIndex: 0, result: "good" });
     await logFlashcardReview({ generatedItemId: item.id, cardIndex: 1, result: "good" });
@@ -759,6 +736,15 @@ describe("course page display settings", () => {
     await setFolderChips({ enabled: false, hidden: ["generated"] });
     expect((await getAppSettings()).folderChips).toEqual({ enabled: false, hidden: ["generated"] });
     await setFolderChips({ enabled: true, hidden: [] });
+  });
+
+  it("round-trips the preferred language, English by default", async () => {
+    expect((await getAppSettings()).preferredLanguage).toBe("en");
+    await setPreferredLanguage("fr");
+    expect((await getAppSettings()).preferredLanguage).toBe("fr");
+    // An unsupported code is stored as the English default, never as-is.
+    await setPreferredLanguage("not-a-language");
+    expect((await getAppSettings()).preferredLanguage).toBe("en");
   });
 
   it("round-trips the app wallpaper setting, off by default", async () => {
@@ -836,15 +822,26 @@ describe("listDueFlashcardItems", () => {
       contentJson: { cards: [{ front: "a", back: "a" }, { front: "b", back: "b" }, { front: "c", back: "c" }] },
       sourceDocumentIds: [],
     });
-    const schedule = { generatedItemId: deck.id, easeFactor: 2.5, intervalDays: 1, repetitions: 1 };
+    const reviewState = (itemIndex: number, due_at: string) => ({
+      generated_item_id: deck.id,
+      kind: "card" as const,
+      item_index: itemIndex,
+      due_at,
+      state: 2,
+      created_at: "2026-01-01 00:00:00",
+    });
     // Card 0 reviewed and not due yet, card 1 overdue, card 2 never reviewed.
-    await upsertFlashcardSchedule({ ...schedule, cardIndex: 0, dueAt: "2999-01-01 00:00:00" });
-    await upsertFlashcardSchedule({ ...schedule, cardIndex: 1, dueAt: "2000-01-01 00:00:00" });
+    await testDb.db
+      .insert(testDb.schema.review_items)
+      .values([reviewState(0, "2999-01-01 00:00:00"), reviewState(1, "2000-01-01 00:00:00")]);
 
     expect((await listDueFlashcardItems()).find((d) => d.itemId === deck.id)?.dueCount).toBe(2);
 
-    await upsertFlashcardSchedule({ ...schedule, cardIndex: 1, dueAt: "2999-01-01 00:00:00" });
-    await upsertFlashcardSchedule({ ...schedule, cardIndex: 2, dueAt: "2999-01-01 00:00:00" });
+    await testDb.db
+      .update(testDb.schema.review_items)
+      .set({ due_at: "2999-01-01 00:00:00" })
+      .where(eq(testDb.schema.review_items.generated_item_id, deck.id));
+    await testDb.db.insert(testDb.schema.review_items).values(reviewState(2, "2999-01-01 00:00:00"));
 
     expect((await listDueFlashcardItems()).map((d) => d.itemId)).not.toContain(deck.id);
   });

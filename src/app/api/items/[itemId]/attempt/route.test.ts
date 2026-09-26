@@ -22,6 +22,11 @@ vi.mock("@/lib/grading", () => ({
 
 vi.mock("@/lib/aiClient", () => ({ describeAiError: vi.fn().mockResolvedValue("AI error") }));
 
+const recordQuizAnswers = vi.fn();
+vi.mock("@/lib/review/answers", () => ({
+  recordQuizAnswers: (...args: unknown[]) => recordQuizAnswers(...args),
+}));
+
 const { POST } = await import("./route");
 
 function req(body: unknown): Request {
@@ -46,6 +51,7 @@ beforeEach(() => {
   getAppSettings.mockReset().mockResolvedValue({ aiEnabled: false, aiGradingEnabled: false });
   gradeShortAnswers.mockReset();
   gradeShortAnswersLocally.mockReset();
+  recordQuizAnswers.mockReset().mockResolvedValue([]);
 });
 
 describe("POST /api/items/[itemId]/attempt", () => {
@@ -57,6 +63,47 @@ describe("POST /api/items/[itemId]/attempt", () => {
 
     expect(res.status).toBe(200);
     expect(completeQuizAttempt).toHaveBeenCalledWith(expect.objectContaining({ id: 42, score: 100 }));
+    expect(deleteQuizAttempt).not.toHaveBeenCalled();
+  });
+
+  it("records each answer for spaced review with its confidence", async () => {
+    getGeneratedItem.mockResolvedValue(quizItem);
+    createQuizAttempt.mockResolvedValue({ id: 42 });
+
+    await POST(req({ answers: [1], confidences: ["sure"] }), { params });
+
+    expect(recordQuizAnswers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "quiz",
+        entries: [
+          expect.objectContaining({
+            answer: 1,
+            confidence: "sure",
+            result: expect.objectContaining({ index: 0, correct: false, correctAnswer: "a" }),
+          }),
+        ],
+      })
+    );
+  });
+
+  it("ignores unknown confidence values", async () => {
+    getGeneratedItem.mockResolvedValue(quizItem);
+    createQuizAttempt.mockResolvedValue({ id: 42 });
+
+    await POST(req({ answers: [0], confidences: ["certain"] }), { params });
+
+    expect(recordQuizAnswers.mock.calls[0][0].entries[0].confidence).toBeNull();
+  });
+
+  it("still returns the graded attempt when recording for review fails", async () => {
+    getGeneratedItem.mockResolvedValue(quizItem);
+    createQuizAttempt.mockResolvedValue({ id: 42 });
+    recordQuizAnswers.mockRejectedValue(new Error("db down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(req({ answers: [0] }), { params });
+
+    expect(res.status).toBe(200);
     expect(deleteQuizAttempt).not.toHaveBeenCalled();
   });
 

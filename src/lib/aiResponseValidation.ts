@@ -1,3 +1,11 @@
+import {
+  RESOURCE_KINDS,
+  type PlanOutline,
+  type PlanOutlineChapter,
+  type ResourceKind,
+  type ResourceSuggestion,
+} from "./studyPlan/types";
+
 // Every AI backend (src/lib/aiBackends/*) already retries once if a
 // response isn't valid JSON, but none of them check that the *parsed*
 // object actually has the shape the caller asked for — a syntactically
@@ -86,4 +94,121 @@ export function assertGradingResultShape(content: unknown, expectedCount: number
       throw new InvalidAiResponseError("a graded result is missing its verdict/feedback");
     }
   }
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.trim())
+    : [];
+}
+
+// A study-plan outline (prompts/studyPlan.ts). Structural problems (no
+// chapters, a chapter without a title) throw; everything optional is
+// coerced to a safe default rather than failing the whole plan over it.
+export function normalizeStudyPlanOutline(content: unknown): PlanOutline {
+  if (!isRecord(content) || !Array.isArray(content.chapters) || content.chapters.length === 0) {
+    throw new InvalidAiResponseError("missing a \"chapters\" array");
+  }
+  const chapters: PlanOutlineChapter[] = content.chapters.map((c) => {
+    if (!isRecord(c) || typeof c.title !== "string" || !c.title.trim()) {
+      throw new InvalidAiResponseError("a chapter is missing its title");
+    }
+    return {
+      title: c.title.trim(),
+      summary: typeof c.summary === "string" ? c.summary.trim() : "",
+      subtopics: stringList(c.subtopics),
+      prerequisites: Array.isArray(c.prerequisites)
+        ? c.prerequisites.filter((p): p is number => Number.isInteger(p))
+        : [],
+      stage: Number.isInteger(c.stage) ? (c.stage as number) : 1,
+      // Clamped to something sane: 10 minutes to 200 hours.
+      estimatedMinutes:
+        typeof c.estimatedMinutes === "number" && Number.isFinite(c.estimatedMinutes) && c.estimatedMinutes > 0
+          ? Math.min(12_000, Math.max(10, Math.round(c.estimatedMinutes)))
+          : null,
+      matchedDocuments: stringList(c.matchedDocuments),
+    };
+  });
+  return {
+    title: typeof content.title === "string" && content.title.trim() ? content.title.trim() : "Study plan",
+    chapters,
+  };
+}
+
+// One chapter's resource suggestions. Malformed entries are dropped rather
+// than failing the chapter — a single bad suggestion shouldn't cost the good
+// ones — but a response with no resources array at all throws.
+export function normalizeResourceSuggestions(content: unknown): ResourceSuggestion[] {
+  if (!isRecord(content) || !Array.isArray(content.resources)) {
+    throw new InvalidAiResponseError("missing a \"resources\" array");
+  }
+  const suggestions: ResourceSuggestion[] = [];
+  for (const r of content.resources) {
+    if (!isRecord(r) || typeof r.url !== "string" || typeof r.title !== "string" || !r.title.trim()) continue;
+    const kind = (RESOURCE_KINDS as readonly unknown[]).includes(r.kind) ? (r.kind as ResourceKind) : "article";
+    suggestions.push({
+      kind,
+      title: r.title.trim(),
+      url: r.url.trim(),
+      provider: typeof r.provider === "string" && r.provider.trim() ? r.provider.trim() : undefined,
+      language: typeof r.language === "string" && r.language.trim() ? r.language.trim().toLowerCase() : undefined,
+      note: typeof r.note === "string" ? r.note.trim() : "",
+    });
+  }
+  return suggestions;
+}
+
+export interface StudyPlanSupplement {
+  updates: { chapter: number; newSubtopics: string[]; matchedDocuments: string[] }[];
+  newChapters: (Omit<PlanOutlineChapter, "stage">)[];
+}
+
+// The "fold in new material" response (prompts/studyPlan.ts). Both lists
+// may legitimately be empty (the new documents fit nowhere); anything
+// malformed inside them is dropped rather than failing the update.
+export function normalizeStudyPlanSupplement(content: unknown): StudyPlanSupplement {
+  if (!isRecord(content) || (!Array.isArray(content.updates) && !Array.isArray(content.newChapters))) {
+    throw new InvalidAiResponseError("missing \"updates\" and \"newChapters\"");
+  }
+  const updates = (Array.isArray(content.updates) ? content.updates : [])
+    .filter((u): u is Record<string, unknown> => isRecord(u) && Number.isInteger(u.chapter))
+    .map((u) => ({
+      chapter: u.chapter as number,
+      newSubtopics: stringList(u.newSubtopics),
+      matchedDocuments: stringList(u.matchedDocuments),
+    }));
+  const newChapters = (Array.isArray(content.newChapters) ? content.newChapters : [])
+    .filter((c): c is Record<string, unknown> => isRecord(c) && typeof c.title === "string" && c.title.trim() !== "")
+    .map((c) => {
+      const chapter = normalizeStudyPlanOutline({ chapters: [c] }).chapters[0];
+      return {
+        title: chapter.title,
+        summary: chapter.summary,
+        subtopics: chapter.subtopics,
+        prerequisites: chapter.prerequisites,
+        estimatedMinutes: chapter.estimatedMinutes,
+        matchedDocuments: chapter.matchedDocuments,
+      };
+    });
+  return { updates, newChapters };
+}
+
+// A replan response: extra review minutes per chapter number, clamped, and
+// a short message. Unknown chapter numbers are the caller's to drop.
+export function normalizeStudyPlanReplan(content: unknown): {
+  adjustments: { chapter: number; extraReviewMinutes: number }[];
+  message: string;
+} {
+  if (!isRecord(content)) throw new InvalidAiResponseError("expected an object");
+  const adjustments = (Array.isArray(content.adjustments) ? content.adjustments : [])
+    .filter(
+      (a): a is Record<string, unknown> =>
+        isRecord(a) && Number.isInteger(a.chapter) && typeof a.extraReviewMinutes === "number"
+    )
+    .map((a) => ({
+      chapter: a.chapter as number,
+      extraReviewMinutes: Math.min(240, Math.max(0, Math.round(a.extraReviewMinutes as number))),
+    }))
+    .filter((a) => a.extraReviewMinutes > 0);
+  return { adjustments, message: typeof content.message === "string" ? content.message.trim() : "" };
 }

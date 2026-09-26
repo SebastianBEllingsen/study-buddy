@@ -1,3 +1,4 @@
+import { SOURCE_NAME_RULE, SOURCE_TRUST_RULE } from "./sources";
 import type { QuizGenerationSettings } from "../types";
 
 // Exported so chunked generation (generate.ts) can distribute this same
@@ -32,8 +33,8 @@ function quizComposition(
     return {
       instructions: `Generate a mix of ${mcqCount} multiple-choice questions and ${shortCount} short-answer questions (${total} total), covering the material broadly rather than clustering on one topic.\n- Multiple-choice questions must have exactly 4 options with exactly one correct answer.`,
       shapeExamples: [
-        '{ "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "..." }',
-        '{ "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "..." }',
+        '{ "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "...", "concept": "...", "source": "..." }',
+        '{ "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "...", "concept": "...", "source": "..." }',
       ],
     };
   }
@@ -49,18 +50,18 @@ function quizComposition(
         `${counts[i]} single-choice questions (type "mcq") — exactly 4 options, exactly ONE correct answer given as "correctIndex".`
       );
       shapeExamples.push(
-        '{ "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "..." }'
+        '{ "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "...", "concept": "...", "source": "..." }'
       );
     } else if (kind === "multipleChoice") {
       lines.push(
         `${counts[i]} multiple-choice questions (type "multi_select") — "select all that apply", exactly 4-5 options with TWO OR MORE correct answers given as "correctIndices" (an array of indices).`
       );
       shapeExamples.push(
-        '{ "type": "multi_select", "question": "...", "options": ["...", "...", "...", "..."], "correctIndices": [0, 2], "explanation": "..." }'
+        '{ "type": "multi_select", "question": "...", "options": ["...", "...", "...", "..."], "correctIndices": [0, 2], "explanation": "...", "concept": "...", "source": "..." }'
       );
     } else {
       lines.push(`${counts[i]} short-answer questions (type "short_answer") — answered with free text, graded against a model answer.`);
-      shapeExamples.push('{ "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "..." }');
+      shapeExamples.push('{ "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "...", "concept": "...", "source": "..." }');
     }
   });
 
@@ -71,6 +72,11 @@ function quizComposition(
     shapeExamples,
   };
 }
+
+// Shared with the flashcards prompt: the concept tag every question/card
+// carries (lib/review/concepts.ts groups results by it).
+export const CONCEPT_RULE =
+  'Tag each item with "concept": a short name (2–5 words) for the specific idea it tests. Items on the same idea share exactly the same name; use the material\'s own section or topic names where they fit.';
 
 export function quizSystemPrompt(
   courseName: string,
@@ -84,8 +90,11 @@ export function quizSystemPrompt(
 
 Rules:
 - Use ONLY the provided material. Do not invent facts or rely on outside knowledge beyond trivial clarification.
+- ${SOURCE_TRUST_RULE}
 - ${instructions}
 - Every question needs a brief explanation of why the answer is correct.
+- ${CONCEPT_RULE}
+- ${SOURCE_NAME_RULE}
 - Write any math notation as standard LaTeX between \`$...$\` for inline math or \`$$...$$\` for display math — never bare \`\\displaystyle\`, parenthesized notation, or other ad-hoc formatting. Remember this is going inside a JSON string, so escape backslashes correctly (e.g. \`\\\\frac\` not \`\\frac\`).
 - The provided material was extracted from PDFs, so math notation may be corrupted or fragmented (e.g. symbols split across lines with no \`$\` delimiters, from an equation editor or math-typeset page). Reconstruct the intended formula from context as clean, complete, correctly-delimited LaTeX — do not copy fragmented source text verbatim.
 - Respond with ONLY a single valid JSON object, no prose, no markdown code fences, matching exactly this shape:
@@ -111,14 +120,15 @@ Rules:
 - For each missed question given, write ONE new question testing the same underlying concept — NOT a verbatim repeat or a trivial rewording. The student shouldn't be able to answer just by pattern-matching the earlier question.
 - Multiple-choice questions must have exactly 4 options with exactly one correct answer.
 - Every question needs a brief explanation of why the answer is correct.
+- ${CONCEPT_RULE}
 - Write any math notation as standard LaTeX between \`$...$\` for inline math or \`$$...$$\` for display math — never bare \`\\displaystyle\`, parenthesized notation, or other ad-hoc formatting. Remember this is going inside a JSON string, so escape backslashes correctly (e.g. \`\\\\frac\` not \`\\frac\`).
 - The provided material was extracted from PDFs, so math notation may be corrupted or fragmented (e.g. symbols split across lines with no \`$\` delimiters, from an equation editor or math-typeset page). Reconstruct the intended formula from context as clean, complete, correctly-delimited LaTeX — do not copy fragmented source text verbatim.
 - Respond with ONLY a single valid JSON object, no prose, no markdown code fences, matching exactly this shape:
 
 {
   "questions": [
-    { "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "..." },
-    { "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "..." }
+    { "type": "mcq", "question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "...", "concept": "..." },
+    { "type": "short_answer", "question": "...", "modelAnswer": "...", "explanation": "...", "concept": "..." }
   ]
 }`;
 }

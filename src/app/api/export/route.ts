@@ -5,8 +5,8 @@ import {
   listGeneratedItemsForCourse,
   listQuizAttemptsForItem,
   listFlashcardReviewsForItem,
-  getFlashcardScheduleForItem,
 } from "@/lib/models";
+import { listReviewItemsForItem } from "@/lib/review/store";
 
 // A student-facing safety net, not a system backup: everything that's
 // expensive to lose (course/folder structure, extracted document text, and
@@ -29,10 +29,10 @@ export async function GET() {
 
         const generatedItems = await Promise.all(
           items.map(async (item) => {
-            const [quizAttempts, flashcardReviews, flashcardSchedule] = await Promise.all([
+            const [quizAttempts, flashcardReviews, reviewSchedule] = await Promise.all([
               item.mode === "quiz" ? listQuizAttemptsForItem(item.id) : [],
               item.mode === "flashcards" ? listFlashcardReviewsForItem(item.id) : [],
-              item.mode === "flashcards" ? getFlashcardScheduleForItem(item.id) : [],
+              item.mode === "notes" ? [] : listReviewItemsForItem(item.id),
             ]);
             const { content_json, ...rest } = item;
             return {
@@ -40,7 +40,7 @@ export async function GET() {
               content: JSON.parse(content_json),
               quizAttempts,
               flashcardReviews,
-              flashcardSchedule,
+              reviewSchedule,
             };
           })
         );

@@ -1,4 +1,4 @@
-import { buildCourseContext, chunkCourseContext, combineDocumentText } from "./context";
+import { buildCourseContext, chunkCourseContext, combineDocumentText, type CourseContext } from "./context";
 import { generateStructured, generateText, getModelInfo } from "./aiClient";
 import {
   createGeneratedItem,
@@ -11,7 +11,16 @@ import {
 import type { GenerationMode, GeneratedItem } from "./models";
 import { estimateTokens, CHUNK_THRESHOLD_TOKENS, chunkText } from "./chunking";
 import { mapWithConcurrency } from "./concurrency";
-import type { QuizContent, FlashcardsContent, NotesContent, QuizQuestion, QuizGenerationSettings } from "./types";
+import type {
+  QuizContent,
+  FlashcardsContent,
+  NotesContent,
+  QuizQuestion,
+  QuizGenerationSettings,
+  SourceRef,
+} from "./types";
+import { attachSources } from "./sources/itemMeta";
+import { factCheckContent } from "./sources/factCheck";
 import {
   quizSystemPrompt,
   quizUserPrompt,
@@ -55,6 +64,15 @@ const EFFICIENT_MAX_TOKENS = 4000;
 // roughly (chunk count / this) round trips rather than one at a time.
 const CHUNK_CONCURRENCY = 3;
 
+// Swaps the source name each generated card/question gives for a reference
+// to that section (see attachSources). Skipped when the model's output isn't
+// an array there — the sanitizer's shape check reports that.
+function withSources<C extends object>(content: C, key: "questions" | "cards", sources: SourceRef[]): C {
+  const items = (content as Record<string, unknown>)?.[key];
+  if (!Array.isArray(items)) return content;
+  return { ...content, [key]: attachSources(items as { source?: unknown }[], sources) };
+}
+
 async function generateQuiz(
   courseName: string,
   text: string,
@@ -62,7 +80,8 @@ async function generateQuiz(
   settings?: QuizGenerationSettings,
   efficient?: boolean,
   totalQuestions?: number,
-  documentIds?: number[]
+  documentIds?: number[],
+  sources: SourceRef[] = []
 ): Promise<QuizContent> {
   const content = await generateStructured<QuizContent>({
     system: quizSystemPrompt(courseName, settings, totalQuestions),
@@ -72,7 +91,7 @@ async function generateQuiz(
     efficient,
     workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
-  return sanitizeQuizContent(content);
+  return sanitizeQuizContent(withSources(content, "questions", sources));
 }
 
 // Distributes the same TOTAL_QUESTIONS a single-call generation would ask
@@ -88,12 +107,13 @@ async function generateQuizChunked(
   alreadyCovered?: string,
   settings?: QuizGenerationSettings,
   efficient?: boolean,
-  documentIds?: number[]
+  documentIds?: number[],
+  sources: SourceRef[] = []
 ): Promise<QuizContent> {
   const counts = distributeCount(TOTAL_QUESTIONS, chunks.length);
   const targeted = chunks.map((chunk, i) => ({ chunk, count: counts[i] })).filter((t) => t.count > 0);
   const perChunk = await mapWithConcurrency(targeted, CHUNK_CONCURRENCY, ({ chunk, count }) =>
-    generateQuiz(courseName, chunk, alreadyCovered, settings, efficient, count, documentIds)
+    generateQuiz(courseName, chunk, alreadyCovered, settings, efficient, count, documentIds, sources)
   );
   return { questions: perChunk.flatMap((c) => c.questions) };
 }
@@ -104,7 +124,8 @@ async function generateFlashcards(
   alreadyCovered?: string,
   efficient?: boolean,
   totalCards?: number,
-  documentIds?: number[]
+  documentIds?: number[],
+  sources: SourceRef[] = []
 ): Promise<FlashcardsContent> {
   const content = await generateStructured<FlashcardsContent>({
     system: flashcardsSystemPrompt(courseName, totalCards),
@@ -114,7 +135,7 @@ async function generateFlashcards(
     efficient,
     workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
-  return sanitizeFlashcardsContent(content);
+  return sanitizeFlashcardsContent(withSources(content, "cards", sources));
 }
 
 // Same reasoning as generateQuizChunked: distributes TOTAL_CARDS across
@@ -124,12 +145,13 @@ async function generateFlashcardsChunked(
   chunks: string[],
   alreadyCovered?: string,
   efficient?: boolean,
-  documentIds?: number[]
+  documentIds?: number[],
+  sources: SourceRef[] = []
 ): Promise<FlashcardsContent> {
   const counts = distributeCount(TOTAL_CARDS, chunks.length);
   const targeted = chunks.map((chunk, i) => ({ chunk, count: counts[i] })).filter((t) => t.count > 0);
   const perChunk = await mapWithConcurrency(targeted, CHUNK_CONCURRENCY, ({ chunk, count }) =>
-    generateFlashcards(courseName, chunk, alreadyCovered, efficient, count, documentIds)
+    generateFlashcards(courseName, chunk, alreadyCovered, efficient, count, documentIds, sources)
   );
   return { cards: perChunk.flatMap((c) => c.cards) };
 }
@@ -195,6 +217,8 @@ export async function generateForCourse(
   options?: {
     folderId?: number | null;
     documentIds?: number[] | null;
+    // Vault notes (marked for generation) to include in a hand-picked set.
+    noteIds?: number[] | null;
     quizSettings?: QuizGenerationSettings;
     // Where the generated item gets filed. `undefined` (the default): same
     // as before this existed — the source folder (options.folderId) when
@@ -205,12 +229,36 @@ export async function generateForCourse(
     // new one" choice as uploading a document (see resolveDestinationFolderId
     // in the course page).
     destinationFolderId?: number | null;
+    // Generating for one study-plan chapter (see lib/studyPlan/): the item
+    // is titled after the chapter and linked to it, so its results count
+    // toward the chapter's mastery. The chapter's linked documents come in
+    // as documentIds; a chapter with none is generated from its topic
+    // outline instead of failing with NoDocumentsError.
+    studyPlanChapter?: { id: number; title: string; summary: string; subtopics: string[] };
+    // A topic typed by the learner, for a scope with no material (e.g. a
+    // self-study course that hasn't got any documents yet): generated from
+    // established knowledge of the topic instead of failing with
+    // NoDocumentsError. Ignored when the scope has material.
+    topic?: string | null;
   }
 ) {
-  const { aiEfficiencyMode: efficient } = await getAppSettings();
+  const { aiEfficiencyMode: efficient, preferredLanguage: language } = await getAppSettings();
 
-  const context = await buildCourseContext(courseId, options);
-  if (context.documentIds.length === 0) {
+  const chapter = options?.studyPlanChapter;
+  let context =
+    chapter && !options?.documentIds?.length
+      ? await chapterTopicContext(courseId, chapter)
+      : await buildCourseContext(courseId, options);
+  // A chapter whose linked documents have since been deleted (or stopped
+  // extracting) falls back to its topic outline too.
+  if (chapter && context.documentIds.length === 0 && !context.combinedText) {
+    context = await chapterTopicContext(courseId, chapter);
+  }
+  const topic = options?.topic?.trim() || null;
+  const fromTopic = !chapter && context.documentIds.length === 0 && context.noteIds.length === 0 && !!topic;
+  if (fromTopic) {
+    context = await topicContext(courseId, topic!);
+  } else if (context.documentIds.length === 0 && context.noteIds.length === 0 && !chapter) {
     throw new NoDocumentsError();
   }
 
@@ -227,7 +275,8 @@ export async function generateForCourse(
             undefined,
             options?.quizSettings,
             efficient,
-            context.documentIds
+            context.documentIds,
+            context.sources
           )
         : await generateQuiz(
             context.courseName,
@@ -236,20 +285,41 @@ export async function generateForCourse(
             options?.quizSettings,
             efficient,
             undefined,
-            context.documentIds
+            context.documentIds,
+            context.sources
           );
+      content = await factCheckContent("quiz", content, {
+        courseName: context.courseName,
+        material: context.combinedText,
+        efficient,
+        language,
+      });
       break;
     case "flashcards":
       content = chunks
-        ? await generateFlashcardsChunked(context.courseName, chunks, undefined, efficient, context.documentIds)
+        ? await generateFlashcardsChunked(
+            context.courseName,
+            chunks,
+            undefined,
+            efficient,
+            context.documentIds,
+            context.sources
+          )
         : await generateFlashcards(
             context.courseName,
             context.combinedText,
             undefined,
             efficient,
             undefined,
-            context.documentIds
+            context.documentIds,
+            context.sources
           );
+      content = await factCheckContent("flashcards", content, {
+        courseName: context.courseName,
+        material: context.combinedText,
+        efficient,
+        language,
+      });
       break;
     case "notes":
       content = chunks
@@ -258,7 +328,11 @@ export async function generateForCourse(
       break;
   }
 
-  const title = `${MODE_LABELS[mode]} — ${context.courseName} (${context.scopeLabel})`;
+  const title = chapter
+    ? `${MODE_LABELS[mode]} — ${chapter.title}`
+    : fromTopic
+      ? `${MODE_LABELS[mode]} — ${topic}`
+    : `${MODE_LABELS[mode]} — ${context.courseName} (${context.scopeLabel})`;
 
   let storageFolderId: number | null;
   if (options?.destinationFolderId !== undefined) {
@@ -289,7 +363,62 @@ export async function generateForCourse(
     contentJson: content,
     sourceDocumentIds: context.documentIds,
     model: await getModelInfo(efficient),
+    studyPlanChapterId: chapter?.id ?? null,
   });
+}
+
+// Stand-in "material" for a study-plan chapter with no course documents:
+// its own topic outline, plus an explicit note overriding the prompts'
+// usual "use only the provided material" rule — there is no material, so
+// the model has to teach the listed topics from established knowledge.
+export function chapterTopicText(chapter: { title: string; summary: string; subtopics: string[] }): string {
+  return [
+    "There are no course documents for this part of the course — only the topic outline below. Write accurate content covering these topics from standard, well-established knowledge of the subject, rather than only from the text given.",
+    "",
+    `Chapter: ${chapter.title}`,
+    chapter.summary ? `Summary: ${chapter.summary}` : "",
+    chapter.subtopics.length ? `Topics:\n${chapter.subtopics.map((s) => `- ${s}`).join("\n")}` : "",
+  ]
+    .filter((line, i) => i < 2 || line)
+    .join("\n");
+}
+
+// Stand-in "material" for a learner-typed topic — see the `topic` option on
+// generateForCourse.
+export function topicText(topic: string): string {
+  return [
+    "There is no material for this — only the topic below. Write accurate content covering its core ideas from standard, well-established knowledge of the subject, rather than only from the text given. Pitch it at someone learning the topic, and cover it broadly rather than one narrow corner.",
+    "",
+    `Topic: ${topic}`,
+  ].join("\n");
+}
+
+async function topicContext(courseId: number, topic: string): Promise<CourseContext> {
+  const context = await chapterTopicContext(courseId, { title: topic, summary: "", subtopics: [] });
+  const combinedText = topicText(topic);
+  return { ...context, combinedText, estimatedTokens: estimateTokens(combinedText) };
+}
+
+async function chapterTopicContext(
+  courseId: number,
+  chapter: { title: string; summary: string; subtopics: string[] }
+): Promise<CourseContext> {
+  const course = await getCourse(courseId);
+  if (!course) throw new Error(`Course ${courseId} not found`);
+  const combinedText = chapterTopicText(chapter);
+  return {
+    courseId,
+    courseName: course.name,
+    folderId: null,
+    handpicked: false,
+    scopeLabel: chapter.title,
+    documentIds: [],
+    noteIds: [],
+    sources: [],
+    combinedText,
+    estimatedTokens: estimateTokens(combinedText),
+    needsChunking: false,
+  };
 }
 
 export class NoNewDocumentsError extends Error {
@@ -354,7 +483,7 @@ function mergeGeneratedContent(
 // generation, just fed a smaller document set plus an "already covered"
 // hint to reduce duplicate questions/cards on overlapping material.
 export async function supplementGeneratedItem(item: GeneratedItem): Promise<GeneratedItem> {
-  const { aiEfficiencyMode: efficient } = await getAppSettings();
+  const { aiEfficiencyMode: efficient, preferredLanguage: language } = await getAppSettings();
 
   const newDocs = await getNewDocumentsForItem(item);
   if (newDocs.length === 0) {
@@ -368,12 +497,13 @@ export async function supplementGeneratedItem(item: GeneratedItem): Promise<Gene
     estimateTokens(combinedText) > CHUNK_THRESHOLD_TOKENS ? chunkText(combinedText) : null;
   const alreadyCovered = summarizeExisting(item);
   const documentIds = newDocs.map((d) => d.id);
+  const sources: SourceRef[] = newDocs.map((d) => ({ kind: "document", id: d.id, title: d.filename }));
 
   let delta: QuizContent | FlashcardsContent | NotesContent;
   switch (item.mode) {
     case "quiz":
       delta = chunks
-        ? await generateQuizChunked(courseName, chunks, alreadyCovered, undefined, efficient, documentIds)
+        ? await generateQuizChunked(courseName, chunks, alreadyCovered, undefined, efficient, documentIds, sources)
         : await generateQuiz(
             courseName,
             combinedText,
@@ -381,13 +511,14 @@ export async function supplementGeneratedItem(item: GeneratedItem): Promise<Gene
             undefined,
             efficient,
             undefined,
-            documentIds
+            documentIds,
+            sources
           );
       break;
     case "flashcards":
       delta = chunks
-        ? await generateFlashcardsChunked(courseName, chunks, alreadyCovered, efficient, documentIds)
-        : await generateFlashcards(courseName, combinedText, alreadyCovered, efficient, undefined, documentIds);
+        ? await generateFlashcardsChunked(courseName, chunks, alreadyCovered, efficient, documentIds, sources)
+        : await generateFlashcards(courseName, combinedText, alreadyCovered, efficient, undefined, documentIds, sources);
       break;
     case "notes":
       delta = chunks
@@ -400,6 +531,14 @@ export async function supplementGeneratedItem(item: GeneratedItem): Promise<Gene
     | QuizContent
     | FlashcardsContent
     | NotesContent;
+  if (item.mode !== "notes") {
+    delta = await factCheckContent(item.mode, delta as QuizContent | FlashcardsContent, {
+      courseName,
+      material: combinedText,
+      efficient,
+      language,
+    });
+  }
   const merged = mergeGeneratedContent(item.mode, existingContent, delta);
   const existingSourceIds = JSON.parse(item.source_document_ids) as number[];
 
@@ -448,7 +587,7 @@ export async function createRetryQuiz(
       explanation: q.explanation,
     }));
 
-  const { aiEfficiencyMode: efficient } = await getAppSettings();
+  const { aiEfficiencyMode: efficient, preferredLanguage: language } = await getAppSettings();
 
   const course = await getCourse(item.course_id);
   const courseName = course?.name ?? "this course";
@@ -460,7 +599,11 @@ export async function createRetryQuiz(
     effort: efficient ? "low" : "medium",
     efficient,
   });
-  const retryContent = sanitizeQuizContent(rawRetryContent);
+  const retryContent = await factCheckContent("quiz", sanitizeQuizContent(rawRetryContent), {
+    courseName,
+    efficient,
+    language,
+  });
 
   return createGeneratedItem({
     courseId: item.course_id,

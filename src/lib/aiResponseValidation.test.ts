@@ -3,6 +3,10 @@ import {
   assertQuizContentShape,
   assertFlashcardsContentShape,
   assertGradingResultShape,
+  normalizeStudyPlanOutline,
+  normalizeResourceSuggestions,
+  normalizeStudyPlanSupplement,
+  normalizeStudyPlanReplan,
   InvalidAiResponseError,
 } from "./aiResponseValidation";
 
@@ -152,5 +156,105 @@ describe("assertGradingResultShape", () => {
     expect(() => assertGradingResultShape({ results: [{ verdict: "correct" }] }, 1)).toThrow(
       InvalidAiResponseError
     );
+  });
+});
+
+describe("normalizeStudyPlanOutline", () => {
+  it("throws without chapters or with an untitled chapter", () => {
+    expect(() => normalizeStudyPlanOutline({})).toThrow(InvalidAiResponseError);
+    expect(() => normalizeStudyPlanOutline({ chapters: [] })).toThrow(InvalidAiResponseError);
+    expect(() => normalizeStudyPlanOutline({ chapters: [{ summary: "x" }] })).toThrow(InvalidAiResponseError);
+  });
+
+  it("coerces optional fields to safe defaults", () => {
+    expect(
+      normalizeStudyPlanOutline({
+        chapters: [{ title: " Foundations ", subtopics: ["a", 3, ""], prerequisites: [1, "2"], stage: "1" }],
+      })
+    ).toEqual({
+      title: "Study plan",
+      chapters: [
+        {
+          title: "Foundations",
+          summary: "",
+          subtopics: ["a"],
+          prerequisites: [1],
+          stage: 1,
+          estimatedMinutes: null,
+          matchedDocuments: [],
+        },
+      ],
+    });
+  });
+});
+
+describe("normalizeStudyPlanOutline estimatedMinutes", () => {
+  it("rounds and clamps the estimate, dropping nonsense", () => {
+    const minutes = (estimatedMinutes: unknown) =>
+      normalizeStudyPlanOutline({ chapters: [{ title: "T", estimatedMinutes }] }).chapters[0].estimatedMinutes;
+    expect(minutes(92.6)).toBe(93);
+    expect(minutes(2)).toBe(10);
+    expect(minutes(1e9)).toBe(12_000);
+    expect(minutes(-5)).toBeNull();
+    expect(minutes("lots")).toBeNull();
+  });
+});
+
+describe("normalizeResourceSuggestions", () => {
+  it("throws without a resources array", () => {
+    expect(() => normalizeResourceSuggestions({})).toThrow(InvalidAiResponseError);
+  });
+
+  it("drops malformed entries and defaults an unknown kind to article", () => {
+    expect(
+      normalizeResourceSuggestions({
+        resources: [
+          { kind: "playlist", title: "Series", url: " https://example.org/p ", language: "EN", note: "why" },
+          { kind: "podcast", title: "Talk", url: "https://example.org/t" },
+          { title: "No url" },
+          "junk",
+        ],
+      })
+    ).toEqual([
+      { kind: "playlist", title: "Series", url: "https://example.org/p", provider: undefined, language: "en", note: "why" },
+      { kind: "article", title: "Talk", url: "https://example.org/t", provider: undefined, language: undefined, note: "" },
+    ]);
+  });
+});
+
+describe("normalizeStudyPlanSupplement", () => {
+  it("throws without either list", () => {
+    expect(() => normalizeStudyPlanSupplement({})).toThrow(InvalidAiResponseError);
+  });
+
+  it("keeps well-formed updates and new chapters, dropping the rest", () => {
+    expect(
+      normalizeStudyPlanSupplement({
+        updates: [{ chapter: 2, newSubtopics: ["a", 1], matchedDocuments: ["x.pdf"] }, { chapter: "2" }],
+        newChapters: [{ title: "New", subtopics: ["b"], prerequisites: [1], estimatedMinutes: 60 }, { summary: "no title" }],
+      })
+    ).toEqual({
+      updates: [{ chapter: 2, newSubtopics: ["a"], matchedDocuments: ["x.pdf"] }],
+      newChapters: [
+        { title: "New", summary: "", subtopics: ["b"], prerequisites: [1], estimatedMinutes: 60, matchedDocuments: [] },
+      ],
+    });
+    expect(normalizeStudyPlanSupplement({ updates: [] })).toEqual({ updates: [], newChapters: [] });
+  });
+});
+
+describe("normalizeStudyPlanReplan", () => {
+  it("clamps minutes, drops zero and malformed adjustments", () => {
+    expect(
+      normalizeStudyPlanReplan({
+        adjustments: [
+          { chapter: 1, extraReviewMinutes: 999 },
+          { chapter: 2, extraReviewMinutes: 0 },
+          { chapter: "3", extraReviewMinutes: 30 },
+        ],
+        message: " Keep going. ",
+      })
+    ).toEqual({ adjustments: [{ chapter: 1, extraReviewMinutes: 240 }], message: "Keep going." });
+    expect(() => normalizeStudyPlanReplan("nope")).toThrow(InvalidAiResponseError);
   });
 });

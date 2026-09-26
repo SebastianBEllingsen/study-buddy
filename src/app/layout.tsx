@@ -21,7 +21,8 @@ import {
   Syne,
   Bangers,
 } from "next/font/google";
-import { Calendar } from "lucide-react";
+import { Calendar, Repeat } from "lucide-react";
+import { Explain, ExplainProvider } from "@/components/Explain";
 import SearchDialog from "@/components/SearchDialog";
 import SettingsDialog from "@/components/SettingsDialog";
 import ChatDialog from "@/components/ChatDialog";
@@ -174,6 +175,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <AppThemeProvider>
             <SWRProvider>
               <PomodoroProvider>
+              <ExplainProvider>
               {/* sticky rather than static so a page that fills the viewport
                   below it (see vault/[noteId]/page.tsx's full-bleed note view)
                   still always has the header in view, without restructuring
@@ -186,7 +188,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   <div className="flex shrink-0 items-center gap-1 sm:gap-2">
                     {/* Two visual groups instead of five buttons in a row with
                         mismatched labeled/icon-only/variant styling: named
-                        destinations first (Calendar, Search), then a divider,
+                        destinations first (Calendar, Review, Search), then a divider,
                         then equally-weighted icon-only utility actions (Pomodoro
                         timer, Chat, Settings, Help) — grouped so the header
                         reads as two decisions instead of six. The timer turns
@@ -203,6 +205,19 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                         <Calendar className="size-3.5" />
                         <span className="hidden sm:inline">Calendar</span>
                       </Button>
+                      <Explain id="nav.review" side="bottom">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 px-2 text-xs sm:px-3"
+                          aria-label="Review"
+                          nativeButton={false}
+                          render={<Link href="/review" />}
+                        >
+                          <Repeat className="size-3.5" />
+                          <span className="hidden sm:inline">Review</span>
+                        </Button>
+                      </Explain>
                       <SearchDialog />
                     </div>
                     <div className="h-5 w-px shrink-0 bg-border" />
@@ -222,6 +237,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <AppWallpaper />
               <AdaptiveHeader />
               <ExternalLinkHandler />
+              </ExplainProvider>
               </PomodoroProvider>
             </SWRProvider>
           </AppThemeProvider>

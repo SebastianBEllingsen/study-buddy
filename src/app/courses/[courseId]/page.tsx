@@ -1,29 +1,39 @@
 "use client";
 
+import { Explain } from "@/components/Explain";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
+  Brain,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  CircleAlert,
   ClipboardPaste,
   ExternalLink,
   EyeOff,
   FileText,
   Folder as FolderIcon,
   FolderPlus,
+  Footprints,
+  Gauge,
+  GraduationCap,
   GripVertical,
   HelpCircle,
   Image as ImageIcon,
   Layers,
+  LineChart,
   ListChecks,
   LoaderCircle,
   NotebookPen,
   Palette,
+  PenLine,
   Pencil,
   Plus,
+  Repeat,
+  Route,
   Sparkles,
   StickyNote,
   Trash2,
@@ -31,6 +41,8 @@ import {
   Wand2,
   X,
   type LucideIcon,
+  ShieldCheck,
+  Code2,
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -114,6 +126,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import DocumentViewer, { type ViewedDocument } from "@/components/DocumentViewer";
 import { CourseCanvasSection } from "@/components/canvas/CourseCanvasSection";
+import { StudyPlanCard } from "@/components/study-plan/StudyPlanCard";
+import { TodayCard } from "@/components/today/TodayCard";
+import { StudyPlanSetupDialog } from "@/components/study-plan/StudyPlanSetupDialog";
+import type { StudyPlan } from "@/lib/studyPlan/types";
 import { resizeImageToDataUrl } from "@/lib/resizeImage";
 import { UPLOAD_ACCEPT, extensionOf, isImageExtension } from "@/lib/documentFormats";
 
@@ -124,6 +140,7 @@ interface CourseDetail {
   items: GeneratedItemSummary[];
   notes: Note[];
   canvases: CanvasSummary[];
+  studyPlan: StudyPlan | null;
 }
 
 const MODE_LABELS: Record<GenerationMode, string> = {
@@ -1329,6 +1346,8 @@ export default function CoursePage() {
   // exclusive ways of answering the same "From" question, not a folder plus
   // extra documents on top of it.
   const [generationDocIds, setGenerationDocIds] = useState<Set<number>>(new Set());
+  // For a scope with no material: generate from a typed topic instead.
+  const [generationTopic, setGenerationTopic] = useState("");
   const [docPickerOpen, setDocPickerOpen] = useState(false);
   // Where to file the generated item — independent of `scope`/
   // `generationDocIds` above, which only pick the source material. Same
@@ -1337,6 +1356,7 @@ export default function CoursePage() {
   const [generationDestination, setGenerationDestination] = useState<string>(AUTO_DESTINATION_SENTINEL);
   const [generationNewFolderName, setGenerationNewFolderName] = useState("");
   const [quizDialogOpen, setQuizDialogOpen] = useState(false);
+  const [studyPlanDialogOpen, setStudyPlanDialogOpen] = useState(false);
   // Collapsed by default — the folders above are the main event; this is a
   // secondary action tucked behind its own small trigger rather than a
   // full card competing for attention every time the page loads.
@@ -2012,6 +2032,7 @@ export default function CoursePage() {
             : { folderId: scope === ALL_MATERIAL ? null : Number(scope) }),
           ...(quizSettings ? { quizSettings } : {}),
           ...(destinationFolderId !== undefined ? { destinationFolderId } : {}),
+          ...(generatingFromTopic ? { topic: generationTopic.trim() } : {}),
         }),
       });
       const body = await res.json();
@@ -2145,14 +2166,31 @@ export default function CoursePage() {
   const hasSubfolders = (folderId: number) => descendantFolderIds(detail.folders, folderId).length > 0;
   const pooledFolderIds = (folderId: number) => subtreeFolderIds(detail.folders, folderId);
 
+  // Vault notes marked for generation count as material too (not in a
+  // hand-picked document set — see buildCourseContext).
+  const generationNotes = detail.notes.filter((n) => n.generation_source && n.markdown.trim());
   const scopedHasExtracted =
     generationDocIds.size > 0
       ? detail.documents.some((d) => generationDocIds.has(d.id) && d.status === "extracted")
       : scope === ALL_MATERIAL
-        ? detail.documents.some((d) => d.status === "extracted")
-        : pooledFolderIds(Number(scope)).some((id) =>
-            docsByFolder(id).some((d) => d.status === "extracted")
+        ? detail.documents.some((d) => d.status === "extracted") || generationNotes.length > 0
+        : pooledFolderIds(Number(scope)).some(
+            (id) =>
+              docsByFolder(id).some((d) => d.status === "extracted") ||
+              generationNotes.some((n) => n.folder_id === id)
           );
+  // With nothing in scope, a typed topic stands in (not for a hand-picked
+  // selection — picking documents means generating from them).
+  const generatingFromTopic = !scopedHasExtracted && generationDocIds.size === 0 && !!generationTopic.trim();
+
+  // What the study-plan setup dialog shows as its material, in the same
+  // words the Material picker uses.
+  const generationScopeLabel =
+    generationDocIds.size > 0
+      ? `${generationDocIds.size} selected document${generationDocIds.size === 1 ? "" : "s"}`
+      : scope === ALL_MATERIAL
+        ? "All course material"
+        : `${folderPathLabel(detail.folders, Number(scope))}${hasSubfolders(Number(scope)) ? " (incl. subfolders)" : ""}`;
 
   const viewingDocument = viewingDocumentData?.document ?? null;
 
@@ -2384,6 +2422,55 @@ export default function CoursePage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {/* Course-wide practice: one mixed review session, concept recall and
+          the mistake log, all narrowed to this course. */}
+      <nav aria-label="Practice this course" className="flex flex-wrap gap-1.5">
+        <Explain id="course.review"><Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/review?courseId=${courseId}`} />}>
+          <Repeat className="size-3.5" />
+          Review this course
+        </Button></Explain>
+        <Explain id="course.concepts"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/knowledge`} />}>
+          <Brain className="size-3.5" />
+          Concepts
+        </Button></Explain>
+        <Explain id="course.mistakes"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/mistakes?courseId=${courseId}`} />}>
+          <CircleAlert className="size-3.5" />
+          Mistakes
+        </Button></Explain>
+        <Explain id="course.examPrep"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/exams`} />}>
+          <GraduationCap className="size-3.5" />
+          Exam prep
+        </Button></Explain>
+        <Explain id="course.problems"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/problems`} />}>
+          <Footprints className="size-3.5" />
+          Problems
+        </Button></Explain>
+        <Explain id="course.code"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/code`} />}>
+          <Code2 className="size-3.5" />
+          Code
+        </Button></Explain>
+        <Explain id="course.readiness"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/readiness`} />}>
+          <Gauge className="size-3.5" />
+          Readiness
+        </Button></Explain>
+        <Explain id="course.explain"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/explain`} />}>
+          <PenLine className="size-3.5" />
+          Blurt / explain
+        </Button></Explain>
+        <Explain id="course.week"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/insights?courseId=${courseId}`} />}>
+          <LineChart className="size-3.5" />
+          Your week
+        </Button></Explain>
+        <Explain id="course.sources"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/sources`} />}>
+          <ShieldCheck className="size-3.5" />
+          Sources
+        </Button></Explain>
+      </nav>
+
+      <TodayCard courseId={Number(courseId)} />
+
+      {detail.studyPlan && <StudyPlanCard courseId={Number(courseId)} plan={detail.studyPlan} />}
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3078,14 +3165,30 @@ export default function CoursePage() {
           />
           <div className="space-y-2 border-t border-border/60 pt-4">
             <p className="text-sm font-medium">Generate</p>
-            {!scopedHasExtracted && (
-              <p className="text-sm text-muted-foreground">
-                Upload at least one document that extracts successfully in this scope before generating.
-              </p>
-            )}
+            {!scopedHasExtracted &&
+              (generationDocIds.size > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  None of the picked documents has readable text yet.
+                </p>
+              ) : (
+                <div className="max-w-xl space-y-1.5">
+                  <p className="text-sm text-muted-foreground">
+                    There&apos;s no material here yet. Upload a document, include a note from the Vault — or
+                    name a topic to generate from general knowledge of it.
+                  </p>
+                  <Input
+                    value={generationTopic}
+                    maxLength={200}
+                    placeholder="Topic, e.g. Recursion"
+                    aria-label="Topic to generate from"
+                    className="h-8"
+                    onChange={(e) => setGenerationTopic(e.target.value)}
+                  />
+                </div>
+              ))}
             {/* Capped so the tiles stay button-sized instead of stretching
                 across a wide card with nothing in them. */}
-            <div className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
               {(Object.keys(MODE_LABELS) as GenerationMode[]).map((mode) => {
                 const Icon = MODE_META[mode].icon;
                 const busy = generating === mode;
@@ -3105,7 +3208,7 @@ export default function CoursePage() {
                     }}
                     disabled={
                       !busy &&
-                      (!scopedHasExtracted ||
+                      ((!scopedHasExtracted && !generatingFromTopic) ||
                         generating !== null ||
                         (generationDestination === NEW_FOLDER_SENTINEL && !generationNewFolderName.trim()))
                     }
@@ -3123,12 +3226,45 @@ export default function CoursePage() {
                   </Button>
                 );
               })}
+              {/* Not a GenerationMode — a plan isn't a generated item, and
+                  it can start from a pasted syllabus with no documents at
+                  all, so it's never disabled by the scope having none. */}
+              <Button
+                variant="outline"
+                className="h-auto justify-start gap-3 bg-card px-3 py-2.5 text-left"
+                onClick={() => setStudyPlanDialogOpen(true)}
+                disabled={generating !== null}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-focus/12 text-focus">
+                  <Route />
+                </span>
+                {detail.studyPlan ? "Rebuild study plan" : "Study plan"}
+              </Button>
             </div>
           </div>
         </CardContent>
           </CollapsibleContent>
         </Collapsible>
       </Card>
+      )}
+
+      {aiEnabled && (
+      <StudyPlanSetupDialog
+        open={studyPlanDialogOpen}
+        onOpenChange={setStudyPlanDialogOpen}
+        courseId={Number(courseId)}
+        documents={detail.documents}
+        scope={{
+          folderId: generationDocIds.size === 0 && scope !== ALL_MATERIAL ? Number(scope) : null,
+          documentIds: generationDocIds.size > 0 ? [...generationDocIds] : null,
+          label: generationScopeLabel,
+        }}
+        hasExistingPlan={!!detail.studyPlan}
+        onCreated={() => {
+          refresh();
+          router.push(`/courses/${courseId}/plan`);
+        }}
+      />
       )}
 
       {aiEnabled && (

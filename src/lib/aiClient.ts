@@ -1,4 +1,5 @@
 import { getAiBackend, getImageAiBackend, isAiEnabled } from "./models";
+import { WEB_SEARCH_CAPABLE_BACKENDS } from "./aiBackendChoices";
 import type { AiBackend } from "./models";
 import * as anthropicApi from "./aiBackends/anthropicApi";
 import * as claudeCode from "./aiBackends/claudeCode";
@@ -6,7 +7,12 @@ import * as codexCli from "./aiBackends/codexCli";
 import * as openai from "./aiBackends/openai";
 import * as gemini from "./aiBackends/gemini";
 import * as free from "./aiBackends/free";
-import type { GenerateStructuredParams, GenerateTextParams } from "./aiBackends/types";
+import type {
+  GenerateStructuredParams,
+  GenerateTextParams,
+  WebSearchParams,
+  WebSearchResult,
+} from "./aiBackends/types";
 
 function backendModule(id: AiBackend) {
   switch (id) {
@@ -72,6 +78,40 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   if (!(await isAiEnabled())) throw new AiDisabledError();
   const id = await resolveBackendId(!!params.images?.length);
   return backendModule(id).generateText(params);
+}
+
+// Every backend module exporting generateTextWithWebSearch, by id —
+// aiClient.test.ts checks this matches WEB_SEARCH_CAPABLE_BACKENDS (the
+// client-safe copy the UI reads).
+export const WEB_SEARCH_IMPLS: Partial<Record<AiBackend, (params: WebSearchParams) => Promise<WebSearchResult>>> = {
+  api: anthropicApi.generateTextWithWebSearch,
+  claude_code: claudeCode.generateTextWithWebSearch,
+  openai: openai.generateTextWithWebSearch,
+  gemini: gemini.generateTextWithWebSearch,
+};
+
+// Searches the web first where the active backend can (see
+// WEB_SEARCH_CAPABLE_BACKENDS); otherwise answers from model knowledge via
+// plain generateText, reported as searched: false. Callers get text either
+// way and parse it themselves (parseJsonFromText) — JSON mode isn't
+// available alongside search on every provider.
+export async function generateWithWebSearch(params: WebSearchParams): Promise<WebSearchResult> {
+  if (!(await isAiEnabled())) throw new AiDisabledError();
+  const id = await resolveBackendId(false);
+  const search = WEB_SEARCH_IMPLS[id];
+  if (search) return search(params);
+  const text = await backendModule(id).generateText({
+    system: params.system,
+    user: params.user,
+    maxTokens: params.maxTokens,
+    efficient: params.efficient,
+    effort: params.efficient ? "low" : "medium",
+  });
+  return { text, citations: [], searched: false };
+}
+
+export async function backendSupportsWebSearch(): Promise<boolean> {
+  return WEB_SEARCH_CAPABLE_BACKENDS.includes(await resolveBackendId(false));
 }
 
 // hasImages must match whatever the failing generateText call itself passed

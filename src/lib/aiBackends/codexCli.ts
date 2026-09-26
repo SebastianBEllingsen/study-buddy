@@ -3,6 +3,7 @@ import { runCli, CliNotFoundError, CliTimeoutError } from "./cliRunner";
 import type { GenerateStructuredParams, GenerateTextImage, GenerateTextParams, GenerateWorkspaceScope } from "./types";
 import { getAppSettings } from "../models";
 import { materializeCliWorkspace } from "./cliWorkspace";
+import { stripCodeFences } from "./jsonText";
 
 // Hardening for a subprocess whose prompt embeds untrusted content (uploaded
 // PDF text — see the same note in claudeCode.ts). -s read-only denies file
@@ -131,11 +132,6 @@ async function runCodex(params: {
   } finally {
     await workspace?.cleanup();
   }
-}
-
-function stripCodeFences(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  return fenced ? fenced[1] : text;
 }
 
 export async function generateStructured<T>(

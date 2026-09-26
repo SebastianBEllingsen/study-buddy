@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import OpenAI from "openai";
 import { createOpenAiCompatibleBackend } from "./openaiCompatible";
 
@@ -55,5 +55,40 @@ describe("createOpenAiCompatibleBackend describeError", () => {
 
   it("falls back to a generic message for a non-Error value", () => {
     expect(backend.describeError("a string, not an Error")).toBe("Generation failed.");
+  });
+});
+
+describe("createOpenAiCompatibleBackend generateTextWithWebSearch", () => {
+  it("calls the Responses API with the web_search tool and collects URL citations", async () => {
+    const create = vi.spyOn(OpenAI.Responses.prototype, "create").mockResolvedValue({
+      output_text: '{"resources":[]}',
+      output: [
+        { type: "web_search_call" },
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: '{"resources":[]}',
+              annotations: [
+                { type: "url_citation", url: "https://example.org/a", title: "A", start_index: 0, end_index: 1 },
+                { type: "file_citation" },
+              ],
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    const result = await backend.generateTextWithWebSearch({ system: "sys", user: "find" });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "test-model", instructions: "sys", input: "find", tools: [{ type: "web_search" }] })
+    );
+    expect(result).toEqual({
+      text: '{"resources":[]}',
+      citations: [{ url: "https://example.org/a", title: "A" }],
+      searched: true,
+    });
+    create.mockRestore();
   });
 });

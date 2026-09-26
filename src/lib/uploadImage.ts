@@ -1,7 +1,7 @@
 "use client";
 
 // Keep in sync with the `kind` keys in src/app/api/blobs/route.ts.
-export type ImageUploadKind = "icon" | "cover" | "background" | "app-icon" | "dashboard-background" | "note";
+export type ImageUploadKind = "icon" | "cover" | "background" | "app-icon" | "dashboard-background" | "note" | "answer";
 
 // Uploads a freshly cropped/resized image and returns whatever's safe to
 // store in a DB column and render directly — either a real blob-storage URL,

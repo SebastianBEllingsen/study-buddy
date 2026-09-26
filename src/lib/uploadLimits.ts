@@ -16,6 +16,8 @@ export const UPLOAD_LIMITS = new Map<ImageUploadKind, number>([
   ["app-icon", 3_000_000],
   ["dashboard-background", 8_000_000],
   ["note", 8_000_000],
+  // Photos of handwritten exam answers (lib/exams/answerImages.ts).
+  ["answer", 8_000_000],
 ]);
 
 export function isUploadKind(value: unknown): value is ImageUploadKind {

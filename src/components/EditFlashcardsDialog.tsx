@@ -19,8 +19,8 @@ import {
 // front/back text or drop a card entirely, nothing more. Adding new cards
 // belongs with generation (regenerate/supplement), not here.
 // Pairs each draft card with its index in the ORIGINAL `cards` prop —
-// flashcard_schedule rows are keyed by that positional index (see
-// reconcileFlashcardScheduleAfterRemoval in lib/models.ts), so removing a
+// review state is keyed by that positional index (see
+// reconcileReviewItemsAfterRemoval in lib/review/store.ts), so removing a
 // card here needs to report which original index(es) disappeared, not just
 // hand back a shorter array and leave every later card's schedule state
 // silently misattributed to the wrong card.
