@@ -1,4 +1,6 @@
 "use client";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import type { DateFormatter } from "@/lib/dateFormat";
 
 import { Clock, ExternalLink, MapPin, NotebookText } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -29,16 +31,15 @@ function sourceDotColor(source: string): string {
   return SOURCE_DOT_COLORS[Math.abs(hash) % SOURCE_DOT_COLORS.length];
 }
 
-function formatEventDateTime(event: EventInfo): string {
+function formatEventDateTime(event: EventInfo, fmt: DateFormatter): string {
   const start = new Date(event.start);
   const end = new Date(event.end);
-  const dateStr = start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const dateStr = fmt.date(start, { weekday: "long", month: "long", day: "numeric" });
   if (event.allDay) return dateStr;
-  const timeFmt = { hour: "numeric", minute: "2-digit" } as const;
   const sameDay = start.toDateString() === end.toDateString();
   return sameDay
-    ? `${dateStr} ⋅ ${start.toLocaleTimeString(undefined, timeFmt)} – ${end.toLocaleTimeString(undefined, timeFmt)}`
-    : `${start.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" })} – ${end.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" })}`;
+    ? `${dateStr} ⋅ ${fmt.time(start)} – ${fmt.time(end)}`
+    : `${fmt.date(start, { day: "numeric", month: "long", year: "numeric" })} ${fmt.time(start)} – ${fmt.date(end, { day: "numeric", month: "long", year: "numeric" })} ${fmt.time(end)}`;
 }
 
 // Wraps an event row/chip with a Google-Calendar-style hover card: a
@@ -47,6 +48,7 @@ function formatEventDateTime(event: EventInfo): string {
 // event actually has them, plus an "Open" link to htmlLink when present
 // (a Canvas assignment page, or the event's own Google Calendar page).
 export function EventInfoTooltip({ event, children }: { event: EventInfo; children: React.ReactNode }) {
+  const fmt = useDateFormatter();
   const dotColor = event.source === "google" ? "bg-focus" : sourceDotColor(event.source);
 
   return (
@@ -71,7 +73,7 @@ export function EventInfoTooltip({ event, children }: { event: EventInfo; childr
         <div className="space-y-1.5 pl-[1.125rem] text-xs text-muted-foreground">
           <div className="flex items-start gap-1.5">
             <Clock className="mt-0.5 size-3.5 shrink-0" />
-            <span>{formatEventDateTime(event)}</span>
+            <span>{formatEventDateTime(event, fmt)}</span>
           </div>
           {event.location && (
             <div className="flex items-start gap-1.5">

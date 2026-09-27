@@ -1,5 +1,6 @@
 "use client";
 
+import { useDateFormatter } from "@/components/DateFormatProvider";
 import { Explain } from "@/components/Explain";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -60,6 +61,7 @@ export function ScheduleView({
   googleConnected: boolean;
   onChanged: () => void;
 }) {
+  const fmt = useDateFormatter();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [replanning, setReplanning] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -123,7 +125,7 @@ export function ScheduleView({
           </h2>
           <p className="text-xs text-muted-foreground">
             {daysSummary(studyDays)} · {formatMinutes(minutesPerDay)} a day
-            {deadline ? ` · finish by ${formatDay(deadline, { day: "numeric", month: "long", year: "numeric" })}` : ""}
+            {deadline ? ` · finish by ${formatDay(fmt, deadline, { day: "numeric", month: "long", year: "numeric" })}` : ""}
             {plan.sessions.length > 0 && ` · ${done.length} of ${plan.sessions.length} sessions done`}
           </p>
         </div>
@@ -177,7 +179,7 @@ export function ScheduleView({
                     ? "This week"
                     : week.label === "next"
                       ? "Next week"
-                      : `Week of ${formatDay(week.label, { day: "numeric", month: "short" })}`}
+                      : `Week of ${formatDay(fmt, week.label, { day: "numeric", month: "short" })}`}
                 </h3>
                 <ul className="divide-y divide-border/60">
                   {week.sessions.map((session) => (
@@ -185,10 +187,10 @@ export function ScheduleView({
                       <Checkbox
                         checked={!!session.done_at}
                         onCheckedChange={(v) => toggleSession(session, !!v)}
-                        aria-label={`Mark the ${formatDay(session.date)} session done`}
+                        aria-label={`Mark the ${formatDay(fmt, session.date)} session done`}
                       />
                       <span className={cn("w-24 shrink-0 tabular-nums", session.date === today && "font-medium text-focus")}>
-                        {session.date === today ? "Today" : formatDay(session.date)}
+                        {session.date === today ? "Today" : formatDay(fmt, session.date)}
                       </span>
                       <a href={`#chapter-${session.chapter_id}`} className="min-w-0 flex-1 truncate hover:underline">
                         {session.kind === "review" && <span className="text-muted-foreground">Review · </span>}

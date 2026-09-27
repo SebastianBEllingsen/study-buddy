@@ -11,7 +11,9 @@ function renderMath(tex: string, displayMode: boolean): string {
   try {
     return katex.renderToString(tex, { displayMode, throwOnError: false });
   } catch {
-    return tex;
+    // Rendered as HTML by the caller — the raw source must be escaped, since
+    // card text can come from imported decks.
+    return tex.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 }
 

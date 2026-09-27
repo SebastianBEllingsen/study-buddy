@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
-import { readApkg, readProto, ApkgFormatError } from "./apkgReader";
+import { readApkg, readProto, readEntry, ApkgFormatError } from "./apkgReader";
 import { writeApkg, stableId, type AnkiNoteType } from "./apkgWriter";
 
 const fixture = (name: string) => readFileSync(path.join(__dirname, "__fixtures__", name));
@@ -108,5 +108,16 @@ describe("readProto", () => {
 
   it("throws on truncated input instead of reading past the end", () => {
     expect(() => readProto(Buffer.from([0x0a, 0x05, 0x68]))).toThrow(ApkgFormatError);
+  });
+});
+
+describe("readEntry", () => {
+  it("stops inflating an entry past the limit (zip bomb guard)", async () => {
+    const zip = await JSZip.loadAsync(
+      await new JSZip().file("big", Buffer.alloc(1_000_000)).generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
+    );
+    const entry = zip.file("big")!;
+    await expect(readEntry(entry, 100_000)).rejects.toThrow(/too large/);
+    expect((await readEntry(entry, 2_000_000)).length).toBe(1_000_000);
   });
 });

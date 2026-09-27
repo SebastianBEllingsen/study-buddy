@@ -1,8 +1,7 @@
 import path from "node:path";
 import { getGeneratedItem } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
-import { blobKeyFromUrl } from "@/lib/blobStorage";
-import { readLocalBlob } from "@/lib/blobStorage/local";
+import { blobKeyFromUrl, readBlob } from "@/lib/blobStorage";
 import { flashcardsToApkg, type LoadLocalMedia } from "@/lib/anki/exportDeck";
 import { MEDIA_MIME_BY_EXTENSION } from "@/lib/anki/importDeck";
 import type { FlashcardsContent } from "@/lib/types";
@@ -23,7 +22,7 @@ const EXTENSION_BY_MIME = new Map<string, string>(
 const loadLocalMedia: LoadLocalMedia = async (src) => {
   if (src.startsWith("/api/blobs/")) {
     const key = blobKeyFromUrl(src);
-    const bytes = key ? await readLocalBlob(key) : null;
+    const bytes = key ? await readBlob(key) : null;
     return bytes ? { bytes, ext: path.extname(key!).toLowerCase() } : null;
   }
   const data = src.match(/^data:([\w.+-]+\/[\w.+-]+);base64,([\s\S]*)$/);

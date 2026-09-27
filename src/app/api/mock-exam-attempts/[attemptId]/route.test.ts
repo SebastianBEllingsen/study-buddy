@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAttempt = vi.fn();
 const getMockExam = vi.fn();
 const saveAnswers = vi.fn();
-const setAttemptStatus = vi.fn();
+const claimForGrading = vi.fn();
 const deleteAttempt = vi.fn();
 const setAttemptPaused = vi.fn();
 vi.mock("@/lib/exams/store", () => ({
@@ -12,7 +12,7 @@ vi.mock("@/lib/exams/store", () => ({
   getAttempt: (...a: unknown[]) => getAttempt(...a),
   getMockExam: (...a: unknown[]) => getMockExam(...a),
   saveAnswers: (...a: unknown[]) => saveAnswers(...a),
-  setAttemptStatus: (...a: unknown[]) => setAttemptStatus(...a),
+  claimForGrading: (...a: unknown[]) => claimForGrading(...a),
 }));
 const gradeAttempt = vi.fn();
 vi.mock("@/lib/exams/grade", () => ({ gradeAttempt: (...a: unknown[]) => gradeAttempt(...a) }));
@@ -22,6 +22,10 @@ vi.mock("@/lib/blobStorage", () => ({
   blobKeyFromUrl: (url: string) => (url.startsWith("/api/blobs/") ? url.slice(11) : null),
 }));
 vi.mock("@/lib/blobStorage/local", () => ({ readLocalBlob: vi.fn() }));
+const removeUnreferencedBlobs = vi.fn();
+vi.mock("@/lib/blobStorage/cleanup", () => ({
+  removeUnreferencedBlobs: (...a: unknown[]) => removeUnreferencedBlobs(...a),
+}));
 
 const one = await import("./route");
 const submit = await import("./submit/route");
@@ -42,7 +46,7 @@ beforeEach(() => {
   getAttempt.mockReset().mockResolvedValue({ id: 7, mock_exam_id: 3, status: "in_progress" });
   getMockExam.mockReset().mockResolvedValue(exam);
   saveAnswers.mockReset();
-  setAttemptStatus.mockReset();
+  claimForGrading.mockReset().mockResolvedValue(true);
   gradeAttempt.mockReset().mockResolvedValue(undefined);
   getAppSettings.mockReset().mockResolvedValue({ aiEnabled: true });
 });
@@ -67,7 +71,7 @@ describe("POST /api/mock-exam-attempts/[attemptId]/submit", () => {
     const res = await submit.POST(req("POST", { answers }), { params });
     expect(res.status).toBe(202);
     expect(saveAnswers).toHaveBeenCalledWith(7, answers);
-    expect(setAttemptStatus).toHaveBeenCalledWith(7, "grading", { submitted: true, errorMessage: null });
+    expect(claimForGrading).toHaveBeenCalledWith(7, { submitted: true });
     expect(gradeAttempt).toHaveBeenCalledWith(7);
   });
 
@@ -75,7 +79,18 @@ describe("POST /api/mock-exam-attempts/[attemptId]/submit", () => {
     getAttempt.mockResolvedValue({ id: 7, mock_exam_id: 3, status: "failed" });
     expect((await submit.POST(req("POST", {}), { params })).status).toBe(202);
     expect(saveAnswers).not.toHaveBeenCalled();
-    expect(setAttemptStatus).toHaveBeenCalledWith(7, "grading", { submitted: false, errorMessage: null });
+    expect(claimForGrading).toHaveBeenCalledWith(7, { submitted: false });
+  });
+
+  it("grades an attempt only once when the database claim is lost (double click, other computer)", async () => {
+    claimForGrading.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const [a, b] = await Promise.all([
+      submit.POST(req("POST", { answers }), { params }),
+      submit.POST(req("POST", { answers }), { params }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    expect(gradeAttempt).toHaveBeenCalledTimes(1);
+    expect(saveAnswers).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a second hand-in and grading with AI off", async () => {
@@ -100,6 +115,8 @@ describe("pausing and discarding", () => {
   it("discards an open attempt but never a graded one", async () => {
     expect((await one.DELETE(req("DELETE"), { params })).status).toBe(200);
     expect(deleteAttempt).toHaveBeenCalledWith(7);
+    // Its uploaded answer photos are cleaned up with it.
+    expect(removeUnreferencedBlobs).toHaveBeenCalledTimes(1);
     deleteAttempt.mockReset();
     getAttempt.mockResolvedValue({ id: 7, mock_exam_id: 3, status: "graded" });
     expect((await one.DELETE(req("DELETE"), { params })).status).toBe(409);

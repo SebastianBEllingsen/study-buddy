@@ -1,6 +1,7 @@
 import { deleteAttempt, getAttempt, getMockExam, saveAnswers } from "@/lib/exams/store";
 import { examForAttempt, parseAnswers } from "@/lib/exams/requests";
 import { parseId } from "@/lib/routeParams";
+import { removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
 import { parseJsonObjectBody } from "@/lib/requestBody";
 
 type Params = { params: Promise<{ attemptId: string }> };
@@ -42,5 +43,6 @@ export async function DELETE(_request: Request, { params }: Params) {
     return Response.json({ error: "A handed-in attempt can't be discarded" }, { status: 409 });
   }
   await deleteAttempt(found.attempt.id);
+  await removeUnreferencedBlobs([JSON.stringify(found.attempt.answers)]);
   return Response.json({ ok: true });
 }

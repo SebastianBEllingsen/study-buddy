@@ -186,6 +186,8 @@ export const app_settings = pgTable("app_settings", {
   cli_trusted_mode_enabled: boolean("cli_trusted_mode_enabled").notNull().default(false),
   // See the matching column in schema.sqlite.ts and lib/languages.ts.
   preferred_language: text("preferred_language"),
+  // See the matching column in schema.sqlite.ts and lib/dateFormat.ts.
+  date_format: text("date_format"),
   // See the matching columns in schema.sqlite.ts.
   review_retention: real("review_retention"),
   new_cards_per_day: integer("new_cards_per_day"),
@@ -233,6 +235,8 @@ export const documents = pgTable(
     // See schema.sqlite.ts — base64-encoded original PDF bytes, synced
     // alongside the row so the file travels with it, not just its metadata.
     file_base64: text("file_base64"),
+    // See schema.sqlite.ts.
+    file_url: text("file_url"),
     extracted_text: text("extracted_text"),
     page_count: integer("page_count"),
     char_count: integer("char_count"),
@@ -725,6 +729,9 @@ export const mock_exam_attempts = pgTable(
     // paused_seconds adds up earlier pauses.
     paused_at: text("paused_at"),
     paused_seconds: integer("paused_seconds").notNull().default(0),
+    // When the current grading run began — lets any computer tell a run
+    // still in progress (elsewhere) from one cut off by a restart.
+    grading_started_at: text("grading_started_at"),
     submitted_at: text("submitted_at"),
   },
   (table) => [index("idx_mock_exam_attempts_exam_id").on(table.mock_exam_id)]

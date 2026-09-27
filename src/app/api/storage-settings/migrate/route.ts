@@ -105,10 +105,38 @@ export async function POST(request: Request) {
   // This connection is only for the duration of this one migration — always
   // close it afterward instead of leaking a pool per migrate click.
   try {
+    // "Local wins" overwrites whatever the cloud database already holds (see
+    // the top of this file). Into an empty database that's the whole point;
+    // into one already in use it would silently roll newer work back to the
+    // local copy — so that needs an explicit go-ahead.
+    if (body?.overwrite !== true) {
+      const existing = await cloudContents(pgDb);
+      if (existing.courses > 0 || existing.generatedItems > 0 || existing.notes > 0) {
+        return Response.json(
+          {
+            error:
+              `That database already has ${existing.courses} course(s), ${existing.generatedItems} generated item(s) ` +
+              `and ${existing.notes} note(s). Migrating would overwrite them with this computer's local copy.`,
+            needsOverwrite: true,
+            existing,
+          },
+          { status: 409 }
+        );
+      }
+    }
     return await runMigration(pgDb);
   } finally {
     await client.end();
   }
+}
+
+async function cloudContents(pgDb: PostgresDb): Promise<{ courses: number; generatedItems: number; notes: number }> {
+  const count = async (table: string) => {
+    const rows = await pgDb.execute(sql.raw(`select count(*)::int as n from ${table}`));
+    return Number((rows as unknown as { n: number }[])[0]?.n ?? 0);
+  };
+  const [courses, generatedItems, notes] = await Promise.all([count("courses"), count("generated_items"), count("notes")]);
+  return { courses, generatedItems, notes };
 }
 
 async function runMigration(pgDb: PostgresDb): Promise<Response> {
@@ -242,6 +270,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "filename",
               "file_path",
               "file_base64",
+              "file_url",
               "extracted_text",
               "page_count",
               "char_count",
@@ -500,6 +529,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
             "paused_at",
             "paused_seconds",
             "submitted_at",
+            "grading_started_at",
           ]),
         });
     }
@@ -743,6 +773,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "model_badge_detail",
               "ai_enabled",
               "preferred_language",
+              "date_format",
               "review_retention",
               "new_cards_per_day",
               "fsrs_migrated_at",

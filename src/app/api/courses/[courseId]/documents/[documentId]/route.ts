@@ -14,6 +14,7 @@ import { parseId } from "@/lib/routeParams";
 import { previewPdfPath } from "@/lib/uploads";
 import { CONTENT_TYPES, extensionOf, isSupportedExtension, needsLibreOfficeConversion } from "@/lib/documentFormats";
 import { convertToPdf } from "@/lib/libreoffice";
+import { removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
 
 type Params = { params: Promise<{ courseId: string; documentId: string }> };
 
@@ -84,6 +85,7 @@ export async function DELETE(_request: Request, { params }: Params) {
     await fs.rm(doc.file_path, { force: true });
     await fs.rm(previewPdfPath(doc.file_path), { force: true });
     await deleteDocument(id);
+    if (doc.file_url) await removeUnreferencedBlobs([doc.file_url]);
   }
   return new Response(null, { status: 204 });
 }

@@ -20,6 +20,7 @@ const { findOrCreateConcepts } = await import("../review/concepts");
 const { analyzePastExams, NoPastExamsError } = await import("./analyze");
 const { generateMockExam, NoExamProfileError } = await import("./generate");
 const { gradeAttempt } = await import("./grade");
+const { markGrading, releaseGrading, INTERRUPTED_MESSAGE } = await import("./gradingJobs");
 const store = await import("./store");
 const { listMistakes } = await import("../review/mistakes");
 const reviewStore = await import("../review/store");
@@ -117,6 +118,35 @@ describe("mock exam pipeline", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     await gradeAttempt(attempt.id);
     expect(await store.getAttempt(attempt.id)).toMatchObject({ status: "failed", error_message: "rate limited" });
+  });
+
+  it("claims an attempt for grading once, and lets a cut-off run be retried", async () => {
+    const { course, doc } = await courseWithExamDoc();
+    generateStructured.mockResolvedValueOnce(profile).mockResolvedValueOnce(examJson);
+    await analyzePastExams(course.id, [doc.id]);
+    const exam = await generateMockExam(course.id);
+    const attempt = await store.createAttempt(exam.id, 2);
+    const t0 = new Date("2026-09-26T12:00:00Z");
+
+    expect(await store.claimForGrading(attempt.id, { submitted: true }, t0)).toBe(true);
+    // Another computer (or a double click) can't claim it again...
+    expect(await store.claimForGrading(attempt.id, { submitted: false }, new Date(t0.getTime() + 60_000))).toBe(false);
+    // ...and sees it as grading, not as failed.
+    vi.useFakeTimers({ now: new Date(t0.getTime() + 60_000), toFake: ["Date"] });
+    expect(await store.getAttempt(attempt.id)).toMatchObject({ status: "grading" });
+
+    // 20 minutes on with no finish: the run was cut off.
+    vi.setSystemTime(new Date(t0.getTime() + 20 * 60_000));
+    expect(await store.getAttempt(attempt.id)).toMatchObject({ status: "failed", error_message: INTERRUPTED_MESSAGE });
+    const [listed] = await store.listMockExams(course.id);
+    expect(listed.attempts[0].status).toBe("failed");
+    // Still running in this process, though? Then it's grading, however long.
+    markGrading(attempt.id);
+    expect(await store.getAttempt(attempt.id)).toMatchObject({ status: "grading" });
+    releaseGrading(attempt.id);
+    vi.useRealTimers();
+
+    expect(await store.claimForGrading(attempt.id, { submitted: false }, new Date(t0.getTime() + 20 * 60_000))).toBe(true);
   });
 
   it("lists exams with their attempts and deletes them", async () => {

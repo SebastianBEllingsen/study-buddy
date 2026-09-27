@@ -84,4 +84,5 @@ export interface MockExamAttempt {
   paused_at: string | null;
   paused_seconds: number;
   submitted_at: string | null;
+  grading_started_at: string | null;
 }

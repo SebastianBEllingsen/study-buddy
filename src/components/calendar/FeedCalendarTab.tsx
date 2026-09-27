@@ -1,4 +1,6 @@
 "use client";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import type { DateFormatter } from "@/lib/dateFormat";
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
@@ -14,11 +16,11 @@ import { FeedCalendarSettings } from "./FeedCalendarSettings";
 import { courseDisplay, FeedEventPopover, FeedWeekView } from "./FeedWeekView";
 import { addDays, monthGridRange, startOfMonth, startOfWeek, type CalendarEvent } from "./shared";
 
-function weekLabel(weekStart: Date, days: number): string {
+function weekLabel(weekStart: Date, days: number, fmt: DateFormatter): string {
   const end = addDays(weekStart, days - 1);
   const sameMonth = weekStart.getMonth() === end.getMonth();
-  const startStr = weekStart.toLocaleDateString(undefined, sameMonth ? { day: "numeric" } : { day: "numeric", month: "short" });
-  const endStr = end.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const startStr = fmt.date(weekStart, sameMonth ? { day: "numeric" } : { day: "numeric", month: "short" });
+  const endStr = fmt.date(end, { day: "numeric", month: "short", year: "numeric" });
   return `${startStr} – ${endStr}`;
 }
 
@@ -26,6 +28,7 @@ function weekLabel(weekStart: Date, days: number): string {
 // as a timetable week grid or the shared month grid, with its own
 // per-course colours/aliases and display settings.
 export function FeedCalendarTab({ feed }: { feed: CalendarFeed }) {
+  const fmt = useDateFormatter();
   const config = useMemo(() => parseFeedCalendarConfig(feed.calendar_config), [feed.calendar_config]);
   const [view, setView] = useState<"week" | "month">(config.defaultView);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
@@ -35,7 +38,7 @@ export function FeedCalendarTab({ feed }: { feed: CalendarFeed }) {
   // Fetched per visible range, not the whole year ahead the shared views
   // load — the week view needs past days (Monday of this week, last week),
   // which the default now-onward window never includes.
-  const range = view === "week" ? { start: weekStart, end: addDays(weekStart, 7) } : monthGridRange(month);
+  const range = view === "week" ? { start: weekStart, end: addDays(weekStart, 7) } : monthGridRange(month, fmt.weekStartsOn);
   const key = `/api/calendar/events?feedId=${feed.id}&maxResults=1000&timeMin=${encodeURIComponent(
     range.start.toISOString()
   )}&timeMax=${encodeURIComponent(range.end.toISOString())}`;
@@ -86,8 +89,8 @@ export function FeedCalendarTab({ feed }: { feed: CalendarFeed }) {
           </Button>
           <span className="ml-1 font-heading text-sm font-semibold">
             {view === "week"
-              ? weekLabel(weekStart, dayCount)
-              : month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+              ? weekLabel(weekStart, dayCount, fmt)
+              : fmt.date(month, { month: "long", year: "numeric" })}
           </span>
         </div>
         <div className="flex items-center gap-1.5">

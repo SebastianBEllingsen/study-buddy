@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { normalizeFolderChipSettings, serializeFolderChipSettings } from "@/lib/folderChips";
 import {
+  listCourseMediaText,
   deleteCourse,
   getCourse,
   listCanvasesForCourse,
@@ -12,7 +13,7 @@ import {
   updateCourseCustomization,
 } from "@/lib/models";
 import { isValidCoverImage, isValidIconImage, isValidPageBackgroundImage } from "@/lib/dataUrlImage";
-import { cleanupReplacedImage } from "@/lib/blobStorage/cleanup";
+import { cleanupReplacedImage, removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
 import { parseId } from "@/lib/routeParams";
 import { courseUploadsDirPath } from "@/lib/uploads";
 import { isValidIcon, isValidColor } from "@/lib/fieldValidation";
@@ -164,13 +165,14 @@ export async function DELETE(_request: Request, { params }: Params) {
   const { courseId } = await params;
   const id = parseId(courseId);
   if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
-  const existing = await getCourse(id);
+  const [existing, mediaText] = await Promise.all([getCourse(id), listCourseMediaText(id)]);
   await deleteCourse(id);
   if (existing) {
     await Promise.all([
       cleanupReplacedImage(existing.cover_image),
       cleanupReplacedImage(existing.icon_image),
       cleanupReplacedImage(existing.page_background_image),
+      removeUnreferencedBlobs(mediaText),
     ]);
   }
   // The DB rows (documents, their file_path/preview cache) are gone once

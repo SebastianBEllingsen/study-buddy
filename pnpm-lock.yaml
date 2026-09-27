@@ -58,7 +58,7 @@ importers:
         version: 0.4.0
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)(postgres@3.4.9)
+        version: 0.45.2(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)(postgres@3.4.9)
       fuse.js:
         specifier: ^7.5.0
         version: 7.5.0
@@ -150,6 +150,9 @@ importers:
         specifier: ^1.8.1
         version: 1.8.1(@napi-rs/canvas@1.0.9)
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.8
+        version: 0.5.8
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.3.3
@@ -530,6 +533,9 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@electric-sql/pglite@0.5.8':
+    resolution: {integrity: sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q==}
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -5862,6 +5868,8 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
+  '@electric-sql/pglite@0.5.8': {}
+
   '@emnapi/core@1.10.0':
     dependencies:
       '@emnapi/wasi-threads': 1.2.1
@@ -7569,8 +7577,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.13
 
-  drizzle-orm@0.45.2(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)(postgres@3.4.9):
+  drizzle-orm@0.45.2(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)(postgres@3.4.9):
     optionalDependencies:
+      '@electric-sql/pglite': 0.5.8
       '@types/better-sqlite3': 9.6.0
       better-sqlite3: 13.0.3
       postgres: 3.4.9

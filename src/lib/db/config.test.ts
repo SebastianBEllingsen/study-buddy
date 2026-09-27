@@ -17,7 +17,7 @@ vi.mock("node:fs", () => ({
   mkdirSync,
 }));
 
-const { resolveStorageConfig, writeStorageConfig } = await import("./config");
+const { resolveStorageConfig, supabaseDetails, writeStorageConfig } = await import("./config");
 
 const ENV_KEYS = ["DATABASE_URL", "SUPABASE_STORAGE_URL", "SUPABASE_STORAGE_SERVICE_KEY", "SUPABASE_STORAGE_BUCKET"];
 
@@ -103,5 +103,21 @@ describe("writeStorageConfig", () => {
     expect(writtenPath).toMatch(/data[/\\]storage-config\.json$/);
     expect(JSON.parse(writtenContent)).toEqual(config);
     expect(writtenContent).toBe(JSON.stringify(config, null, 2));
+  });
+});
+
+describe("remembered Supabase details", () => {
+  const details = { connectionString: "postgres://x", storageUrl: "https://p.supabase.co", storageServiceKey: "k", storageBucket: "b" };
+
+  it("reads them from a Supabase config, sync or not", () => {
+    expect(supabaseDetails({ mode: "supabase", sync: true, ...details })).toEqual(details);
+  });
+
+  it("keeps them while on local, so switching back needs nothing re-entered", () => {
+    readFileSync.mockReturnValue(JSON.stringify({ mode: "local", remembered: details }));
+    const config = resolveStorageConfig();
+    expect(config.mode).toBe("local");
+    expect(supabaseDetails(config)).toEqual(details);
+    expect(supabaseDetails({ mode: "local" })).toBeNull();
   });
 });

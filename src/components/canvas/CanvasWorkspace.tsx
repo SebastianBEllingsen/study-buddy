@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { saveStateLabel, useAutosave } from "@/lib/autosave";
 import useSWR from "swr";
 import { ArrowLeft, Download, X } from "lucide-react";
 import { toast } from "sonner";
@@ -16,11 +17,6 @@ import CanvasBoard from "./CanvasBoard";
 
 const EMPTY_TARGETS: LinkTargets = { notes: [], documents: [], items: [] };
 
-// Same debounce as a note's autosave (see NoteWorkspace) — the board only
-// reports a change at the end of each gesture, so this mostly just batches
-// a quick run of edits into one PATCH.
-const AUTOSAVE_DELAY_MS = 800;
-
 export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
   const router = useRouter();
   const { data: detail, error: notFound, mutate } = useSWR<{ canvas: Canvas }>(`/api/canvases/${canvasId}`);
@@ -29,9 +25,10 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
     detail ? `/api/courses/${detail.canvas.course_id}` : null
   );
   const [title, setTitle] = useState("");
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingFields = useRef<{ title?: string; data?: CanvasData }>({});
+  const { schedule: queueSave, discard: discardSaves, state: saveState } = useAutosave<{ title: string; data: CanvasData }>(
+    `/api/canvases/${canvasId}`,
+    "Couldn't save canvas"
+  );
 
   // Seeded once per canvas id (render-phase, like NoteWorkspace) so a
   // background revalidation never clobbers a title being typed.
@@ -50,28 +47,8 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
     }).catch(() => {});
   }, [canvasId]);
 
-  // Flush a save still waiting in the debounce window when leaving the page
-  // (e.g. opening a note card) — keepalive lets it outlive the unmount.
-  useEffect(() => {
-    return () => {
-      if (!saveTimer.current) return;
-      clearTimeout(saveTimer.current);
-      const fields = pendingFields.current;
-      pendingFields.current = {};
-      if (Object.keys(fields).length === 0) return;
-      fetch(`/api/canvases/${canvasId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
-        keepalive: true,
-      }).catch(() => {});
-    };
-  }, [canvasId]);
-
   const scheduleSave = useCallback(
     (fields: { title?: string; data?: CanvasData }) => {
-      setSaveState("saving");
-      pendingFields.current = { ...pendingFields.current, ...fields };
       // Keeps SWR's cached copy current too — the board is seeded from that
       // cache when you come back to this canvas, and a stale copy there would
       // show (and then autosave over) the board as it was before these edits.
@@ -79,26 +56,9 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
         (prev) => (prev ? { canvas: { ...prev.canvas, ...fields } } : prev),
         { revalidate: false }
       );
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(async () => {
-        const toSend = pendingFields.current;
-        pendingFields.current = {};
-        saveTimer.current = null;
-        const res = await fetch(`/api/canvases/${canvasId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toSend),
-        }).catch(() => null);
-        if (!res?.ok) {
-          const body = await res?.json().catch(() => ({}));
-          toast.error(body?.error ?? "Couldn't save canvas");
-          setSaveState("idle");
-          return;
-        }
-        setSaveState("saved");
-      }, AUTOSAVE_DELAY_MS);
+      queueSave(fields);
     },
-    [canvasId, mutate]
+    [queueSave, mutate]
   );
 
   const handleDataChange = useCallback((data: CanvasData) => scheduleSave({ data }), [scheduleSave]);
@@ -125,9 +85,7 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
   }
 
   async function handleDelete() {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = null;
-    pendingFields.current = {};
+    discardSaves();
     const res = await fetch(`/api/canvases/${canvasId}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error("Couldn't delete canvas");
@@ -178,7 +136,7 @@ export default function CanvasWorkspace({ canvasId }: { canvasId: number }) {
           placeholder="Untitled canvas"
         />
         <span className="shrink-0 text-xs text-muted-foreground">
-          {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
+          {saveStateLabel(saveState)}
         </span>
         <RowActionsMenu
           ariaLabel="Canvas actions"

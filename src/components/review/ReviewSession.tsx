@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { toast } from "sonner";
+import { saveInBackground } from "@/lib/backgroundSaves";
 import { CalendarCheck, CheckCircle2, CircleAlert, LoaderCircle, PartyPopper, XCircle } from "lucide-react";
 import { cn } from "cn";
 import type { FlashcardResult } from "@/lib/models";
@@ -156,19 +157,22 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
     setResult(null);
   }
 
-  async function rateCard(rating: FlashcardResult) {
+  // Moves on at once; the rating is saved in the background (a card has
+  // nothing to wait for — unlike a question, which needs its grading).
+  function rateCard(rating: FlashcardResult) {
     if (!entry || entry.kind !== "card" || busy) return;
-    setBusy(true);
-    const saved = await postAnswer({
-      itemId: entry.itemId,
-      kind: "card",
-      index: entry.index,
-      result: rating,
-      confidence,
-      record: !answeredKeys.has(entry.key),
-    });
-    setBusy(false);
-    if (!saved) return;
+    saveInBackground(
+      "/api/review/answer",
+      {
+        itemId: entry.itemId,
+        kind: "card",
+        index: entry.index,
+        result: rating,
+        confidence,
+        record: !answeredKeys.has(entry.key),
+      },
+      "Couldn't save a card rating — that card will come up again"
+    );
     advance(rating !== "again");
   }
 
@@ -338,7 +342,7 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
             <div className="flex flex-wrap gap-2">
               {RATINGS.map(({ result: rating, label, className }, i) => (
                 <Explain key={rating} id={`rating.${rating}`}>
-                  <Button variant="ghost" disabled={busy} onClick={() => void rateCard(rating)} className={className}>
+                  <Button variant="ghost" disabled={busy} onClick={() => rateCard(rating)} className={className}>
                     {label}
                     <kbd className="ml-1 rounded border border-current/30 px-1 font-sans text-[0.65rem] opacity-60">{i + 1}</kbd>
                   </Button>

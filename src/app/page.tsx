@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import type { DateFormatter } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { isStickerImageUrl } from "@/lib/imageTransparency";
 import { shouldShowWallpaper } from "@/lib/appWallpaper";
@@ -436,7 +438,7 @@ function eventLocalDate(event: UpcomingCalendarEvent): Date {
   return new Date(event.start);
 }
 
-function eventDayLabel(event: UpcomingCalendarEvent): string {
+function eventDayLabel(event: UpcomingCalendarEvent, fmt: DateFormatter): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
@@ -445,12 +447,12 @@ function eventDayLabel(event: UpcomingCalendarEvent): string {
   day.setHours(0, 0, 0, 0);
   if (day.getTime() === today.getTime()) return "Today";
   if (day.getTime() === tomorrow.getTime()) return "Tomorrow";
-  return day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return fmt.date(day, { weekday: "short", month: "short", day: "numeric" });
 }
 
-function eventTimeLabel(event: UpcomingCalendarEvent): string {
+function eventTimeLabel(event: UpcomingCalendarEvent, fmt: DateFormatter): string {
   if (event.allDay) return "All day";
-  return new Date(event.start).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return fmt.time(new Date(event.start));
 }
 
 // Links an Upcoming-widget event straight to its own day on /calendar,
@@ -495,6 +497,7 @@ function UpcomingEventsWidget({
   label?: string;
   transparent: boolean;
 }) {
+  const fmt = useDateFormatter();
   const maxResults = upcomingMaxResultsFor(layout);
   // The list's date/time columns need more room than a narrow tile has —
   // below that width it falls back to just the next event, the same
@@ -551,7 +554,7 @@ function UpcomingEventsWidget({
               )}
               {next.title}
             </p>
-            <p className="text-xs text-muted-foreground">{eventDayLabel(next)}</p>
+            <p className="text-xs text-muted-foreground">{eventDayLabel(next, fmt)}</p>
           </Link>
         )}
       </Card>
@@ -597,7 +600,7 @@ function UpcomingEventsWidget({
                     className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-muted/40"
                   >
                     <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-                      {eventDayLabel(event)}
+                      {eventDayLabel(event, fmt)}
                     </span>
                     <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
                       {event.source !== "google" && (
@@ -605,7 +608,7 @@ function UpcomingEventsWidget({
                       )}
                       <span className="min-w-0 flex-1 truncate">{event.title}</span>
                     </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event, fmt)}</span>
                   </Link>
                 </EventInfoTooltip>
               </li>
@@ -634,6 +637,7 @@ function AssignmentsWidget({
   label?: string;
   transparent: boolean;
 }) {
+  const fmt = useDateFormatter();
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data: eventsData, error: fetchError } = useSWR<{ events: UpcomingCalendarEvent[] }>(
     "/api/calendar/events?maxResults=50"
@@ -704,7 +708,7 @@ function AssignmentsWidget({
         {!error && next && (
           <Link href={assignmentsCalendarHref(next)} className="w-full hover:underline">
             <p className="truncate text-sm font-medium">{next.title}</p>
-            <p className="text-xs text-muted-foreground">{eventDayLabel(next)}</p>
+            <p className="text-xs text-muted-foreground">{eventDayLabel(next, fmt)}</p>
           </Link>
         )}
       </Card>
@@ -761,7 +765,7 @@ function AssignmentsWidget({
                       className="flex min-w-0 flex-1 items-center gap-3"
                     >
                       <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-                        {eventDayLabel(event)}
+                        {eventDayLabel(event, fmt)}
                       </span>
                       <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
                         <span className={`size-1.5 shrink-0 rounded-full ${sourceDotColor(event.source)}`} />
@@ -774,7 +778,7 @@ function AssignmentsWidget({
                           {event.title}
                         </span>
                       </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event)}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event, fmt)}</span>
                     </Link>
                   </EventInfoTooltip>
                 </li>
@@ -805,7 +809,7 @@ function RecentViewIcon({ type }: { type: RecentView["type"] }) {
 // Coarse "how long ago" — this widget only ever needs a rough sense of
 // recency (minutes/hours/days), not a precise timestamp, so a small local
 // formatter is simpler than pulling in a date-relative-time library for it.
-function formatRelativeTime(utcString: string): string {
+function formatRelativeTime(utcString: string, fmt: DateFormatter): string {
   const then = new Date(utcString.replace(" ", "T") + "Z").getTime();
   const minutes = Math.floor((Date.now() - then) / 60000);
   if (minutes < 1) return "just now";
@@ -814,7 +818,7 @@ function formatRelativeTime(utcString: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(then).toLocaleDateString();
+  return fmt.numericDate(new Date(then));
 }
 
 function RecentActivityWidget({
@@ -826,6 +830,7 @@ function RecentActivityWidget({
   label?: string;
   transparent: boolean;
 }) {
+  const fmt = useDateFormatter();
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data, error: fetchError } = useSWR<{ views: RecentView[] }>("/api/recent-views");
   const views = data?.views ?? null;
@@ -849,7 +854,7 @@ function RecentActivityWidget({
         {!error && next && (
           <Link href={recentViewHref(next)} className="w-full hover:underline">
             <p className="truncate text-sm font-medium">{next.title}</p>
-            <p className="text-xs text-muted-foreground">{formatRelativeTime(next.viewedAt)}</p>
+            <p className="text-xs text-muted-foreground">{formatRelativeTime(next.viewedAt, fmt)}</p>
           </Link>
         )}
       </Card>
@@ -892,7 +897,7 @@ function RecentActivityWidget({
                     <span className="truncate font-medium">{view.title}</span>
                     <span className="truncate text-xs text-muted-foreground">{view.courseName}</span>
                   </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(view.viewedAt)}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(view.viewedAt, fmt)}</span>
                 </Link>
               </li>
             ))}

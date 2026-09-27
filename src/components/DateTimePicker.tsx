@@ -1,5 +1,8 @@
 "use client";
 
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import type { DateFormatter } from "@/lib/dateFormat";
+import { weekdayLabels } from "@/components/calendar/shared";
 import { useState } from "react";
 import { CalendarIcon, ChevronLeft, ChevronRight, ClockIcon } from "lucide-react";
 import { cn } from "cn";
@@ -45,12 +48,13 @@ function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-// 6 weeks of 7 days, starting on the Sunday on/before the 1st — a fixed
-// 42-cell grid so the popup's height never jumps between months.
-function monthGrid(month: Date): Date[] {
+// 6 weeks of 7 days, starting on the week's first day (see
+// lib/dateFormat.ts) on/before the 1st — a fixed 42-cell grid so the
+// popup's height never jumps between months.
+function monthGrid(month: Date, weekStartsOn: 0 | 1): Date[] {
   const first = startOfMonth(month);
   const start = new Date(first);
-  start.setDate(start.getDate() - first.getDay());
+  start.setDate(start.getDate() - ((first.getDay() - weekStartsOn + 7) % 7));
   return Array.from({ length: 42 }, (_, i) => {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
@@ -60,11 +64,11 @@ function monthGrid(month: Date): Date[] {
 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
-function formatTimeLabel(hhmm: string): string {
+function formatTimeLabel(hhmm: string, fmt: DateFormatter): string {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
   d.setHours(h ?? 0, m ?? 0, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return fmt.time(d);
 }
 
 // Every 15 minutes across a day — a fine enough grain for calendar events,
@@ -84,8 +88,9 @@ const TIME_SLOTS = Array.from({ length: 96 }, (_, i) => {
 // jumps straight to 9-something instead of scrolling past 36 half-hour
 // slots to get there.
 function TimePicker({ value, onChange, id }: { value: string; onChange: (value: string) => void; id?: string }) {
+  const fmt = useDateFormatter();
   return (
-    <Combobox items={TIME_SLOTS} value={value || null} onValueChange={(v) => v && onChange(v)} itemToStringLabel={formatTimeLabel}>
+    <Combobox items={TIME_SLOTS} value={value || null} onValueChange={(v) => v && onChange(v)} itemToStringLabel={(item: string) => formatTimeLabel(item, fmt)}>
       <ComboboxInputGroup className="w-[8rem] shrink-0">
         <ClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <ComboboxInput id={id} placeholder="Time" className="tabular-nums" />
@@ -96,7 +101,7 @@ function TimePicker({ value, onChange, id }: { value: string; onChange: (value: 
         <ComboboxList>
           {(item: string) => (
             <ComboboxItem key={item} value={item} className="tabular-nums">
-              {formatTimeLabel(item)}
+              {formatTimeLabel(item, fmt)}
             </ComboboxItem>
           )}
         </ComboboxList>
@@ -126,6 +131,7 @@ export function DateTimePicker({
   mode: "date" | "datetime";
   id?: string;
 }) {
+  const fmt = useDateFormatter();
   const [open, setOpen] = useState(false);
   const [datePart, timePart] = mode === "datetime" ? value.split("T") : [value, ""];
   const selected = parseDateOnly(datePart);
@@ -154,7 +160,7 @@ export function DateTimePicker({
           <CalendarIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">
             {selected
-              ? selected.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
+              ? fmt.date(selected, { weekday: "short", month: "short", day: "numeric" })
               : "Pick a date"}
           </span>
         </PopoverTrigger>
@@ -170,7 +176,7 @@ export function DateTimePicker({
               <ChevronLeft className="size-4" />
             </Button>
             <span className="text-sm font-medium">
-              {viewMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+              {fmt.date(viewMonth, { month: "long", year: "numeric" })}
             </span>
             <Button
               type="button"
@@ -183,14 +189,14 @@ export function DateTimePicker({
             </Button>
           </div>
           <div className="grid grid-cols-7 text-center text-xs text-muted-foreground">
-            {WEEKDAY_LABELS.map((label, i) => (
+            {weekdayLabels(WEEKDAY_LABELS, fmt.weekStartsOn).map((label, i) => (
               <div key={i} className="py-1">
                 {label}
               </div>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-y-0.5">
-            {monthGrid(viewMonth).map((d) => {
+            {monthGrid(viewMonth, fmt.weekStartsOn).map((d) => {
               const inMonth = d.getMonth() === viewMonth.getMonth();
               const isSelected = selected && sameDay(d, selected);
               const isToday = sameDay(d, today);

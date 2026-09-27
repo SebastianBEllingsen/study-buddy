@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
+import { useAutosave } from "@/lib/autosave";
 import { toast } from "sonner";
 import { Camera, CheckCircle2, CircleAlert, Clock, Lightbulb, LoaderCircle, Pause, Play, X, XCircle } from "lucide-react";
 import { cn } from "cn";
@@ -238,35 +239,25 @@ export default function AttemptPage() {
   });
   const [answers, setAnswers] = useState<TaskAnswer[] | null>(null);
   const [seeded, setSeeded] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Answers autosave as you write (lib/autosave.ts): in order, retried if
+  // the connection drops, and sent before the page closes.
+  const { schedule: saveAnswers, discard: discardSaves, state: saveState } = useAutosave<{ answers: TaskAnswer[] }>(
+    key,
+    "Couldn't save your answers — they're still on this page"
+  );
 
   if (data && seeded !== data.attempt.id) {
     setSeeded(data.attempt.id);
     setAnswers(data.attempt.answers);
   }
 
-  useEffect(() => () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-  }, []);
-
   function change(index: number, answer: TaskAnswer) {
     if (!answers) return;
     const next = answers.map((a, i) => (i === index ? answer : a));
     setAnswers(next);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      setSaving(true);
-      const res = await fetch(key, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: next }),
-      }).catch(() => null);
-      setSaving(false);
-      if (!res?.ok) toast.error("Couldn't save your answers — they're still on this page");
-    }, 1500);
+    saveAnswers({ answers: next });
   }
 
   async function setPaused(paused: boolean) {
@@ -280,6 +271,7 @@ export default function AttemptPage() {
   }
 
   async function discard() {
+    discardSaves();
     const res = await fetch(key, { method: "DELETE" }).catch(() => null);
     if (!res?.ok) {
       toast.error("Couldn't discard this attempt");
@@ -289,7 +281,8 @@ export default function AttemptPage() {
   }
 
   async function submit() {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
+    // The hand-in carries the final answers itself.
+    discardSaves();
     setSubmitting(true);
     const res = await fetch(`${key}/submit`, {
       method: "POST",
@@ -385,7 +378,7 @@ export default function AttemptPage() {
           <h1 className="truncate font-heading text-lg font-semibold">{exam.title}</h1>
           <p className="text-xs text-muted-foreground">
             {answered} of {exam.tasks.length} answered · {fmt(exam.total_points)} points
-            {saving && " · saving…"}
+            {saveState === "saving" && " · saving…"}{saveState === "error" && " · not saved yet, retrying"}
           </p>
         </div>
         <div className="flex items-center gap-3">

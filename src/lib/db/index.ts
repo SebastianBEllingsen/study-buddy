@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
-import { sqliteDb } from "./sqlite";
-import { createPostgresDb } from "./postgres";
+import { sqliteConnection, sqliteDb } from "./sqlite";
+import { deviceAllocator } from "../sync/runtime";
+import { withDeviceIds } from "../sync/ids";
+import { createPostgresDb, runPgMigrations } from "./postgres";
 import { resolveStorageConfig, type StorageConfig } from "./config";
 import { enqueue } from "./operationQueue";
 import * as sqliteSchema from "./schema.sqlite";
@@ -8,11 +10,24 @@ import * as pgSchema from "./schema.pg";
 
 type Schema = typeof sqliteSchema;
 type PgClient = Awaited<ReturnType<typeof createPostgresDb>>["client"];
+type PgDb = Awaited<ReturnType<typeof createPostgresDb>>["db"];
 
-// The Postgres connection currently backing `db`, if any — kept so
-// switching away from Supabase (or to a different project) can close it
-// with `.end()` instead of leaking a connection pool.
-let currentPgClient: PgClient | null = null;
+type PgConnection = { connectionString: string; db: PgDb; client: PgClient };
+
+declare global {
+  var __studyBuddyPg: PgConnection | undefined;
+}
+
+// The Postgres connection currently backing `db`, if any — kept on
+// globalThis (like sqlite.ts's connection) so a dev hot-reload of this
+// module reuses the open pool instead of opening another and leaking the
+// old one, and so switching away from Supabase (or to a different project)
+// can close it with `.end()`.
+async function closePg(): Promise<void> {
+  const current = globalThis.__studyBuddyPg;
+  globalThis.__studyBuddyPg = undefined;
+  if (current) await current.client.end();
+}
 
 // Set whenever resolve() falls back to local because a Supabase connection
 // attempt failed; cleared on success. Surfaced through
@@ -32,13 +47,36 @@ export let usingPostgres = false;
 // record the failure instead.
 async function resolve(config: StorageConfig): Promise<{ db: typeof sqliteDb; schema: Schema }> {
   if (config.mode !== "supabase") {
+    await closePg();
     lastConnectionError = null;
     usingPostgres = false;
     return { db: sqliteDb, schema: sqliteSchema };
   }
+  // Sync mode: the app works on this computer's database, creating rows
+  // with this computer's own ids; lib/sync/ moves changes to and from the
+  // cloud in the background.
+  if (config.sync) {
+    const ids = deviceAllocator(sqliteConnection);
+    if (ids) {
+      await closePg();
+      lastConnectionError = null;
+      usingPostgres = false;
+      return { db: withDeviceIds(sqliteDb, ids), schema: sqliteSchema };
+    }
+  }
   try {
-    const { db: pgDb, client } = await createPostgresDb(config.connectionString);
-    currentPgClient = client;
+    let pg = globalThis.__studyBuddyPg;
+    if (pg?.connectionString !== config.connectionString) {
+      await closePg();
+      const { db, client } = await createPostgresDb(config.connectionString);
+      pg = { connectionString: config.connectionString, db, client };
+      globalThis.__studyBuddyPg = pg;
+    } else {
+      // A dev hot-reload reusing the open pool: still pick up any new
+      // migration, as opening a fresh pool would have.
+      await runPgMigrations(pg.db);
+    }
+    const pgDb = pg.db;
     lastConnectionError = null;
     usingPostgres = true;
     return {
@@ -120,10 +158,9 @@ export let code_sets = initial.schema.code_sets;
 // takes effect immediately.
 export async function reconnect(): Promise<{ ok: boolean; error: string | null }> {
   return enqueue(async () => {
-    if (currentPgClient) {
-      await currentPgClient.end();
-      currentPgClient = null;
-    }
+    // Always a fresh connection here: reconnect() runs right after the
+    // settings were saved, and should prove the new ones work.
+    await closePg();
     const next = await resolve(resolveStorageConfig());
     db = next.db;
     courses = next.schema.courses;

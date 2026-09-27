@@ -1,4 +1,4 @@
-import { getCourse, listCourses } from "../models";
+import { listCourseNames } from "../models";
 import { localToday, missedSessions } from "../studyPlan/schedule";
 import { reschedulePlan } from "../studyPlan/scheduleService";
 import { getStudyPlan, listReadyStudyPlans } from "../studyPlan/store";
@@ -98,7 +98,7 @@ export async function loadToday(options: {
     sourcesLoad.then((loaded) => loadReviewQueue({ courseId, dayStart: options.dayStart, now, limit: 1, sources: loaded })),
     listMistakes({ courseId, status: "open" }),
     listReadyStudyPlans(),
-    courseId === null ? listCourses() : getCourse(courseId).then((c) => (c ? [c] : [])),
+    listCourseNames(courseId),
     sourcesLoad,
   ]);
   const courseNames = new Map(courses.map((c) => [c.id, c.name]));

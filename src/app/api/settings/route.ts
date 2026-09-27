@@ -16,6 +16,7 @@ import {
   setCoursePageDisplay,
   setAiEfficiencyMode,
   setPreferredLanguage,
+  setDateFormat,
   setReviewSettings,
   MAX_NEW_CARDS_PER_DAY,
   setCliTrustedModeEnabled,
@@ -28,6 +29,7 @@ import {
   IMAGE_CAPABLE_BACKENDS,
 } from "@/lib/models";
 import { normalizeFolderChipSettings } from "@/lib/folderChips";
+import { isDateFormat } from "@/lib/dateFormat";
 import { normalizeAppWallpaper } from "@/lib/appWallpaper";
 import { HEADER_TINT_MODES, parseHeaderTintMode } from "@/lib/headerTint";
 import { droppedLinkIconImages, normalizeDashboardLinks } from "@/lib/dashboardLinks";
@@ -217,6 +219,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "preferredLanguage must be a supported language code" }, { status: 400 });
     }
     await setPreferredLanguage(body.preferredLanguage);
+  }
+
+  if (body?.dateFormat !== undefined) {
+    if (!isDateFormat(body.dateFormat)) {
+      return Response.json({ error: "dateFormat must be one of: no, uk, us, iso" }, { status: 400 });
+    }
+    await setDateFormat(body.dateFormat);
   }
 
   if (body?.reviewRetention !== undefined) {

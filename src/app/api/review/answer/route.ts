@@ -37,6 +37,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid answer" }, { status: 400 });
   }
 
+  // Only grading a written answer can fail because of the AI; anything else
+  // is a storage problem and is reported as one.
+  let grading = false;
   try {
     const item = await getGeneratedItem(itemId as number);
     if (!item || item.mode !== (body.kind === "card" ? "flashcards" : "quiz")) {
@@ -66,7 +69,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "Invalid answer" }, { status: 400 });
     }
     const answer = (body.answer ?? null) as QuizAnswer;
+    grading = true;
     const [result] = await gradeQuizAnswers([{ index: index as number, question, answer }]);
+    grading = false;
     let recorded = { scheduled: false, dueAt: null as string | null };
     if (record) {
       [recorded] = await recordQuizAnswers({
@@ -78,6 +83,7 @@ export async function POST(request: Request) {
     return Response.json({ result, scheduled: recorded.scheduled, dueAt: recorded.dueAt });
   } catch (err) {
     console.error("Recording a review answer failed:", err);
-    return Response.json({ error: await describeAiError(err) }, { status: 502 });
+    if (grading) return Response.json({ error: await describeAiError(err) }, { status: 502 });
+    return Response.json({ error: "Couldn't save that answer — try again" }, { status: 500 });
   }
 }

@@ -1,4 +1,5 @@
 "use client";
+import { useDateFormatter } from "@/components/DateFormatProvider";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -9,7 +10,7 @@ import type { CalendarFeed } from "@/lib/models";
 import { layoutDayEvents, PALETTE, parseFeedCalendarConfig, shortLocation, type FeedCalendarConfig } from "@/lib/feedCalendar";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { courseDisplay, FeedEventPopover, hhmm, TODAY_ACCENT, type CourseDisplay } from "./FeedWeekView";
+import { courseDisplay, FeedEventPopover, TODAY_ACCENT, type CourseDisplay } from "./FeedWeekView";
 import { addDays, dateKey, type CalendarEvent } from "./shared";
 
 // How far ahead the widget looks for the next class day — far enough to
@@ -31,7 +32,8 @@ function dayLabel(day: Date, today: Date): string {
   const diff = Math.round((startOfDay(day).getTime() - today.getTime()) / 86_400_000);
   if (diff === 0) return "Today";
   if (diff === 1) return "Tomorrow";
-  return day.toLocaleDateString(undefined, { weekday: "long" });
+  // Weekday names are the same in every date format; English like the rest.
+  return day.toLocaleDateString("en-GB", { weekday: "long" });
 }
 
 function untilLabel(from: Date, to: Date): string {
@@ -102,16 +104,17 @@ function CoursePill({ display, className }: { display: CourseDisplay; className?
 }
 
 function StatusText({ item, running, now, today }: { item: Item; running: boolean; now: Date; today: Date }) {
+  const fmt = useDateFormatter();
   if (running) {
     return (
       <span className="font-medium" style={{ color: TODAY_ACCENT }}>
-        Now · until {hhmm(item.end)}
+        Now · until {fmt.time(item.end)}
       </span>
     );
   }
   const sameDay = dateKey(item.start) === dateKey(today);
   return (
-    <span>{sameDay ? untilLabel(now, item.start) : `${dayLabel(item.start, today)} ${hhmm(item.start)}`}</span>
+    <span>{sameDay ? untilLabel(now, item.start) : `${dayLabel(item.start, today)} ${fmt.time(item.start)}`}</span>
   );
 }
 
@@ -376,6 +379,7 @@ function DayAgenda({
   heading: string | null;
   transparent: boolean;
 }) {
+  const fmt = useDateFormatter();
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusId = currentOrNext(items, now)?.item.event.id;
 
@@ -423,8 +427,8 @@ function DayAgenda({
                     style={running ? { backgroundColor: `color-mix(in srgb, ${palette.bg} 16%, transparent)` } : undefined}
                   >
                     <span className="flex w-10 shrink-0 flex-col text-xs leading-tight tabular-nums">
-                      <span className="font-semibold">{hhmm(start)}</span>
-                      {!display.deadline && <span className="text-muted-foreground">{hhmm(end)}</span>}
+                      <span className="font-semibold">{fmt.time(start)}</span>
+                      {!display.deadline && <span className="text-muted-foreground">{fmt.time(end)}</span>}
                     </span>
                     <span
                       className={cn("w-1 shrink-0 rounded-full", past && transparent && "opacity-45")}
@@ -439,7 +443,7 @@ function DayAgenda({
                       {(room || display.deadline) && (
                         <span className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
                           {display.deadline ? (
-                            `Due ${hhmm(start)}`
+                            `Due ${fmt.time(start)}`
                           ) : (
                             <>
                               <MapPin className="size-3 shrink-0" />

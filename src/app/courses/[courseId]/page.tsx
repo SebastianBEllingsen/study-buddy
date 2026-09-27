@@ -4,6 +4,8 @@ import { Explain } from "@/components/Explain";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import {
   Brain,
@@ -564,6 +566,7 @@ function GeneratedItemList({
 }) {
   const { push: pushWithTransition } = useViewTransitionRouter();
   const modelBadge = useShowModelBadge();
+  const fmt = useDateFormatter();
 
   // See DocumentList's handleDrop — same reorder-by-drop-on-a-sibling-row
   // pattern (including why stopPropagation matters), mirrored here for
@@ -646,7 +649,7 @@ function GeneratedItemList({
                 />
               )}
               <span className="shrink-0 text-xs text-muted-foreground">
-                {new Date(item.created_at).toLocaleDateString()}
+                {fmt.numericDate(fromUtcTimestamp(item.created_at))}
               </span>
             </div>
           </div>
@@ -689,6 +692,7 @@ function NoteList({
   onDelete: (noteId: number) => void;
   onReorder: (folderId: number | null, orderedIds: number[]) => void;
 }) {
+  const fmt = useDateFormatter();
   // Same reorder-by-drop-on-a-sibling-row pattern as DocumentList/
   // GeneratedItemList's row-level handleDrop.
   function handleDrop(e: React.DragEvent, targetId: number) {
@@ -733,7 +737,7 @@ function NoteList({
               {note.title}
             </Link>
             <span className="shrink-0 text-xs text-muted-foreground">
-              {new Date(note.updated_at.replace(" ", "T") + "Z").toLocaleDateString()}
+              {fmt.numericDate(fromUtcTimestamp(note.updated_at))}
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">

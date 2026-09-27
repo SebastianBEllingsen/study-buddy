@@ -30,13 +30,15 @@ import ChatDialog from "@/components/ChatDialog";
 import HelpDialog from "@/components/HelpDialog";
 import ThemeProvider from "@/components/ThemeProvider";
 import AppThemeProvider from "@/components/AppThemeProvider";
-import SWRProvider from "@/components/SWRProvider";
+import SWRProvider, { SWRCacheGate } from "@/components/SWRProvider";
+import { DateFormatProvider } from "@/components/DateFormatProvider";
 import AppBranding from "@/components/AppBranding";
 import AppWallpaper from "@/components/AppWallpaper";
 import AdaptiveHeader from "@/components/AdaptiveHeader";
 import ExternalLinkHandler from "@/components/ExternalLinkHandler";
 import PomodoroProvider from "@/components/pomodoro/PomodoroProvider";
 import PomodoroButton from "@/components/pomodoro/PomodoroButton";
+import { SyncIndicator } from "@/components/SyncIndicator";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { getAppSettings } from "@/lib/models";
@@ -178,6 +180,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AppThemeProvider>
             <SWRProvider>
+              <DateFormatProvider initial={settings.dateFormat}>
               <PomodoroProvider>
               <ExplainProvider>
               {/* sticky rather than static so a page that fills the viewport
@@ -226,6 +229,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                     </div>
                     <div className="h-5 w-px shrink-0 bg-border" />
                     <div className="flex items-center gap-0.5 sm:gap-1">
+                      <SyncIndicator />
                       <PomodoroButton />
                       <ChatDialog />
                       <SettingsDialog />
@@ -235,7 +239,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 </div>
               </header>
               <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
-                {children}
+                <SWRCacheGate>{children}</SWRCacheGate>
               </main>
               <Toaster />
               <AppWallpaper />
@@ -243,6 +247,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <ExternalLinkHandler />
               </ExplainProvider>
               </PomodoroProvider>
+              </DateFormatProvider>
             </SWRProvider>
           </AppThemeProvider>
         </ThemeProvider>

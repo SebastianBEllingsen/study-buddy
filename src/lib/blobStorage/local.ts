@@ -22,6 +22,10 @@ function resolveBlobPath(key: string): string {
 }
 
 export const localBlobStore: BlobStore = {
+  kind: "local",
+
+  get: (key) => readLocalBlob(key),
+
   async put(key, bytes) {
     const filePath = resolveBlobPath(key);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -44,4 +48,17 @@ export async function readLocalBlob(key: string): Promise<Buffer | null> {
   } catch {
     return null;
   }
+}
+
+// data/blobs/ is also this computer's cache of files kept in Supabase
+// Storage (see blobStorage/index.ts's readBlob), so each file is only
+// downloaded once per computer and stays viewable offline.
+export async function writeLocalBlobCache(key: string, bytes: Buffer): Promise<void> {
+  const filePath = resolveBlobPath(key);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, bytes);
+}
+
+export async function removeLocalBlobCache(key: string): Promise<void> {
+  await fs.rm(resolveBlobPath(key), { force: true }).catch(() => {});
 }

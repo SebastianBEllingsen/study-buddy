@@ -1,3 +1,4 @@
+import type { Grade } from "ts-fsrs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { TestDb } from "../db/testHarness";
 
@@ -101,6 +102,28 @@ describe("recordReview", () => {
       [Rating.Good, "deck", "sure"],
       [Rating.Again, "queue", null],
     ]);
+  });
+
+  it("counts only one of two racing answers within the same-session window", async () => {
+    const { deck } = await setup();
+    const answer = {
+      generatedItemId: deck.id,
+      kind: "card" as const,
+      itemIndex: 0,
+      rating: Rating.Good as Grade,
+      correct: true,
+      confidence: null,
+      source: "queue" as const,
+      now: T0,
+    };
+    const results = await Promise.all([
+      store.recordReviewUnlessRecent(answer, 60_000),
+      store.recordReviewUnlessRecent(answer, 60_000),
+    ]);
+    const counted = results.filter((r) => r !== null);
+    expect(counted).toHaveLength(1);
+    const logs = await testDb.db.select().from(testDb.schema.review_logs);
+    expect(logs.filter((l) => l.review_item_id === counted[0]!.id)).toHaveLength(1);
   });
 });
 

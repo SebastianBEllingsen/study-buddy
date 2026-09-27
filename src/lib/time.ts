@@ -8,3 +8,15 @@
 export function nowUtc(): string {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
 }
+
+// The local calendar day ("YYYY-MM-DD") a stored UTC timestamp falls on —
+// for grouping activity by the day it happened for the learner (streak,
+// heatmap), not by UTC day. Runs on the server, which in this local app is
+// the learner's own machine and timezone.
+export function localDayOfUtc(text: string): string {
+  const d = new Date(`${text.replace(" ", "T")}Z`);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}

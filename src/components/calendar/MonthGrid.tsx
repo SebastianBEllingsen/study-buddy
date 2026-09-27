@@ -1,12 +1,13 @@
 "use client";
 
+import { useDateFormatter } from "@/components/DateFormatProvider";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { EventInfoTooltip } from "@/components/EventInfoTooltip";
 import { prefersReducedMotion } from "@/lib/motion";
-import { addDays, addMonths, dateKey, monthGridRange, sameDay, startOfMonth, type CalendarEvent } from "./shared";
+import { addDays, addMonths, dateKey, monthGridRange, sameDay, startOfMonth, weekdayLabels, type CalendarEvent } from "./shared";
 
 // Deterministic per-source color for a feed-sourced event's indicator dot —
 // see the identical helper in page.tsx's UpcomingEventsWidget for why
@@ -57,6 +58,7 @@ export function MonthGrid({
   // then drives the shown month through initialMonth + a key.
   hideHeader?: boolean;
 }) {
+  const fmt = useDateFormatter();
   const [month, setMonth] = useState(() => startOfMonth(initialMonth ?? new Date()));
   const today = new Date();
 
@@ -71,9 +73,9 @@ export function MonthGrid({
   }, [highlightEventId]);
 
   const days = useMemo(() => {
-    const { start } = monthGridRange(month);
+    const { start } = monthGridRange(month, fmt.weekStartsOn);
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
-  }, [month]);
+  }, [month, fmt.weekStartsOn]);
 
   const eventsByDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
@@ -94,7 +96,7 @@ export function MonthGrid({
       {!hideHeader && (
         <div className="flex items-center justify-between gap-2 border-b bg-card px-4 py-2.5">
           <span className="font-heading text-sm font-semibold">
-            {month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+            {fmt.date(month, { month: "long", year: "numeric" })}
           </span>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon-sm" aria-label="Previous month" onClick={() => setMonth(addMonths(month, -1))}>
@@ -110,7 +112,7 @@ export function MonthGrid({
         </div>
       )}
       <div className="grid grid-cols-7 border-b text-center text-xs text-muted-foreground">
-        {WEEKDAY_LABELS.map((label) => (
+        {weekdayLabels(WEEKDAY_LABELS, fmt.weekStartsOn).map((label) => (
           <div key={label} className="py-1.5">
             {label}
           </div>

@@ -15,8 +15,9 @@
 package-lock.json
 yarn.lock
 
-# testing
+# testing (the tests themselves are committed; their output isn't)
 /coverage
+/.vitest/
 
 # next.js
 /.next/

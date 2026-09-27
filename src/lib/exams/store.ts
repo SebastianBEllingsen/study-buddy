@@ -1,7 +1,8 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db, exam_profiles, mock_exam_attempts, mock_exams } from "../db";
 import type { AiBackend } from "../models";
 import { nowUtc } from "../time";
+import { INTERRUPTED_MESSAGE, liveStatus, stuckBefore } from "./gradingJobs";
 import type { AttemptStatus, ExamProfile, MockExam, MockExamAttempt, MockExamTask, TaskAnswer, TaskResult } from "./types";
 
 type ExamRow = typeof mock_exams.$inferSelect;
@@ -59,18 +60,20 @@ function toExam(row: ExamRow): MockExam {
 }
 
 function toAttempt(row: AttemptRow): MockExamAttempt {
+  const status = liveStatus(row);
   return {
     id: row.id,
     mock_exam_id: row.mock_exam_id,
-    status: row.status,
+    status,
     answers: JSON.parse(row.answers_json) as TaskAnswer[],
     results: row.results_json ? (JSON.parse(row.results_json) as TaskResult[]) : null,
     score: row.score,
-    error_message: row.error_message,
+    error_message: status !== row.status ? INTERRUPTED_MESSAGE : row.error_message,
     started_at: row.started_at,
     paused_at: row.paused_at,
     paused_seconds: row.paused_seconds,
     submitted_at: row.submitted_at,
+    grading_started_at: row.grading_started_at,
   };
 }
 
@@ -121,6 +124,7 @@ export async function listMockExams(courseId: number): Promise<MockExamSummary[]
           status: mock_exam_attempts.status,
           score: mock_exam_attempts.score,
           started_at: mock_exam_attempts.started_at,
+          grading_started_at: mock_exam_attempts.grading_started_at,
         })
         .from(mock_exam_attempts)
         .where(inArray(mock_exam_attempts.mock_exam_id, rows.map((r) => r.id)))
@@ -128,7 +132,7 @@ export async function listMockExams(courseId: number): Promise<MockExamSummary[]
     : [];
   return rows.map((row) => {
     const { tasks, ...exam } = toExam(row);
-    const own = attempts.filter((a) => a.mock_exam_id === row.id).map((a) => ({ id: a.id, status: a.status, score: a.score, started_at: a.started_at }));
+    const own = attempts.filter((a) => a.mock_exam_id === row.id).map((a) => ({ id: a.id, status: liveStatus(a), score: a.score, started_at: a.started_at }));
     return { ...exam, taskCount: tasks.length, attempts: own };
   });
 }
@@ -154,6 +158,11 @@ export async function createAttempt(examId: number, taskCount: number): Promise<
   return toAttempt(row);
 }
 
+export async function listAttemptsForExam(examId: number): Promise<MockExamAttempt[]> {
+  const rows = await db.select().from(mock_exam_attempts).where(eq(mock_exam_attempts.mock_exam_id, examId));
+  return rows.map(toAttempt);
+}
+
 export async function getAttempt(id: number): Promise<MockExamAttempt | null> {
   const [row] = await db.select().from(mock_exam_attempts).where(eq(mock_exam_attempts.id, id)).limit(1);
   return row ? toAttempt(row) : null;
@@ -161,6 +170,36 @@ export async function getAttempt(id: number): Promise<MockExamAttempt | null> {
 
 export async function saveAnswers(id: number, answers: TaskAnswer[]): Promise<void> {
   await db.update(mock_exam_attempts).set({ answers_json: JSON.stringify(answers) }).where(eq(mock_exam_attempts.id, id));
+}
+
+// Hands an attempt over for grading — atomically, in the database, so two
+// hand-ins racing each other (a double click, or two computers) can't both
+// win: only an attempt that's open, failed, or whose last run was cut off
+// can be claimed. `submitted` records the hand-in time on the first one.
+export async function claimForGrading(id: number, options: { submitted: boolean }, now = new Date()): Promise<boolean> {
+  const started = now.toISOString().slice(0, 19).replace("T", " ");
+  const claimed = await db
+    .update(mock_exam_attempts)
+    .set({
+      status: "grading",
+      grading_started_at: started,
+      error_message: null,
+      ...(options.submitted && { submitted_at: started }),
+    })
+    .where(
+      and(
+        eq(mock_exam_attempts.id, id),
+        or(
+          inArray(mock_exam_attempts.status, ["in_progress", "failed"]),
+          and(
+            eq(mock_exam_attempts.status, "grading"),
+            or(isNull(mock_exam_attempts.grading_started_at), lt(mock_exam_attempts.grading_started_at, stuckBefore(now)))
+          )
+        )
+      )
+    )
+    .returning({ id: mock_exam_attempts.id });
+  return claimed.length > 0;
 }
 
 export async function setAttemptStatus(

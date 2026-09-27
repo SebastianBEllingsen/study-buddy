@@ -3,7 +3,7 @@
 import { Explain } from "@/components/Explain";
 import { useEffect, useRef, useState } from "react";
 import { PartyPopper, CalendarCheck } from "lucide-react";
-import { toast } from "sonner";
+import { saveInBackground } from "@/lib/backgroundSaves";
 import type { Flashcard } from "@/lib/types";
 import type { FlashcardResult } from "@/lib/models";
 import { Button } from "@/components/ui/button";
@@ -110,22 +110,14 @@ export default function FlashcardViewer({
     setFlipped((f) => !f);
   }
 
-  async function handleResult(result: FlashcardResult) {
+  // Moves on at once; the rating is saved in the background.
+  function handleResult(result: FlashcardResult) {
     if (cardIndex == null) return;
-    try {
-      const res = await fetch(`/api/items/${itemId}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardIndex, result, confidence }),
-      });
-      if (!res.ok) {
-        toast.error("Couldn't save that review — try again");
-        return;
-      }
-    } catch {
-      toast.error("Couldn't save that review — try again");
-      return;
-    }
+    saveInBackground(
+      `/api/items/${itemId}/review`,
+      { cardIndex, result, confidence },
+      "Couldn't save a card rating — it'll come up again next review"
+    );
     setLogged((n) => n + 1);
     setFlipped(false);
     setConfidence(null);

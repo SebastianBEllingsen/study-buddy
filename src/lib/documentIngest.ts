@@ -12,6 +12,7 @@ import { uploadsDir, previewPdfPath } from "./uploads";
 import { extractPdfText, extractDocxText, ScannedPdfError, EmptyDocumentError } from "./extraction";
 import { convertToPdf, LibreOfficeUnavailableError } from "./libreoffice";
 import { extensionOf, isSupportedExtension, isImageExtension, needsLibreOfficeConversion } from "./documentFormats";
+import { blobStore } from "./blobStorage";
 
 export class UnsupportedDocumentTypeError extends Error {
   constructor() {
@@ -56,7 +57,7 @@ export async function ingestDocumentBytes(params: {
     folderId: params.folderId,
     filename: params.filename,
     filePath,
-    fileBase64: params.buffer.toString("base64"),
+    ...(await storeOriginal(params.buffer, safeName)),
   });
 
   try {
@@ -86,4 +87,16 @@ export async function ingestDocumentBytes(params: {
   }
 
   return doc;
+}
+
+// Where the original file travels with the document, so it opens on other
+// computers too: in Supabase mode, Storage (keeping the database small);
+// otherwise — or if that upload fails — inline in the row, as before.
+async function storeOriginal(buffer: Buffer, safeName: string): Promise<{ fileBase64: string | null; fileUrl: string | null }> {
+  if (blobStore?.kind === "supabase") {
+    const ext = path.extname(safeName).toLowerCase();
+    const stored = await blobStore.put(`documents/${crypto.randomUUID()}${ext}`, buffer, "application/octet-stream");
+    if (stored) return { fileBase64: null, fileUrl: stored.url };
+  }
+  return { fileBase64: buffer.toString("base64"), fileUrl: null };
 }

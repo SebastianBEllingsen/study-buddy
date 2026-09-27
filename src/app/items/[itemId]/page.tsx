@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
+import { saveStateLabel, useAutosave } from "@/lib/autosave";
 import { Bell, BellOff, Download, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedItem, QuizAttempt } from "@/lib/models";
@@ -69,12 +72,9 @@ const MODE_UNIT: Record<GeneratedItem["mode"], string> = {
   notes: "a section",
 };
 
-// How long to wait after the last keystroke before autosaving notes content —
-// same debounce as the Vault's NoteEditor (see vault/[noteId]/page.tsx) so
-// both note-editing surfaces feel identical.
-const AUTOSAVE_DELAY_MS = 800;
 
 export default function ItemPage() {
+  const fmt = useDateFormatter();
   const params = useParams<{ itemId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -107,11 +107,16 @@ export default function ItemPage() {
     setNoteMarkdown((JSON.parse(detail.item.content_json) as NotesContent).markdown);
     setNotesSyncedFor(detail.item.id);
   }
-  const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  // Same autosave as the Vault's note editor (lib/autosave.ts), so both
+  // note-editing surfaces behave identically.
+  const {
+    schedule: scheduleNoteSave,
+    discard: discardNoteSaves,
+    state: noteSaveState,
+  } = useAutosave<{ content: { markdown: string } }>(`/api/items/${params.itemId}`, "Couldn't save note");
   const [editingCards, setEditingCards] = useState(false);
   const notesRef = useRef<HTMLDivElement>(null);
   const noteEditorRef = useRef<NoteEditorHandle>(null);
-  const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelBadge = useShowModelBadge();
   const aiEnabled = useAiEnabled();
 
@@ -167,17 +172,6 @@ export default function ItemPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.item.id]);
 
-  // Without this, typing in the notes editor then immediately navigating
-  // away or deleting the item leaves handleNotesChange's setTimeout
-  // pending — it still fires after unmount, issuing a PATCH against an
-  // item the user has already left (possibly deleted), and calling
-  // setNoteSaveState on an unmounted component.
-  useEffect(() => {
-    return () => {
-      if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
-    };
-  }, []);
-
   async function saveContent(newContent: unknown, removedCardIndices?: number[]): Promise<boolean> {
     const res = await fetch(`/api/items/${params.itemId}`, {
       method: "PATCH",
@@ -199,6 +193,7 @@ export default function ItemPage() {
   // Stored only as `false`; turning them back on drops the key.
   async function handleDeleteItem() {
     if (!detail) return;
+    discardNoteSaves();
     const res = await fetch(`/api/items/${detail.item.id}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error("Couldn't delete it");
@@ -237,22 +232,7 @@ export default function ItemPage() {
   // on every keystroke, matching the Vault NoteEditor's own autosave feel.
   function handleNotesChange(value: string) {
     setNoteMarkdown(value);
-    setNoteSaveState("saving");
-    if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
-    noteSaveTimer.current = setTimeout(async () => {
-      const res = await fetch(`/api/items/${params.itemId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: { markdown: value } }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        toast.error(body.error ?? "Couldn't save note");
-        setNoteSaveState("idle");
-        return;
-      }
-      setNoteSaveState("saved");
-    }, AUTOSAVE_DELAY_MS);
+    scheduleNoteSave({ content: { markdown: value } });
   }
 
   async function handleSupplement() {
@@ -343,7 +323,7 @@ export default function ItemPage() {
             {item.mode === "notes" && (
               <>
                 <span className="text-xs text-muted-foreground">
-                  {noteSaveState === "saving" ? "Saving…" : noteSaveState === "saved" ? "Saved" : ""}
+                  {saveStateLabel(noteSaveState)}
                 </span>
                 <CropToAskButton active={notesCropMode} onClick={toggleNotesCropMode} />
               </>
@@ -482,7 +462,7 @@ export default function ItemPage() {
                 {attempts.map((a) => (
                   <li key={a.id}>
                     {a.completed_at
-                      ? `${a.score?.toFixed(0)}% — ${new Date(a.completed_at).toLocaleString()}`
+                      ? `${a.score?.toFixed(0)}% — ${fmt.dateTime(fromUtcTimestamp(a.completed_at))}`
                       : "In progress"}
                   </li>
                 ))}

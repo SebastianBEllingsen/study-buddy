@@ -1,10 +1,11 @@
-import fs from "node:fs/promises";
 import path from "node:path";
+import { readBlob } from "@/lib/blobStorage";
 
-// Serves what src/lib/blobStorage/local.ts writes under data/blobs/ — that
-// directory isn't under public/, so local-mode blob URLs (/api/blobs/...)
-// need a route to actually resolve. Supabase-mode URLs point straight at
-// the Storage bucket's own public endpoint and never hit this route.
+// Serves every stored file by key: from data/blobs/ (see
+// src/lib/blobStorage/local.ts), which isn't under public/, or — for files
+// kept in Supabase Storage — downloaded once and cached there. Older
+// Supabase-mode rows may still hold the bucket's public URL directly
+// (Settings → Storage → Move files rewrites them to this route).
 const blobsDir = path.join(process.cwd(), "data", "blobs");
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -27,6 +28,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".webm": "video/webm",
   ".ogv": "video/ogg",
   ".mov": "video/quicktime",
+  ".pdf": "application/pdf",
 };
 
 type Params = { params: Promise<{ key: string[] }> };
@@ -46,7 +48,10 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   try {
-    const bytes = await fs.readFile(filePath);
+    // This computer's copy, or — for files kept in Supabase Storage — a
+    // one-time download that's cached for next time (and for offline).
+    const bytes = await readBlob(key.join("/"));
+    if (!bytes) return new Response(null, { status: 404 });
     const contentType = CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
     return new Response(new Uint8Array(bytes), {
       headers: {
@@ -54,6 +59,11 @@ export async function GET(_request: Request, { params }: Params) {
         // Filenames are UUID-based and never reused, so a cached copy is
         // always still correct — same reasoning as the document-file route.
         "Cache-Control": "public, max-age=31536000, immutable",
+        // Blobs are media, never pages: an SVG (e.g. from an imported Anki
+        // deck) opened directly in a tab must not be able to run script on
+        // this app's origin, where it could call the whole API.
+        "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; media-src 'self'; sandbox",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch {

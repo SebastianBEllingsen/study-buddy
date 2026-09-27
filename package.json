@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:webpack": "next dev --webpack",
+    "dev": "next dev -H 127.0.0.1",
+    "dev:webpack": "next dev --webpack -H 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 127.0.0.1",
     "lint": "eslint",
     "test": "vitest run"
   },
@@ -60,6 +60,7 @@
     "unpdf": "^1.8.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",

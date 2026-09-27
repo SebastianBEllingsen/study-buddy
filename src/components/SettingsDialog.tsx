@@ -8,6 +8,10 @@ import { SettingGroup, SettingSlider, SettingToggle } from "@/components/Setting
 import { MAX_BACKDROP_BLUR } from "@/lib/backdropBlur";
 import type { FolderChipSettings } from "@/lib/folderChips";
 import { LANGUAGES, languageName } from "@/lib/languages";
+import { DATE_FORMAT_LABELS, DATE_FORMATS, isDateFormat, type DateFormat } from "@/lib/dateFormat";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { SyncPanel } from "@/components/SyncIndicator";
+import type { BackupInfo } from "@/lib/backup/service";
 import { MAX_RETENTION, MIN_RETENTION } from "@/lib/review/types";
 import { setExplanationsEnabled, useExplanationsEnabled } from "@/components/Explain";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
@@ -15,6 +19,7 @@ import useSWR, { useSWRConfig } from "swr";
 import {
   AlertTriangle,
   Calendar,
+  Archive,
   Database,
   BookOpen,
   Download,
@@ -81,7 +86,7 @@ const KEY_PROVIDERS: {
   { backend: "free", field: "hasOpenRouterKey", bodyField: "openrouterApiKey", help: "openrouter.ai/keys — free, no credit card required" },
 ];
 
-type StorageMode = "local" | "supabase";
+type StorageMode = "local" | "supabase" | "sync";
 
 interface StorageSettingsState {
   mode: StorageMode;
@@ -94,7 +99,8 @@ interface StorageSettingsState {
 
 const STORAGE_LABELS: Record<StorageMode, string> = {
   local: "Local (this device only)",
-  supabase: "Supabase (synced)",
+  supabase: "Supabase (online only)",
+  sync: "This computer + Supabase sync (works offline)",
 };
 
 const BANNER_STYLE_LABELS: Record<AppSettings["dashboardBannerStyle"], string> = {
@@ -859,7 +865,197 @@ function UploadLimitToggle() {
   );
 }
 
+// Backups on this computer (lib/backup/service.ts): made daily while the
+// app runs, or on demand; restoring one loads it into the local database.
+// Settings → Storage → Move files (lib/blobStorage/moveToStorage.ts): PDFs
+// out of the database into Supabase Storage, image links onto this app's
+// own route, then the freed space handed back. Shown only while there's
+// something to move.
+function MoveFilesSection() {
+  const { data, mutate } = useSWR<{ available: boolean; documentsRemaining?: number; databaseBytes?: number }>(
+    "/api/storage-settings/move-files"
+  );
+  const [progress, setProgress] = useState<string | null>(null);
+  if (!data?.available || !data.documentsRemaining) return null;
+  const total = data.documentsRemaining;
+
+  async function step(body: object) {
+    const res = await fetch("/api/storage-settings/move-files", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(result.error ?? "Moving files failed");
+    return result;
+  }
+
+  async function run() {
+    try {
+      setProgress("Updating image links…");
+      await step({ step: "images" });
+      let remaining = total;
+      while (remaining > 0) {
+        setProgress(`Moving PDFs… ${total - remaining} of ${total}`);
+        const result = await step({ step: "documents" });
+        if (result.moved === 0 && result.failed > 0) throw new Error(`${result.failed} PDF(s) couldn't be uploaded — try again later`);
+        remaining = result.remaining;
+      }
+      setProgress("Freeing the space in the database…");
+      const { databaseBytes } = await step({ step: "compact" });
+      toast.success(`Files moved — the database is now ${(databaseBytes / 1e6).toFixed(0)} MB`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Moving files failed");
+    } finally {
+      setProgress(null);
+      void mutate();
+    }
+  }
+
+  return (
+    <div className="space-y-1.5 border-t pt-3">
+      <Label>Move files to Storage</Label>
+      <p className="text-xs text-muted-foreground">
+        {total} PDF(s) are stored inside the database, which is{" "}
+        {data.databaseBytes ? `${(data.databaseBytes / 1e6).toFixed(0)} MB` : "large"}. Moving them to Storage keeps the
+        database small and fast. Nothing is removed from the database until it&apos;s safely in Storage, so it&apos;s
+        fine to stop and run it again.
+      </p>
+      <Button type="button" variant="outline" size="sm" onClick={run} disabled={progress !== null}>
+        {progress ?? "Move files to Storage"}
+      </Button>
+    </div>
+  );
+}
+
+function BackupsSection() {
+  const fmt = useDateFormatter();
+  const { data, mutate } = useSWR<{ backups: BackupInfo[]; folder: string; kept: number }>("/api/backups");
+  const { data: storage } = useSWR<{ mode: StorageMode }>("/api/storage-settings");
+  const [busy, setBusy] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState<BackupInfo | null>(null);
+  const when = (b: BackupInfo) => {
+    const d = new Date(b.createdAt);
+    return `${fmt.date(d, { weekday: "short", day: "numeric", month: "short" })} ${fmt.time(d)}`;
+  };
+
+  async function backUpNow() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/backups", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error);
+      toast.success(
+        body.backup.blobs.failed > 0
+          ? `Backed up — ${body.backup.blobs.failed} image(s) couldn't be copied`
+          : "Backed up"
+      );
+      void mutate();
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Backup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restore(backup: BackupInfo) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/backups/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: backup.name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error);
+      setConfirmRestore(null);
+      toast.success(
+        storage?.mode === "supabase"
+          ? "Restored into this computer's local database — switch Storage to This computer to use it"
+          : storage?.mode === "sync"
+            ? "Restored — uploading it to the cloud; reloading"
+            : "Restored — reloading"
+      );
+      void mutate();
+      if (storage?.mode !== "supabase") setTimeout(() => window.location.reload(), 800);
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Restore failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const backups = data?.backups ?? [];
+  return (
+    <div className="space-y-3">
+      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+        <Archive className="size-3.5" />
+        Backups
+      </h3>
+      <p className="text-xs text-muted-foreground">
+        Everything — courses, notes, PDFs, images, reviews — is backed up to this computer once a day while the
+        app is running. The newest {data?.kept ?? 14} are kept{data ? ` in ${data.folder}` : ""}.
+      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm">
+          {backups.length > 0 ? `Last backup: ${when(backups[0])}` : "No backups yet"}
+        </span>
+        <Button type="button" variant="outline" size="sm" onClick={backUpNow} disabled={busy}>
+          {busy ? "Working…" : "Back up now"}
+        </Button>
+      </div>
+      {backups.length > 0 && (
+        <ul className="divide-y rounded-lg border text-sm">
+          {backups.slice(0, 5).map((backup) => (
+            <li key={backup.name} className="flex items-center justify-between gap-2 px-3 py-1.5">
+              <span>
+                {when(backup)}
+                {backup.name.includes("before-restore") && (
+                  <span className="text-muted-foreground"> · before a restore</span>
+                )}
+                <span className="text-muted-foreground"> · {(backup.bytes / 1e6).toFixed(0)} MB</span>
+              </span>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmRestore(backup)} disabled={busy}>
+                Restore…
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {confirmRestore && (
+        <Alert variant="destructive">
+          <AlertTitle>Restore the backup from {when(confirmRestore)}?</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>
+              This replaces everything in this computer&apos;s local database with that backup. What&apos;s there now
+              is backed up first, so you can undo it.
+              {storage?.mode === "supabase" &&
+                " You're using Supabase, which isn't touched: switch Storage to This computer to see the restored data, and use Migrate (it asks before overwriting) to put it back in the cloud."}
+              {storage?.mode === "sync" && (
+                <>
+                  {" "}
+                  <strong>Sync is on, so this restores everywhere:</strong> the cloud and your other computers go back to
+                  this backup too, and anything added or changed since it was made is removed there as well.
+                </>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="destructive" size="sm" onClick={() => restore(confirmRestore)} disabled={busy}>
+                Restore
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setConfirmRestore(null)}>
+                Cancel
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 function StorageSection() {
+  const { mutate: globalMutate } = useSWRConfig();
   const [settings, setSettings] = useState<StorageSettingsState | null>(null);
   const [mode, setMode] = useState<StorageMode>("local");
   const [connectionString, setConnectionString] = useState("");
@@ -867,6 +1063,9 @@ function StorageSection() {
   const [storageServiceKey, setStorageServiceKey] = useState("");
   const [storageBucket, setStorageBucket] = useState("");
   const [migrating, setMigrating] = useState(false);
+  // Set when the target database already holds data — migrating would
+  // overwrite it, so that takes a second, explicit click.
+  const [overwriteWarning, setOverwriteWarning] = useState<string | null>(null);
   const [migratingImages, setMigratingImages] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -884,19 +1083,24 @@ function StorageSection() {
       });
   }, []);
 
-  async function handleMigrate() {
+  async function handleMigrate(overwrite = false) {
     if (!connectionString.trim()) {
       toast.error("Paste a connection string first");
       return;
     }
     setMigrating(true);
+    setOverwriteWarning(null);
     try {
       const res = await fetch("/api/storage-settings/migrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionString: connectionString.trim() }),
+        body: JSON.stringify({ connectionString: connectionString.trim(), overwrite }),
       });
       const body = await res.json();
+      if (res.status === 409 && body.needsOverwrite) {
+        setOverwriteWarning(body.error);
+        return;
+      }
       if (!res.ok) {
         toast.error(body.error ?? "Migration failed");
         return;
@@ -961,6 +1165,10 @@ function StorageSection() {
         toast.error(body.error ?? "Couldn't save storage settings");
         return;
       }
+      if (!body.ok && mode === "sync") {
+        toast.error(body.error ?? "Couldn't turn on sync");
+        return;
+      }
       if (!body.ok) {
         setSettings({
           mode,
@@ -975,7 +1183,7 @@ function StorageSection() {
       }
       setSettings({
         mode,
-        hasConnectionString: mode === "supabase" && !!connectionString.trim(),
+        hasConnectionString: mode === "sync" ? settings?.hasConnectionString ?? true : mode === "supabase" && !!connectionString.trim(),
         connectionError: null,
         storageUrl,
         hasStorageServiceKey: settings?.hasStorageServiceKey || !!storageServiceKey.trim(),
@@ -986,7 +1194,15 @@ function StorageSection() {
       // /api/storage-settings's "leave blank to keep the existing key"
       // handling), so nothing is lost by clearing the input.
       setStorageServiceKey("");
-      toast.success(mode === "supabase" ? "Now syncing live with Supabase" : "Switched to local");
+      toast.success(
+        mode === "sync"
+          ? "Sync is on — this computer now works offline too"
+          : mode === "supabase"
+            ? "Now syncing live with Supabase"
+            : "Switched to local"
+      );
+      if (body.error) toast.warning(body.error);
+      void globalMutate("/api/sync");
     } catch {
       toast.error("Couldn't save storage settings");
     } finally {
@@ -1008,6 +1224,8 @@ function StorageSection() {
         Local keeps everything on this device. Supabase syncs your courses and notes across
         devices — bring your own free project.
       </p>
+
+      {settings.mode === "sync" && <SyncPanel />}
 
       {hasError && (
         <Alert variant="destructive">
@@ -1031,6 +1249,24 @@ function StorageSection() {
             ))}
           </SelectContent>
         </Select>
+        {mode === "sync" && settings.mode === "local" && (
+          <p className="text-xs text-muted-foreground">
+            Connect Supabase first (choose Supabase above and save), then turn on sync.
+          </p>
+        )}
+        {mode === "sync" && settings.mode === "supabase" && (
+          <p className="text-xs text-muted-foreground">
+            This computer gets its own copy of everything and works on it — instant, and offline too. Changes
+            upload in the background and the other computer&apos;s changes come down. Turning it on downloads a full
+            copy first; your current local data is backed up before that.
+          </p>
+        )}
+        {mode === "local" && settings.mode === "supabase" && (
+          <p className="text-xs text-muted-foreground">
+            The local copy on this computer isn&apos;t kept in sync with Supabase — switching back shows your data
+            as it was when you moved to the cloud, without anything you&apos;ve done since.
+          </p>
+        )}
       </div>
 
       {mode === "supabase" && (
@@ -1047,9 +1283,28 @@ function StorageSection() {
             project. Migrate your local data below first, or you&apos;ll start from an empty
             database.
           </p>
-          <Button type="button" variant="outline" size="sm" onClick={handleMigrate} disabled={migrating}>
+          <Button type="button" variant="outline" size="sm" onClick={() => handleMigrate()} disabled={migrating}>
             {migrating ? "Migrating…" : "Migrate my local data to Supabase"}
           </Button>
+          {overwriteWarning && (
+            <Alert variant="destructive">
+              <AlertTitle>This would overwrite your cloud data</AlertTitle>
+              <AlertDescription className="space-y-2">
+                <p>
+                  {overwriteWarning} Anything changed in the cloud since then — notes, reviews, new items — would
+                  be rolled back. Only do this from the computer whose data you want to keep.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="destructive" size="sm" onClick={() => handleMigrate(true)} disabled={migrating}>
+                    Overwrite cloud data
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setOverwriteWarning(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
           <div className="space-y-1.5 border-t pt-3">
             <Label className="flex items-center gap-1.5">
@@ -1195,6 +1450,58 @@ function NavBarColorSetting() {
   );
 }
 
+// How dates and times are shown everywhere (lib/dateFormat.ts). Applied
+// straight away through the settings cache, rolled back if saving fails.
+function DateFormatSetting() {
+  const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
+  const [saving, setSaving] = useState(false);
+  if (!settings) return null;
+
+  async function change(next: DateFormat) {
+    if (!settings) return;
+    const previous = settings.dateFormat;
+    mutate({ ...settings, dateFormat: next }, { revalidate: false });
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateFormat: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.error("Couldn't save the date format");
+      mutate((prev) => (prev ? { ...prev, dateFormat: previous } : prev), { revalidate: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="flex items-center gap-1.5">
+        Date &amp; time format
+        <HelpTooltip>
+          How dates and times are written across the app. Words like month names stay in English;
+          US also starts weeks on Sunday, the others on Monday.
+        </HelpTooltip>
+      </Label>
+      <Select value={settings.dateFormat} onValueChange={(v) => isDateFormat(v) && change(v)} disabled={saving}>
+        <SelectTrigger className="w-full">
+          <SelectValue>{(v: string) => (isDateFormat(v) ? DATE_FORMAT_LABELS[v] : v)}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {DATE_FORMATS.map((format) => (
+            <SelectItem key={format} value={format}>
+              {DATE_FORMAT_LABELS[format]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme } = useAppTheme();
 
@@ -1227,6 +1534,7 @@ function AppearanceSection() {
         <Label>Heading font</Label>
         <FontPicker />
       </div>
+      <DateFormatSetting />
       <NavBarColorSetting />
     </div>
   );
@@ -2013,6 +2321,9 @@ export default function SettingsDialog() {
           </TabsPanel>
           <TabsPanel value="storage">
             <StorageSection />
+            <MoveFilesSection />
+            <Separator />
+            <BackupsSection />
           </TabsPanel>
           <TabsPanel value="appearance">
             <AppearanceSection />

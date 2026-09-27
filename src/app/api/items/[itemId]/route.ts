@@ -10,6 +10,7 @@ import {
   InvalidDestinationFolderError,
   type GenerationMode,
 } from "@/lib/models";
+import { removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
 import { deckDueCardIndices } from "@/lib/spacedRepetition";
 import { cardDueRowsForItem, reconcileReviewItemsAfterRemoval } from "@/lib/review/store";
 import { ensureFsrsMigrated } from "@/lib/review/legacyMigration";
@@ -144,7 +145,9 @@ export async function DELETE(_request: Request, { params }: Params) {
     const { itemId } = await params;
     const id = parseId(itemId);
     if (id === null) return new Response(null, { status: 204 });
+    const item = await getGeneratedItem(id);
     await deleteGeneratedItem(id);
+    if (item) await removeUnreferencedBlobs([item.content_json]);
     return new Response(null, { status: 204 });
   } catch (err) {
     console.error("Deleting item failed:", err);

@@ -1,5 +1,4 @@
-import { blobKeyFromUrl } from "../blobStorage";
-import { readLocalBlob } from "../blobStorage/local";
+import { blobKeyFromUrl, readBlob } from "../blobStorage";
 import type { GenerateTextImage } from "../aiBackends/types";
 
 // Photos of handwritten answers, uploaded through /api/blobs as kind
@@ -31,7 +30,7 @@ export async function loadAnswerImage(url: string): Promise<GenerateTextImage | 
   if (data) return { mimeType: data[1], base64: data[2] };
   const key = blobKeyFromUrl(url) as string;
   if (url.startsWith("/api/blobs/")) {
-    const bytes = await readLocalBlob(key);
+    const bytes = await readBlob(key);
     return bytes ? { mimeType: mimeFromKey(key), base64: bytes.toString("base64") } : null;
   }
   if (!SUPABASE_PUBLIC.test(url)) return null;

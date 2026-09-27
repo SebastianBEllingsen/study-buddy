@@ -1,5 +1,6 @@
 import type { StorageConfig } from "@/lib/db/config";
 import type { BlobStore } from "./types";
+import { writeLocalBlobCache } from "./local";
 
 type SupabaseConfig = Extract<StorageConfig, { mode: "supabase" }>;
 
@@ -20,6 +21,21 @@ export function createSupabaseBlobStore(config: SupabaseConfig): BlobStore | nul
   };
 
   return {
+    kind: "supabase",
+
+    // With the service key, so it works for private buckets as well.
+    async get(key) {
+      try {
+        const res = await fetch(`${base}/${storageBucket}/${key}`, {
+          headers: authHeaders,
+          signal: AbortSignal.timeout(60_000),
+        });
+        return res.ok ? Buffer.from(await res.arrayBuffer()) : null;
+      } catch {
+        return null;
+      }
+    },
+
     async put(key, bytes, contentType) {
       try {
         const res = await fetch(`${base}/${storageBucket}/${key}`, {
@@ -28,9 +44,13 @@ export function createSupabaseBlobStore(config: SupabaseConfig): BlobStore | nul
           body: new Uint8Array(bytes),
         });
         if (!res.ok) return null;
-        // The bucket is public (no signed URLs) — this path is deterministic
-        // and permanent, no follow-up API call needed to resolve it.
-        return { url: `${base}/public/${storageBucket}/${key}` };
+        // Kept here too (this computer's cache), and addressed through this
+        // app's own /api/blobs/ route rather than the bucket's public URL:
+        // the same URL works on every computer — each serves its cached
+        // copy, downloading it once if needed — and keeps working offline
+        // and if the bucket is made private.
+        await writeLocalBlobCache(key, bytes).catch(() => {});
+        return { url: `/api/blobs/${key}` };
       } catch {
         return null;
       }

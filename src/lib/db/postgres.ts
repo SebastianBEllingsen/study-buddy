@@ -10,7 +10,7 @@ import { nowUtc } from "../time";
 // project gets its schema created automatically on first connect, the same
 // way schema.sql bootstraps a fresh local SQLite file. Safe to call every
 // time: already-applied migrations are recorded in the target DB and skipped.
-export async function createPostgresDb(connectionString: string) {
+export async function createPostgresDb(connectionString: string, options: { maxConnections?: number } = {}) {
   // Defense in depth alongside sqlite.ts's own import-time guard: this is
   // the one place a real network connection gets opened using whatever
   // credentials are in data/storage-config.json (a real Supabase project's,
@@ -25,9 +25,11 @@ export async function createPostgresDb(connectionString: string) {
         "whatever credentials are in data/storage-config.json. Mock ./postgres or ./db instead."
     );
   }
-  const client = postgres(connectionString, { max: 10 });
+  // idle_timeout: connections nobody has used for a while are closed, so
+  // the Supabase pooler never fills up with forgotten ones.
+  const client = postgres(connectionString, { max: options.maxConnections ?? 10, idle_timeout: 60 });
   const db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder: path.join(process.cwd(), "drizzle", "pg") });
+  await runPgMigrations(db);
   // schema.sql seeds this same row for SQLite (`INSERT OR IGNORE INTO
   // app_settings ...`) at database-creation time — Drizzle-Kit's migrations
   // only create the table shape, not this singleton row, so a Postgres
@@ -46,6 +48,13 @@ export async function createPostgresDb(connectionString: string) {
   // close the connection pool cleanly when switching away from Postgres
   // (see db/index.ts's reconnect()).
   return { db, client };
+}
+
+// Applies any migrations not yet in the database — already-applied ones
+// are skipped, so this is cheap to repeat (db/index.ts does after a dev
+// hot-reload that reuses an open pool, so a new migration still lands).
+export async function runPgMigrations(db: ReturnType<typeof drizzle<typeof schema>>): Promise<void> {
+  await migrate(db, { migrationsFolder: path.join(process.cwd(), "drizzle", "pg") });
 }
 
 export type PostgresDb = Awaited<ReturnType<typeof createPostgresDb>>["db"];

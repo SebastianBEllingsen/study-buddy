@@ -1,4 +1,6 @@
 "use client";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 
 import { useRef, useState } from "react";
 import Link from "next/link";
@@ -35,6 +37,7 @@ export function CourseCanvasSection({
   canvases: CanvasSummary[];
   onChanged: () => void;
 }) {
+  const fmt = useDateFormatter();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -209,7 +212,7 @@ export function CourseCanvasSection({
                   {canvas.title}
                 </Link>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {new Date(canvas.updated_at.replace(" ", "T") + "Z").toLocaleDateString()}
+                  {fmt.numericDate(fromUtcTimestamp(canvas.updated_at))}
                 </span>
               </div>
               <RowActionsMenu

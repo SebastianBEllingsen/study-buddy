@@ -9,6 +9,7 @@ import type { QuizContent, ShortAnswerQuestion } from "../types";
 import { recordQuizAnswers } from "../review/answers";
 import { listMistakes, setMisconceptions } from "../review/mistakes";
 import { loadAnswerImage } from "./answerImages";
+import { markGrading, releaseGrading } from "./gradingJobs";
 import { getAttempt, getExamProfile, getMockExam, saveResults, setAttemptStatus, setPracticeItem } from "./store";
 import type { MockExam, MockExamTask, TaskAnswer, TaskResult } from "./types";
 import { normalizeTaskGrading } from "./validate";
@@ -122,7 +123,18 @@ export async function recordExamForReview(exam: MockExam, answers: TaskAnswer[],
   await setMisconceptions(labels);
 }
 
+// Expects the attempt to be claimed (claimForGrading); marks it as running
+// in this process meanwhile (see gradingJobs.ts).
 export async function gradeAttempt(attemptId: number): Promise<void> {
+  markGrading(attemptId);
+  try {
+    await gradeClaimedAttempt(attemptId);
+  } finally {
+    releaseGrading(attemptId);
+  }
+}
+
+async function gradeClaimedAttempt(attemptId: number): Promise<void> {
   const attempt = await getAttempt(attemptId);
   if (!attempt) return;
   const exam = await getMockExam(attempt.mock_exam_id);

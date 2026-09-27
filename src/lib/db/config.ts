@@ -2,19 +2,40 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type StorageConfig =
-  | { mode: "local" }
   | {
+      mode: "local";
+      // The Supabase details from before switching to local, so switching
+      // back doesn't mean pasting them in again.
+      remembered?: SupabaseDetails;
+    }
+  | ({
       mode: "supabase";
-      connectionString: string;
-      // Optional: where uploaded images go when this backend is active (see
-      // src/lib/blobStorage). Left unset, blob uploads fall back to inlining
-      // a base64 data URL straight into the DB column — today's behavior —
-      // so an existing config saved before this feature existed keeps
-      // working unchanged.
-      storageUrl?: string;
-      storageServiceKey?: string;
-      storageBucket?: string;
-    };
+      // This computer works on its own local database and syncs it with
+      // the Supabase one in the background (lib/sync/) — so it works
+      // offline. Per computer: data/ isn't shared between computers.
+      sync?: boolean;
+    } & SupabaseDetails);
+
+export interface SupabaseDetails {
+  connectionString: string;
+  // Optional: where uploaded images go when this backend is active (see
+  // src/lib/blobStorage). Left unset, blob uploads fall back to inlining
+  // a base64 data URL straight into the DB column — today's behavior —
+  // so an existing config saved before this feature existed keeps
+  // working unchanged.
+  storageUrl?: string;
+  storageServiceKey?: string;
+  storageBucket?: string;
+}
+
+// The Supabase details in a config, if it has any (current or remembered).
+export function supabaseDetails(config: StorageConfig): SupabaseDetails | null {
+  if (config.mode === "supabase") {
+    const { connectionString, storageUrl, storageServiceKey, storageBucket } = config;
+    return { connectionString, storageUrl, storageServiceKey, storageBucket };
+  }
+  return config.remembered ?? null;
+}
 
 const configPath = path.join(process.cwd(), "data", "storage-config.json");
 
@@ -38,6 +59,7 @@ export function resolveStorageConfig(): StorageConfig {
     if (parsed.mode === "supabase" && parsed.connectionString) {
       return parsed;
     }
+    if (parsed.mode === "local") return parsed;
   } catch {
     // No config file yet, or it's malformed — fall back to local.
   }

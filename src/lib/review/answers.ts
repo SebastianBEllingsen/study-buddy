@@ -1,13 +1,13 @@
 import { getAppSettings, logFlashcardReview, type FlashcardResult, type GeneratedItem } from "../models";
-import { fromUtcText, Rating, ratingFromAnswer, ratingFromFlashcardResult } from "../fsrs";
+import { Rating, ratingFromAnswer, ratingFromFlashcardResult } from "../fsrs";
 import { answerText, verdictOf, type AttemptResultEntry, type QuizAnswer } from "../quizGrading";
 import { cleanConceptName, conceptKey } from "../conceptName";
 import type { Flashcard, QuizQuestion } from "../types";
 import { findOrCreateConcepts } from "./concepts";
 import { autoResolveMistakes, logMistake } from "./mistakes";
 import { ensureFsrsMigrated } from "./legacyMigration";
-import { getReviewItem, recordReview } from "./store";
-import type { Confidence, ReviewItemKind, ReviewSource } from "./types";
+import { recordReviewUnlessRecent } from "./store";
+import type { Confidence, ReviewSource } from "./types";
 
 // Turns answers — a flashcard self-rating, a graded quiz question — into
 // FSRS reviews, mistake-log entries and mistake auto-resolution. The one
@@ -34,13 +34,6 @@ function conceptIdOf(ids: Map<string, number>, name: string | undefined): number
   return clean ? (ids.get(conceptKey(clean)) ?? null) : null;
 }
 
-async function answeredRecently(generatedItemId: number, kind: ReviewItemKind, index: number, now: Date) {
-  const existing = await getReviewItem(generatedItemId, kind, index);
-  return (
-    !!existing?.last_reviewed_at && now.getTime() - fromUtcText(existing.last_reviewed_at).getTime() < SAME_SESSION_MS
-  );
-}
-
 export interface RecordedAnswer {
   index: number;
   // false when the answer came too soon after the last one to count
@@ -58,20 +51,22 @@ export async function recordCardAnswer(input: {
   now?: Date;
 }): Promise<RecordedAnswer> {
   const now = input.now ?? new Date();
+  // The rest are independent, so they run together — each is a network
+  // round trip on Postgres. The flashcard_reviews log still feeds the
+  // activity heatmap, streak and study plan mastery, whatever the schedule
+  // does.
+  // First: a one-time migration would otherwise also replay this answer's
+  // log row. Instant after the first call.
   await ensureFsrsMigrated();
-  // The flashcard_reviews log still feeds the activity heatmap, streak and
-  // study plan mastery, whatever the schedule does.
-  await logFlashcardReview({ generatedItemId: input.item.id, cardIndex: input.cardIndex, result: input.result });
-  if (await answeredRecently(input.item.id, "card", input.cardIndex, now)) {
-    return { index: input.cardIndex, scheduled: false, dueAt: null };
-  }
-
-  const { reviewRetention } = await getAppSettings();
-  const ids = await conceptIds(input.item, [input.card.concept]);
+  const [, { reviewRetention }, ids] = await Promise.all([
+    logFlashcardReview({ generatedItemId: input.item.id, cardIndex: input.cardIndex, result: input.result }),
+    getAppSettings(),
+    conceptIds(input.item, [input.card.concept]),
+  ]);
   const conceptId = conceptIdOf(ids, input.card.concept);
   const rating = ratingFromFlashcardResult(input.result);
   const correct = rating !== Rating.Again;
-  const row = await recordReview({
+  const row = await recordReviewUnlessRecent({
     generatedItemId: input.item.id,
     kind: "card",
     itemIndex: input.cardIndex,
@@ -82,7 +77,8 @@ export async function recordCardAnswer(input: {
     conceptId,
     retention: reviewRetention,
     now,
-  });
+  }, SAME_SESSION_MS);
+  if (!row) return { index: input.cardIndex, scheduled: false, dueAt: null };
   if (correct) {
     await autoResolveMistakes(row.id);
   } else {
@@ -108,23 +104,25 @@ export async function recordQuizAnswers(input: {
   now?: Date;
 }): Promise<RecordedAnswer[]> {
   const now = input.now ?? new Date();
-  const { reviewRetention } = await getAppSettings();
-  const ids = await conceptIds(
-    input.item,
-    input.entries.map((e) => e.question.concept)
-  );
+  const [{ reviewRetention }, ids] = await Promise.all([
+    getAppSettings(),
+    conceptIds(
+      input.item,
+      input.entries.map((e) => e.question.concept)
+    ),
+  ]);
   const recorded: RecordedAnswer[] = [];
   for (const { question, answer, confidence, result } of input.entries) {
     const index = result.index;
     // A flagged question is held out of review: its answer isn't
     // scheduled or logged as a mistake until the flag is resolved.
-    if (question.flag || (await answeredRecently(input.item.id, "question", index, now))) {
+    if (question.flag) {
       recorded.push({ index, scheduled: false, dueAt: null });
       continue;
     }
     const verdict = verdictOf(result);
     const conceptId = conceptIdOf(ids, question.concept);
-    const row = await recordReview({
+    const row = await recordReviewUnlessRecent({
       generatedItemId: input.item.id,
       kind: "question",
       itemIndex: index,
@@ -135,7 +133,11 @@ export async function recordQuizAnswers(input: {
       conceptId,
       retention: reviewRetention,
       now,
-    });
+    }, SAME_SESSION_MS);
+    if (!row) {
+      recorded.push({ index, scheduled: false, dueAt: null });
+      continue;
+    }
     if (verdict === "correct") {
       await autoResolveMistakes(row.id);
     } else {

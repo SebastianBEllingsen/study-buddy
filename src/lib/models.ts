@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, max, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, max, or, sql, type AnyColumn } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import Fuse from "fuse.js";
 import {
@@ -16,6 +16,8 @@ import {
   folders,
   generated_items,
   generation_notifications,
+  mock_exam_attempts,
+  mock_exams,
   notes,
   quiz_attempts,
   quiz_generation_presets,
@@ -26,7 +28,10 @@ import {
   uploaded_images,
 } from "./db";
 import { appendBelow } from "./dashboardGrid";
-import { nowUtc } from "./time";
+import { localDayOfUtc, nowUtc } from "./time";
+import { normalizeDateFormat, type DateFormat } from "./dateFormat";
+import { forgetItemContent, itemContents } from "./itemContentCache";
+import { blobKeyFromUrl, readBlob } from "./blobStorage";
 import { normalizeLanguage } from "./languages";
 import { clampRetention, DEFAULT_RETENTION } from "./fsrs";
 import { subtreeFolderIds, wouldCreateCycle } from "./folderTree";
@@ -111,6 +116,9 @@ export interface DocumentRow {
   position: number;
   filename: string;
   file_path: string;
+  // Where the original file is kept in blob storage, when it is (only
+  // loaded by getDocument; list queries leave it out).
+  file_url?: string | null;
   extracted_text: string | null;
   page_count: number | null;
   char_count: number | null;
@@ -210,6 +218,7 @@ interface SettingsRow {
   ai_enabled: boolean;
   cli_trusted_mode_enabled: boolean;
   preferred_language: string | null;
+  date_format: string | null;
   review_retention: number | null;
   new_cards_per_day: number | null;
 }
@@ -256,6 +265,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       ai_enabled: app_settings.ai_enabled,
       cli_trusted_mode_enabled: app_settings.cli_trusted_mode_enabled,
       preferred_language: app_settings.preferred_language,
+      date_format: app_settings.date_format,
       review_retention: app_settings.review_retention,
       new_cards_per_day: app_settings.new_cards_per_day,
     })
@@ -496,6 +506,8 @@ export interface AppSettings {
   // study plans are written in, and which language learning resources are
   // preferred in (falling back to English where little exists).
   preferredLanguage: string;
+  // How dates and times are shown — see lib/dateFormat.ts.
+  dateFormat: DateFormat;
   // FSRS target retention — the recall probability reviews are scheduled
   // to keep each card/question at (lib/fsrs.ts). Higher means more reviews.
   reviewRetention: number;
@@ -546,6 +558,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     modelBadgeDetail: row?.model_badge_detail === "minimal" ? "minimal" : "detailed",
     cliTrustedModeEnabled: row?.cli_trusted_mode_enabled ?? false,
     preferredLanguage: normalizeLanguage(row?.preferred_language),
+    dateFormat: normalizeDateFormat(row?.date_format),
     reviewRetention: clampRetention(row?.review_retention ?? DEFAULT_RETENTION),
     newCardsPerDay: clampNewCardsPerDay(row?.new_cards_per_day ?? DEFAULT_NEW_CARDS_PER_DAY),
   };
@@ -661,6 +674,10 @@ export async function setPreferredLanguage(code: string): Promise<void> {
     .update(app_settings)
     .set({ preferred_language: normalizeLanguage(code), updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
+}
+
+export async function setDateFormat(format: DateFormat): Promise<void> {
+  await db.update(app_settings).set({ date_format: format, updated_at: nowUtc() }).where(eq(app_settings.id, 1));
 }
 
 export const DEFAULT_NEW_CARDS_PER_DAY = 20;
@@ -1079,6 +1096,44 @@ export async function isImageUrlReferenced(url: string): Promise<boolean> {
     settings.dashboardBackgroundImage === url ||
     settings.dashboardLinks.some((link) => link.icon === `image:${url}`)
   );
+}
+
+// Wider than isImageUrlReferenced: also whether any flashcard/quiz content
+// (imported Anki media), note or mock exam answer still mentions the URL —
+// checked before removing the files of something deleted (see
+// removeUnreferencedBlobs), since a media file can be shared, e.g. by decks
+// from one Anki package.
+export async function isBlobUrlReferenced(url: string): Promise<boolean> {
+  const pattern = `%${url.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const mentions = (column: AnyColumn) => sql`${column} like ${pattern} escape '\\'`;
+  const [item, note, attempt, doc, image] = await Promise.all([
+    db.select({ id: generated_items.id }).from(generated_items).where(mentions(generated_items.content_json)).limit(1),
+    db.select({ id: notes.id }).from(notes).where(mentions(notes.markdown)).limit(1),
+    db
+      .select({ id: mock_exam_attempts.id })
+      .from(mock_exam_attempts)
+      .where(mentions(mock_exam_attempts.answers_json))
+      .limit(1),
+    db.select({ id: documents.id }).from(documents).where(eq(documents.file_url, url)).limit(1),
+    isImageUrlReferenced(url),
+  ]);
+  return image || item.length > 0 || note.length > 0 || attempt.length > 0 || doc.length > 0;
+}
+
+// The stored text that can mention a course's media files (its decks'
+// content, its mock exam answers, its documents' files) — read before the course is deleted,
+// so the files can be cleaned up after (see removeUnreferencedBlobs).
+export async function listCourseMediaText(courseId: number): Promise<string[]> {
+  const [items, attempts, docs] = await Promise.all([
+    db.select({ text: generated_items.content_json }).from(generated_items).where(eq(generated_items.course_id, courseId)),
+    db
+      .select({ text: mock_exam_attempts.answers_json })
+      .from(mock_exam_attempts)
+      .innerJoin(mock_exams, eq(mock_exams.id, mock_exam_attempts.mock_exam_id))
+      .where(eq(mock_exams.course_id, courseId)),
+    db.select({ text: documents.file_url }).from(documents).where(eq(documents.course_id, courseId)),
+  ]);
+  return [...items, ...attempts, ...docs].map((r) => r.text ?? "");
 }
 
 // True if any note embeds this uploaded_images row via a
@@ -1725,6 +1780,13 @@ export async function listCourseSummaries(): Promise<CourseSummary[]> {
     .orderBy(asc(courses.position), desc(courses.created_at));
 }
 
+// Just ids and names, for callers that only label things by course — the
+// full row carries the course's image columns.
+export async function listCourseNames(courseId: number | null = null): Promise<{ id: number; name: string }[]> {
+  const query = db.select({ id: courses.id, name: courses.name }).from(courses);
+  return courseId === null ? query : query.where(eq(courses.id, courseId));
+}
+
 export async function listCourses(): Promise<Course[]> {
   return db.select().from(courses).orderBy(asc(courses.position), desc(courses.created_at));
 }
@@ -1931,6 +1993,8 @@ export async function createDocument(params: {
   // null for pasted-text documents, which have no underlying file — see
   // POST .../documents/paste/route.ts.
   fileBase64: string | null;
+  // Where the file was put in blob storage instead of fileBase64.
+  fileUrl?: string | null;
 }): Promise<DocumentRow> {
   // Same invariant moveDocument enforces on the move path — an explicit
   // folderId here (from either the file-upload or paste-text route) was
@@ -1958,6 +2022,7 @@ export async function createDocument(params: {
         filename: params.filename,
         file_path: params.filePath,
         file_base64: params.fileBase64,
+        file_url: params.fileUrl ?? null,
         status: "pending",
         created_at: nowUtc(),
       })
@@ -1976,12 +2041,13 @@ export async function getDocument(id: number): Promise<DocumentRow | undefined> 
 // it's fetched narrowly on demand rather than as part of any list query.
 export async function getDocumentFile(
   id: number
-): Promise<{ filename: string; file_path: string; file_base64: string | null } | undefined> {
+): Promise<{ filename: string; file_path: string; file_base64: string | null; file_url: string | null } | undefined> {
   const rows = await db
     .select({
       filename: documents.filename,
       file_path: documents.file_path,
       file_base64: documents.file_base64,
+      file_url: documents.file_url,
     })
     .from(documents)
     .where(eq(documents.id, id))
@@ -1990,18 +2056,25 @@ export async function getDocumentFile(
 }
 
 // Reads a document's original bytes: the local on-disk copy if this is the
-// device it was uploaded from (fast path, works offline), else the synced
-// file_base64 copy from the database. Neither present -> null. Shared by the
+// device it was uploaded from (fast path, works offline), else the file in
+// blob storage (this computer's cached copy, or downloaded once), else the
+// older in-database file_base64 copy. None present -> null. Shared by the
 // document-viewing route and aiBackends/cliWorkspace.ts (materializing a
 // trusted-CLI workspace needs the same fallback).
 export async function getDocumentBytes(doc: {
   file_path: string;
   file_base64: string | null;
+  file_url?: string | null;
 }): Promise<Buffer | null> {
   try {
     return await fs.readFile(doc.file_path);
   } catch {
     // Not on this device (ENOENT) — fall through to the synced copy.
+  }
+  const key = doc.file_url ? blobKeyFromUrl(doc.file_url) : null;
+  if (key) {
+    const bytes = await readBlob(key);
+    if (bytes) return bytes;
   }
   if (doc.file_base64) {
     return Buffer.from(doc.file_base64, "base64");
@@ -2016,6 +2089,7 @@ export interface DocumentWithBytes {
   filename: string;
   file_path: string;
   file_base64: string | null;
+  file_url: string | null;
   status: DocumentStatus;
 }
 
@@ -2034,6 +2108,7 @@ export async function getDocumentsByIds(ids: number[]): Promise<DocumentWithByte
       filename: documents.filename,
       file_path: documents.file_path,
       file_base64: documents.file_base64,
+      file_url: documents.file_url,
       status: documents.status,
     })
     .from(documents)
@@ -2296,6 +2371,7 @@ export async function updateGeneratedItemContent(params: {
     })
     .where(eq(generated_items.id, params.id))
     .returning();
+  forgetItemContent(params.id);
   return item as GeneratedItem;
 }
 
@@ -2689,7 +2765,16 @@ async function loadSearchCorpus(courseId?: number): Promise<SearchCorpus> {
   }
 
   const itemsBase = db
-    .select()
+    .select({
+      generated_items: {
+        id: generated_items.id,
+        title: generated_items.title,
+        mode: generated_items.mode,
+        course_id: generated_items.course_id,
+        content_json: generated_items.content_json,
+      },
+      courses: { name: courses.name },
+    })
     .from(generated_items)
     .innerJoin(courses, eq(courses.id, generated_items.course_id));
   const documentsBase = db
@@ -2878,12 +2963,12 @@ export async function listStudyActivity(): Promise<StudyActivity> {
   const counts: Record<string, number> = {};
   for (const row of quizRows) {
     if (!row.completed_at) continue;
-    const day = row.completed_at.slice(0, 10);
+    const day = localDayOfUtc(row.completed_at);
     dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
   }
   for (const row of [...reviewRows, ...questionRows]) {
-    const day = row.reviewed_at.slice(0, 10);
+    const day = localDayOfUtc(row.reviewed_at);
     dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
   }
@@ -2905,11 +2990,29 @@ export interface DueFlashcardItem {
 // deckDueCardIndices the same way the single-item route does.
 export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
   const [rows, schedule] = await Promise.all([
+    // Only the columns used below — a bare select() here would also pull
+    // every course's image columns once per deck. Content comes from
+    // itemContents(), which only downloads decks that changed.
     db
-      .select()
+      .select({
+        generated_items: {
+          id: generated_items.id,
+          title: generated_items.title,
+          course_id: generated_items.course_id,
+          updated_at: generated_items.updated_at,
+        },
+        courses: { name: courses.name },
+      })
       .from(generated_items)
       .innerJoin(courses, eq(courses.id, generated_items.course_id))
-      .where(eq(generated_items.mode, "flashcards")),
+      .where(eq(generated_items.mode, "flashcards"))
+      .then(async (rows) => {
+        const contents = await itemContents(rows.map((r) => r.generated_items));
+        return rows.map((r) => ({
+          ...r,
+          generated_items: { ...r.generated_items, content_json: contents.get(r.generated_items.id) ?? "" },
+        }));
+      }),
     // Every reviewed card, not just the ones already due: a card with no
     // row counts as never reviewed and therefore due, so dropping the
     // not-yet-due rows here would make every card reviewed ahead of time
@@ -2986,7 +3089,16 @@ export async function dismissGenerationNotification(itemId: number): Promise<voi
 // the home page so a course's badge dot lights up for either reason.
 export async function listGenerationNotifications(): Promise<GenerationNotification[]> {
   const rows = await db
-    .select()
+    .select({
+      generated_items: {
+        id: generated_items.id,
+        title: generated_items.title,
+        mode: generated_items.mode,
+        course_id: generated_items.course_id,
+      },
+      courses: { name: courses.name },
+      generation_notifications: { created_at: generation_notifications.created_at },
+    })
     .from(generation_notifications)
     .innerJoin(generated_items, eq(generated_items.id, generation_notifications.generated_item_id))
     .innerJoin(courses, eq(courses.id, generated_items.course_id))

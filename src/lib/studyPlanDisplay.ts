@@ -1,3 +1,4 @@
+import type { DateFormatter } from "./dateFormat";
 import type { LinkStatus, ResourceKind, StudyPlan, StudyPlanChapter } from "./studyPlan/types";
 import { groupStages } from "./studyPlan/roadmap";
 import type { ScheduleWarning } from "./studyPlan/schedule";
@@ -146,8 +147,13 @@ export function groupSessionsByWeek<T extends { date: string }>(sessions: T[], t
   }));
 }
 
-export function formatDay(date: string, options: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" }): string {
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { ...options, timeZone: "UTC" });
+// A "YYYY-MM-DD" day in the chosen date format (lib/dateFormat.ts).
+export function formatDay(
+  fmt: DateFormatter,
+  date: string,
+  options: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" }
+): string {
+  return fmt.date(new Date(`${date}T00:00:00Z`), { ...options, timeZone: "UTC" });
 }
 
 export function formatMinutes(minutes: number): string {

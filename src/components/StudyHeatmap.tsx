@@ -1,5 +1,6 @@
 "use client";
 
+import { useDateFormatter } from "@/components/DateFormatProvider";
 import { useEffect, useRef, useState } from "react";
 import { HEATMAP_GAP, fitHeatmap, type HeatmapFit } from "@/lib/heatmapFit";
 
@@ -17,6 +18,12 @@ function levelFor(count: number): string {
   if (count <= 3) return "bg-amber/50";
   if (count <= 6) return "bg-amber/75";
   return "bg-amber";
+}
+
+// "YYYY-MM-DD" as a local-midnight Date, for display.
+function localDateOfKey(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
 function toDateKey(d: Date): string {
@@ -66,27 +73,29 @@ function HeatmapGrid({
   cell: number;
   showLabel: boolean;
 }) {
+  const fmt = useDateFormatter();
   // Always renders, even with zero activity anywhere — an all-empty grid is
   // itself the "nothing yet" state (same idea as GitHub's own contribution
   // graph), and the home page now places this widget deliberately rather
   // than showing it only opportunistically, so it shouldn't disappear.
 
-  // Everything here runs in UTC (getUTCDay/setUTCDate/setUTCHours), matching
-  // streak.ts and every stored timestamp in this app (see lib/time.ts) —
-  // mixing in local Date methods here previously left the grid position
-  // (computed locally) and the toDateKey() label/lookup (UTC, via
-  // toISOString) disagreeing by a day outside UTC, so "today" showed up
-  // correctly placed but labeled/counted as if it were the day before.
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  // Start on the Sunday of the week (weeksCount - 1) weeks before today's,
+  // Activity is keyed by local calendar day (see listStudyActivity), so the
+  // grid starts from today's local date — then all the arithmetic below
+  // runs in UTC on that date-only value (getUTCDay/setUTCDate), where no
+  // timezone can shift it. Mixing local and UTC methods here previously
+  // left the grid position and the toDateKey() label/lookup disagreeing by
+  // a day.
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  // Start on the first day (per the date format: Sunday or Monday) of the
+  // week (weeksCount - 1) weeks before today's,
   // so the grid is always exactly weeksCount*7 days — a clean rectangle, no
   // trailing partial week. (A previous version re-read start.getDay()
   // *after* mutating start to compute the loop bound, picking up the
   // shifted day of week instead of today's — that off-by-a-few-days error
   // produced one extra day dangling past the last full column.)
   const start = new Date(today);
-  start.setUTCDate(start.getUTCDate() - today.getUTCDay() - (weeksCount - 1) * 7);
+  start.setUTCDate(start.getUTCDate() - ((today.getUTCDay() - fmt.weekStartsOn + 7) % 7) - (weeksCount - 1) * 7);
 
   const days: { key: string; date: Date; count: number }[] = [];
   for (let i = 0; i < weeksCount * 7; i++) {
@@ -114,7 +123,7 @@ function HeatmapGrid({
               return (
                 <div
                   key={day.key}
-                  title={isFuture ? undefined : `${day.count} ${day.count === 1 ? "activity" : "activities"} on ${day.key}`}
+                  title={isFuture ? undefined : `${day.count} ${day.count === 1 ? "activity" : "activities"} on ${fmt.numericDate(localDateOfKey(day.key))}`}
                   style={{ width: cell, height: cell, borderRadius: Math.max(2, Math.round(cell / 5)) }}
                   className={isFuture ? "bg-transparent" : levelFor(day.count)}
                 />

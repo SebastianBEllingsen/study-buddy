@@ -7,6 +7,7 @@ import { countNewCardsIntroducedSince, listReviewItemsForItems, startOfUtcDay, t
 import { buildFocusQueue, buildQueue, conceptKeys, type QueueSource } from "./queueBuild";
 import { listMistakes } from "./mistakes";
 import { conceptKey } from "../conceptName";
+import { itemContents } from "../itemContentCache";
 
 // Loads the review queue (see queueBuild.ts for how it's assembled).
 
@@ -20,14 +21,15 @@ export async function loadQueueSources(courseId: number | null): Promise<LoadedS
       id: generated_items.id,
       title: generated_items.title,
       mode: generated_items.mode,
-      content_json: generated_items.content_json,
+      updated_at: generated_items.updated_at,
       course_id: generated_items.course_id,
       course_name: courses.name,
     })
     .from(generated_items)
     .innerJoin(courses, eq(courses.id, generated_items.course_id))
     .where(courseId === null ? modes : and(modes, eq(generated_items.course_id, courseId)));
-  const reviews = await listReviewItemsForItems(rows.map((r) => r.id));
+  // Content from memory where it hasn't changed — see itemContentCache.ts.
+  const [reviews, contents] = await Promise.all([listReviewItemsForItems(rows.map((r) => r.id)), itemContents(rows)]);
   const byItem = new Map<number, ReviewItemRow[]>();
   for (const r of reviews) byItem.set(r.generated_item_id, [...(byItem.get(r.generated_item_id) ?? []), r]);
 
@@ -35,7 +37,7 @@ export async function loadQueueSources(courseId: number | null): Promise<LoadedS
   for (const row of rows) {
     let content: FlashcardsContent | QuizContent;
     try {
-      content = JSON.parse(row.content_json);
+      content = JSON.parse(contents.get(row.id) ?? "");
     } catch {
       continue; // one unreadable item mustn't break the whole queue
     }

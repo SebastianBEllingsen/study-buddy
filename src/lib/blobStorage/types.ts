@@ -8,4 +8,7 @@ export interface BlobStore {
   // as "fall back to inlining a base64 data URL," never as a hard failure.
   put(key: string, bytes: Buffer, contentType: string): Promise<{ url: string } | null>;
   remove(key: string): Promise<void>;
+  // The stored bytes, or null when they're gone or unreachable.
+  get(key: string): Promise<Buffer | null>;
+  kind: "local" | "supabase";
 }

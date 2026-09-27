@@ -51,3 +51,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export const sqliteDb = drizzle(connection, { schema });
+
+// The raw connection, for work Drizzle doesn't cover (restoring a backup
+// attaches the backup file to it — see lib/backup/service.ts).
+export const sqliteConnection = connection;

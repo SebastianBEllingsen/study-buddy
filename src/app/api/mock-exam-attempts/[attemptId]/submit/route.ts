@@ -1,6 +1,6 @@
 import { getAppSettings } from "@/lib/models";
 import { gradeAttempt } from "@/lib/exams/grade";
-import { getAttempt, getMockExam, saveAnswers, setAttemptStatus } from "@/lib/exams/store";
+import { claimForGrading, getAttempt, getMockExam, saveAnswers } from "@/lib/exams/store";
 import { parseAnswers } from "@/lib/exams/requests";
 import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
@@ -23,13 +23,19 @@ export async function POST(request: Request, { params }: Params) {
     return Response.json({ error: "Grading needs AI, which is turned off in Settings" }, { status: 400 });
   }
   const body = await parseJsonObjectBody(request);
+  let answers = null;
   if (body.answers !== undefined) {
     if (attempt.status !== "in_progress") return Response.json({ error: "Invalid answers" }, { status: 400 });
-    const answers = parseAnswers(body.answers, exam.tasks.length);
+    answers = parseAnswers(body.answers, exam.tasks.length);
     if (!answers) return Response.json({ error: "Invalid answers" }, { status: 400 });
-    await saveAnswers(attempt.id, answers);
   }
-  await setAttemptStatus(attempt.id, "grading", { submitted: attempt.status === "in_progress", errorMessage: null });
+  // Claimed in the database: a second hand-in racing this one (a double
+  // click, or another computer) is turned away instead of grading — and
+  // paying for — the attempt twice.
+  if (!(await claimForGrading(attempt.id, { submitted: attempt.status === "in_progress" }))) {
+    return Response.json({ error: "This attempt has already been handed in" }, { status: 409 });
+  }
+  if (answers) await saveAnswers(attempt.id, answers);
   void gradeAttempt(attempt.id);
   return Response.json({ ok: true }, { status: 202 });
 }

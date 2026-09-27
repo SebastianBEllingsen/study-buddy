@@ -30,6 +30,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("documents", "file_base64")) {
     database.exec("ALTER TABLE documents ADD COLUMN file_base64 TEXT");
   }
+  if (!hasColumn("documents", "file_url")) {
+    database.exec("ALTER TABLE documents ADD COLUMN file_url TEXT");
+  }
   if (!hasColumn("generated_items", "folder_id")) {
     database.exec(
       "ALTER TABLE generated_items ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL"
@@ -550,6 +553,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "preferred_language")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN preferred_language TEXT");
   }
+  if (!hasColumn("app_settings", "date_format")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN date_format TEXT");
+  }
   if (!hasColumn("app_settings", "review_retention")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN review_retention REAL");
   }
@@ -561,6 +567,9 @@ export function migrate(database: Database.Database) {
   }
   if (!hasColumn("mock_exam_attempts", "paused_seconds")) {
     database.exec("ALTER TABLE mock_exam_attempts ADD COLUMN paused_seconds INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("mock_exam_attempts", "grading_started_at")) {
+    database.exec("ALTER TABLE mock_exam_attempts ADD COLUMN grading_started_at TEXT");
   }
   if (!hasColumn("documents", "trust")) {
     database.exec("ALTER TABLE documents ADD COLUMN trust TEXT NOT NULL DEFAULT 'official'");

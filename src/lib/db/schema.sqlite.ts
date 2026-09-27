@@ -145,6 +145,8 @@ export const app_settings = sqliteTable("app_settings", {
   // BCP-47 code (see lib/languages.ts); null == English. What AI-written
   // study plans are written in and which language resources are preferred in.
   preferred_language: text("preferred_language"),
+  // "no" | "uk" | "us" | "iso" (lib/dateFormat.ts); null == "uk".
+  date_format: text("date_format"),
   // FSRS target retention (0.8–0.97); null == 0.9. See lib/fsrs.ts.
   review_retention: real("review_retention"),
   // How many never-seen cards the review queue introduces a day; null == 20.
@@ -193,6 +195,9 @@ export const documents = sqliteTable("documents", {
   // see the document-serving route). Null for rows uploaded before this
   // column existed until a migration backfills them.
   file_base64: text("file_base64"),
+  // Where the original file is kept in blob storage (an /api/blobs/ URL)
+  // — how Supabase mode stores new uploads, instead of file_base64.
+  file_url: text("file_url"),
   extracted_text: text("extracted_text"),
   page_count: integer("page_count"),
   char_count: integer("char_count"),
@@ -638,6 +643,9 @@ export const mock_exam_attempts = sqliteTable(
     // paused_seconds adds up earlier pauses.
     paused_at: text("paused_at"),
     paused_seconds: integer("paused_seconds").notNull().default(0),
+    // When the current grading run began — lets any computer tell a run
+    // still in progress (elsewhere) from one cut off by a restart.
+    grading_started_at: text("grading_started_at"),
     submitted_at: text("submitted_at"),
   },
   (table) => [index("idx_mock_exam_attempts_exam_id").on(table.mock_exam_id)]

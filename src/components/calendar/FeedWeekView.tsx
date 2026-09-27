@@ -1,4 +1,6 @@
 "use client";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import type { DateFormatter } from "@/lib/dateFormat";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -58,12 +60,12 @@ export function hhmm(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function formatWhen(event: CalendarEvent, deadline: boolean): string {
+function formatWhen(event: CalendarEvent, deadline: boolean, fmt: DateFormatter): string {
   const start = new Date(event.allDay ? `${event.start}T00:00:00` : event.start);
-  const date = start.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  const date = fmt.date(start, { weekday: "long", day: "numeric", month: "long" });
   if (event.allDay) return date;
-  if (deadline) return `${date} ⋅ due ${hhmm(start)}`;
-  return `${date} ⋅ ${hhmm(start)} - ${hhmm(new Date(event.end))}`;
+  if (deadline) return `${date} ⋅ due ${fmt.time(start)}`;
+  return `${date} ⋅ ${fmt.time(start)} - ${fmt.time(new Date(event.end))}`;
 }
 
 // The click-to-open details card for a block or chip — the same content
@@ -78,6 +80,7 @@ export function FeedEventPopover({
   display: CourseDisplay;
   trigger: React.ReactElement;
 }) {
+  const fmt = useDateFormatter();
   const palette = PALETTE[display.color];
   const location = event.location ? shortLocation(event.location) : null;
   return (
@@ -97,7 +100,7 @@ export function FeedEventPopover({
         <div className="space-y-1.5 pl-5 text-xs text-muted-foreground">
           <div className="flex items-start gap-1.5">
             <Clock className="mt-0.5 size-3.5 shrink-0" />
-            <span>{formatWhen(event, display.deadline)}</span>
+            <span>{formatWhen(event, display.deadline, fmt)}</span>
           </div>
           {location?.text && (
             <div className="flex items-start gap-1.5">
@@ -163,6 +166,7 @@ export function FeedWeekView({
   weekStart: Date;
   config: FeedCalendarConfig;
 }) {
+  const fmt = useDateFormatter();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 60_000);
@@ -343,12 +347,12 @@ export function FeedWeekView({
                           </span>
                           {display.type && <span className="block font-bold">{display.type}</span>}
                           {deadline ? (
-                            <span className="block">due {hhmm(startDate)}</span>
+                            <span className="block">due {fmt.time(startDate)}</span>
                           ) : (
                             <>
                               <span className="block h-[18px]" />
                               <span className="block">
-                                {hhmm(startDate)} - {hhmm(new Date(event.end))}
+                                {fmt.time(startDate)} - {fmt.time(new Date(event.end))}
                               </span>
                             </>
                           )}

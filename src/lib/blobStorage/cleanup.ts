@@ -1,5 +1,9 @@
-import { isImageUrlReferenced } from "@/lib/models";
+import { isBlobUrlReferenced, isImageUrlReferenced } from "@/lib/models";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { blobKeyFromUrl, removeBlobByUrl } from "./index";
+import { blobUrlsIn } from "./urls";
+
+export { blobUrlsIn };
 
 // Called after an image field is replaced or cleared (or a library entry is
 // deleted, with newUrl left undefined) — removes the blob oldUrl pointed
@@ -16,4 +20,18 @@ export async function cleanupReplacedImage(
   if (!blobKeyFromUrl(oldUrl)) return;
   if (await isImageUrlReferenced(oldUrl)) return;
   await removeBlobByUrl(oldUrl);
+}
+
+// After deleting something (a course, a deck, an exam attempt): removes the
+// media files it used, except any still referenced elsewhere. Best-effort —
+// a failure just leaves a file behind, never fails the delete.
+export async function removeUnreferencedBlobs(texts: string[]): Promise<void> {
+  const urls = [...new Set(texts.flatMap(blobUrlsIn))];
+  await mapWithConcurrency(urls, 4, async (url) => {
+    try {
+      if (!(await isBlobUrlReferenced(url))) await removeBlobByUrl(url);
+    } catch (err) {
+      console.error("Couldn't clean up a media file:", err);
+    }
+  });
 }

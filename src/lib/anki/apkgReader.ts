@@ -50,6 +50,38 @@ const zstdDecompressSync = (
   }
 ).zstdDecompressSync;
 
+// Zip entries are inflated as a stream and counted as they go, so a small
+// entry that decompresses to gigabytes is stopped at `max` instead of
+// exhausting memory (sizes declared in the zip itself can't be trusted).
+const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+const MAX_MEDIA_MAP_BYTES = 50 * 1024 * 1024;
+
+export function readEntry(entry: JSZip.JSZipObject, max: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let stopped = false;
+    const stream = entry.nodeStream("nodebuffer");
+    stream.on("data", (chunk: Buffer) => {
+      if (stopped) return;
+      total += chunk.length;
+      if (total > max) {
+        stopped = true;
+        stream.pause();
+        reject(new ApkgFormatError(`"${entry.name}" in that .apkg file is too large once unpacked`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    stream.on("error", (err: Error) => {
+      if (!stopped) reject(err);
+    });
+    stream.on("end", () => {
+      if (!stopped) resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
 function maybeZstd(bytes: Buffer): Buffer {
   if (bytes.length >= 4 && bytes.subarray(0, 4).equals(ZSTD_MAGIC)) {
     if (!zstdDecompressSync) {
@@ -198,7 +230,7 @@ async function loadMediaMap(zip: JSZip): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   const entry = zip.file("media");
   if (!entry) return map;
-  const raw = await entry.async("nodebuffer");
+  const raw = await readEntry(entry, MAX_MEDIA_MAP_BYTES);
   if (raw.subarray(0, 4).equals(ZSTD_MAGIC)) {
     readProto(maybeZstd(raw))
       .filter((f) => f.field === 1 && f.bytes)
@@ -231,7 +263,7 @@ export async function readApkg(bytes: Buffer): Promise<ApkgContents> {
 
   let db: Database.Database;
   try {
-    db = openCollection(maybeZstd(await collectionEntry.async("nodebuffer")));
+    db = openCollection(maybeZstd(await readEntry(collectionEntry, MAX_DECOMPRESSED_BYTES)));
   } catch (err) {
     if (err instanceof ApkgFormatError) throw err;
     throw new ApkgFormatError("Couldn't open the Anki collection inside that .apkg file");
@@ -281,7 +313,12 @@ export async function readApkg(bytes: Buffer): Promise<ApkgContents> {
       async readMedia(name) {
         const zipName = mediaMap.get(name) ?? mediaMap.get(safeDecodeUri(name));
         const entry = zipName !== undefined ? zip.file(zipName) : null;
-        return entry ? maybeZstd(await entry.async("nodebuffer")) : null;
+        if (!entry) return null;
+        try {
+          return maybeZstd(await readEntry(entry, MAX_MEDIA_BYTES));
+        } catch {
+          return null; // skipped like any unreadable clip, not the whole import
+        }
       },
     };
   } finally {

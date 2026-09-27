@@ -1,7 +1,7 @@
 import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import type { Grade } from "ts-fsrs";
 import { db, generated_items, mistakes, review_items, review_logs, runTransaction } from "../db";
-import { scheduleReview, type MemoryState } from "../fsrs";
+import { fromUtcText, scheduleReview, type MemoryState } from "../fsrs";
 import type { Confidence, ReviewItemKind, ReviewSource } from "./types";
 
 // FSRS state per card/question (review_items) and the log of every graded
@@ -94,14 +94,44 @@ export interface RecordReviewInput {
 // Grades one answer: moves the item's FSRS state on and logs the review.
 // Returns the updated row.
 export async function recordReview(input: RecordReviewInput): Promise<ReviewItemRow> {
-  const now = input.now ?? new Date();
-  const existing = await getReviewItem(input.generatedItemId, input.kind, input.itemIndex);
-  const { memory, log } = scheduleReview(existing ? memoryOf(existing) : null, input.rating, now, {
-    retention: input.retention,
-  });
-  const reviewedAt = memory.last_reviewed_at as string;
+  return (await writeReview(input, null)) as ReviewItemRow;
+}
 
+// Like recordReview, but does nothing (null) when the item was already
+// reviewed within `withinMs` — see answers.ts's SAME_SESSION_MS. The check
+// and the write share one transaction, and transactions run one at a time
+// (runTransaction), so two answers racing each other can't both count or
+// overwrite each other's schedule.
+export async function recordReviewUnlessRecent(input: RecordReviewInput, withinMs: number): Promise<ReviewItemRow | null> {
+  return writeReview(input, withinMs);
+}
+
+async function writeReview(input: RecordReviewInput, skipWithinMs: number | null): Promise<ReviewItemRow | null> {
+  const now = input.now ?? new Date();
   return runTransaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(review_items)
+      .where(
+        and(
+          eq(review_items.generated_item_id, input.generatedItemId),
+          eq(review_items.kind, input.kind),
+          eq(review_items.item_index, input.itemIndex)
+        )
+      )
+      .limit(1);
+    if (
+      skipWithinMs !== null &&
+      existing?.last_reviewed_at &&
+      now.getTime() - fromUtcText(existing.last_reviewed_at).getTime() < skipWithinMs
+    ) {
+      return null;
+    }
+    const { memory, log } = scheduleReview(existing ? memoryOf(existing) : null, input.rating, now, {
+      retention: input.retention,
+    });
+    const reviewedAt = memory.last_reviewed_at as string;
+
     let row: ReviewItemRow;
     if (existing) {
       const conceptId = input.conceptId === undefined ? existing.concept_id : input.conceptId;

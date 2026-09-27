@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { saveStateLabel, useAutosave } from "@/lib/autosave";
 import useSWR from "swr";
 import { ArrowLeft, ExternalLink, GitFork, Link2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -33,15 +34,13 @@ interface NoteDetail {
 }
 
 // How long to wait after the last keystroke before autosaving — Obsidian
-// itself autosaves rather than requiring an explicit Save action, and a
-// short debounce here avoids a PATCH per keystroke.
-const AUTOSAVE_DELAY_MS = 800;
+// itself autosaves rather than requiring an explicit Save action (see
+// lib/autosave.ts, which batches keystrokes into one PATCH).
 
 // The note-editing pane shared by the normal /vault/[noteId] page and its
 // detached-window counterpart (/vault/[noteId]/detached) — everything about
 // loading, autosaving, and rendering a note lives here so the two can't
-// drift out of sync (see scheduleSave's unmount-flush behavior below, easy
-// to silently lose if duplicated). `detached` swaps out the chrome that
+// drift out of sync. `detached` swaps out the chrome that
 // doesn't make sense in a standalone popped-out window (the "← Course"/
 // Close controls have nowhere meaningful to navigate to from a separate
 // window) and sets the OS window title directly, mirroring
@@ -61,7 +60,10 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   const courseName = courseData?.course?.name ?? null;
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const { schedule: scheduleSave, discard: discardSaves, state: saveState } = useAutosave<{ title: string; markdown: string }>(
+    `/api/notes/${noteId}`,
+    "Couldn't save note"
+  );
   // Preview is read-only for the note body (NoteEditor renders it as
   // rendered markdown, not an editable field) — the title above it should
   // follow suit rather than staying editable while everything below it isn't.
@@ -77,16 +79,6 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
       loadedNoteId !== undefined && courseId !== undefined ? { noteId: loadedNoteId, courseId, folderId } : undefined,
     [loadedNoteId, courseId, folderId]
   );
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Fields from scheduleSave calls that haven't been sent yet — merged
-  // rather than replaced, so e.g. a title edit followed shortly by a
-  // markdown edit doesn't cancel/drop the still-unsent title change when the
-  // shared debounce timer restarts for the markdown one.
-  const pendingFields = useRef<{ title?: string; markdown?: string }>({});
-  const noteIdRef = useRef(noteId);
-  useEffect(() => {
-    noteIdRef.current = noteId;
-  }, [noteId]);
 
   // Seeds title/markdown from the fetched note the moment its data first
   // arrives for THIS note id — render-phase sync (see CustomizeCourseDialog's
@@ -139,51 +131,6 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
     }, 0);
     return () => clearTimeout(timer);
   }, [detached, detail]);
-
-  // Navigating away (e.g. the Close button or the breadcrumb link, both of
-  // which route to a different page entirely) unmounts this component. A
-  // save still pending in the debounce window at that point — which can be
-  // as recent as a picture just pasted in — has to be flushed here instead
-  // of just cancelled, or that edit is silently lost. keepalive lets the
-  // request outlive the unmount that triggers it.
-  useEffect(() => {
-    return () => {
-      if (!saveTimer.current) return;
-      clearTimeout(saveTimer.current);
-      const fields = pendingFields.current;
-      pendingFields.current = {};
-      if (Object.keys(fields).length === 0) return;
-      fetch(`/api/notes/${noteIdRef.current}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
-        keepalive: true,
-      }).catch(() => {});
-    };
-  }, []);
-
-  function scheduleSave(fields: { title?: string; markdown?: string }) {
-    setSaveState("saving");
-    pendingFields.current = { ...pendingFields.current, ...fields };
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      const toSend = pendingFields.current;
-      pendingFields.current = {};
-      saveTimer.current = null;
-      const res = await fetch(`/api/notes/${noteId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toSend),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        toast.error(body.error ?? "Couldn't save note");
-        setSaveState("idle");
-        return;
-      }
-      setSaveState("saved");
-    }, AUTOSAVE_DELAY_MS);
-  }
 
   function handleTitleChange(value: string) {
     setTitle(value);
@@ -240,6 +187,7 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   }
 
   async function handleDelete() {
+    discardSaves();
     const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error("Couldn't delete note");
@@ -303,7 +251,7 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
             acting on it. */}
         <div className="flex items-center gap-1">
           <span className="mr-2 text-xs text-muted-foreground">
-            {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
+            {saveStateLabel(saveState)}
           </span>
           <Explain id="note.generation">
             <div>

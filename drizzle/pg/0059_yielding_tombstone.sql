@@ -1,0 +1,1 @@
+ALTER TABLE "mock_exam_attempts" ADD COLUMN "grading_started_at" text;

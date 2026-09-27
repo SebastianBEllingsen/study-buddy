@@ -1,5 +1,6 @@
 "use client";
 
+import { useDateFormatter } from "@/components/DateFormatProvider";
 import Link from "next/link";
 import { ArrowRight, Route } from "lucide-react";
 import type { StudyPlan } from "@/lib/studyPlan/types";
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 // overall progress and the next chapter to work on, one click from the full
 // plan.
 export function StudyPlanCard({ courseId, plan }: { courseId: number; plan: StudyPlan }) {
+  const fmt = useDateFormatter();
   const progress = planProgress(plan);
   const next = nextChapter(plan);
   const numbers = chapterNumbers(plan.chapters);
@@ -69,7 +71,7 @@ export function StudyPlanCard({ courseId, plan }: { courseId: number; plan: Stud
           </p>
           {nextSession && nextSessionChapter && plan.status === "ready" && (
             <p className="text-xs text-muted-foreground">
-              Next session: {nextSession.date === today ? "today" : formatDay(nextSession.date)} ·{" "}
+              Next session: {nextSession.date === today ? "today" : formatDay(fmt, nextSession.date)} ·{" "}
               {formatMinutes(nextSession.minutes)} on {nextSessionChapter.title}
             </p>
           )}

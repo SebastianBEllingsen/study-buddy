@@ -32,7 +32,7 @@ export function addMonths(d: Date, n: number): Date {
 }
 
 // Monday 00:00 local of the week containing `d` — the timetable week runs
-// Mon–Sun, unlike the month grid's Sun-first rows.
+// Mon–Sun whatever the date format.
 export function startOfWeek(d: Date): Date {
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
@@ -45,10 +45,16 @@ export function addDays(d: Date, n: number): Date {
   return next;
 }
 
-// The 6-week span MonthGrid renders for a month (Sun-first rows), so a
-// caller fetching by range gets the leading/trailing days' events too.
-export function monthGridRange(month: Date): { start: Date; end: Date } {
+// The 6-week span MonthGrid renders for a month (rows start on
+// `weekStartsOn`: 0 Sunday, 1 Monday — see lib/dateFormat.ts), so a caller
+// fetching by range gets the leading/trailing days' events too.
+export function monthGridRange(month: Date, weekStartsOn: 0 | 1 = 0): { start: Date; end: Date } {
   const start = new Date(month);
-  start.setDate(start.getDate() - month.getDay());
+  start.setDate(start.getDate() - ((month.getDay() - weekStartsOn + 7) % 7));
   return { start, end: addDays(start, 42) };
+}
+
+// Weekday labels in display order for a week starting on `weekStartsOn`.
+export function weekdayLabels<T>(sundayFirst: readonly T[], weekStartsOn: 0 | 1): T[] {
+  return [...sundayFirst.slice(weekStartsOn), ...sundayFirst.slice(0, weekStartsOn)];
 }
