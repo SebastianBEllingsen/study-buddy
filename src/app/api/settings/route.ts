@@ -18,6 +18,7 @@ import {
   setPreferredLanguage,
   setDateFormat,
   setReviewSettings,
+  setFlashcardAudioAutoplay,
   MAX_NEW_CARDS_PER_DAY,
   setCliTrustedModeEnabled,
   setModelBadgeDetail,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/models";
 import { normalizeFolderChipSettings } from "@/lib/folderChips";
 import { isDateFormat } from "@/lib/dateFormat";
+import { AUDIO_AUTOPLAY_MODES, isAudioAutoplayMode } from "@/lib/audioAutoplay";
 import { normalizeAppWallpaper } from "@/lib/appWallpaper";
 import { HEADER_TINT_MODES, parseHeaderTintMode } from "@/lib/headerTint";
 import { droppedLinkIconImages, normalizeDashboardLinks } from "@/lib/dashboardLinks";
@@ -248,6 +250,16 @@ export async function POST(request: Request) {
       );
     }
     await setReviewSettings({ newCardsPerDay: n });
+  }
+
+  if (body?.flashcardAudioAutoplay !== undefined) {
+    if (!isAudioAutoplayMode(body.flashcardAudioAutoplay)) {
+      return Response.json(
+        { error: `flashcardAudioAutoplay must be one of ${AUDIO_AUTOPLAY_MODES.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    await setFlashcardAudioAutoplay(body.flashcardAudioAutoplay);
   }
 
   if (body?.cliTrustedModeEnabled !== undefined) {

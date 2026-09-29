@@ -428,6 +428,13 @@
       "when": 1790421040985,
       "tag": "0060_sweet_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790675638246,
+      "tag": "0061_condemned_vivisector",
+      "breakpoints": true
     }
   ]
 }

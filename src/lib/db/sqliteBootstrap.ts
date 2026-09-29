@@ -562,6 +562,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "new_cards_per_day")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN new_cards_per_day INTEGER");
   }
+  if (!hasColumn("app_settings", "flashcard_audio_autoplay")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN flashcard_audio_autoplay TEXT");
+  }
   if (!hasColumn("mock_exam_attempts", "paused_at")) {
     database.exec("ALTER TABLE mock_exam_attempts ADD COLUMN paused_at TEXT");
   }

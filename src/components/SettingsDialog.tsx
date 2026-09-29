@@ -13,6 +13,7 @@ import { useDateFormatter } from "@/components/DateFormatProvider";
 import { SyncPanel } from "@/components/SyncIndicator";
 import type { BackupInfo } from "@/lib/backup/service";
 import { MAX_RETENTION, MIN_RETENTION } from "@/lib/review/types";
+import { AUDIO_AUTOPLAY_LABELS, AUDIO_AUTOPLAY_MODES } from "@/lib/audioAutoplay";
 import { setExplanationsEnabled, useExplanationsEnabled } from "@/components/Explain";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
 import useSWR, { useSWRConfig } from "swr";
@@ -1952,14 +1953,17 @@ function HoverHelpSection() {
   );
 }
 
-// Spaced review: how much to remember (FSRS target retention) and how many
-// new cards a day the review session brings in.
+// Spaced review: how much to remember (FSRS target retention), how many
+// new cards a day the review session brings in, and how cards play audio.
 function ReviewSection() {
   const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
   const [retentionDraft, setRetentionDraft] = useState<number | null>(null);
   const [newCardsDraft, setNewCardsDraft] = useState<number | null>(null);
 
-  async function save(field: "reviewRetention" | "newCardsPerDay", value: number) {
+  async function save<K extends "reviewRetention" | "newCardsPerDay" | "flashcardAudioAutoplay">(
+    field: K,
+    value: AppSettings[K]
+  ) {
     if (!settings) return;
     const previous = settings[field];
     mutate({ ...settings, [field]: value }, { revalidate: false });
@@ -2021,6 +2025,32 @@ function ReviewSection() {
         />
         <p className="text-xs text-muted-foreground">
           How many never-seen cards a review session brings in each day. Decks you open directly aren&apos;t limited.
+        </p>
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span>Card audio</span>
+          <Select
+            value={settings.flashcardAudioAutoplay}
+            onValueChange={(value: AppSettings["flashcardAudioAutoplay"] | null) =>
+              value && void save("flashcardAudioAutoplay", value)
+            }
+          >
+            <SelectTrigger className="h-8 w-40 text-xs">
+              <SelectValue>
+                {(v: AppSettings["flashcardAudioAutoplay"]) => AUDIO_AUTOPLAY_LABELS[v] ?? v}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {AUDIO_AUTOPLAY_MODES.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {AUDIO_AUTOPLAY_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          For cards with several audio clips, like a word and an example sentence: play just the first, or all of
+          them in turn.
         </p>
       </SettingGroup>
     </div>

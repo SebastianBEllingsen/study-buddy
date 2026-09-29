@@ -56,6 +56,7 @@ import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
 import { canvasReferencesTarget, emptyCanvas, parseCanvasJson, type CanvasData } from "./canvas";
+import { parseAudioAutoplayMode, type AudioAutoplayMode } from "./audioAutoplay";
 
 // "image" is distinct from "failed": a plain image (png/jpg/...) has no text
 // to extract by design (no OCR — see extraction.ts), not a broken upload —
@@ -221,6 +222,7 @@ interface SettingsRow {
   date_format: string | null;
   review_retention: number | null;
   new_cards_per_day: number | null;
+  flashcard_audio_autoplay: string | null;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -268,6 +270,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       date_format: app_settings.date_format,
       review_retention: app_settings.review_retention,
       new_cards_per_day: app_settings.new_cards_per_day,
+      flashcard_audio_autoplay: app_settings.flashcard_audio_autoplay,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -513,6 +516,9 @@ export interface AppSettings {
   reviewRetention: number;
   // How many never-reviewed cards the review session introduces a day.
   newCardsPerDay: number;
+  // Which of a flashcard face's audio clips play on their own — see
+  // lib/audioAutoplay.ts.
+  flashcardAudioAutoplay: AudioAutoplayMode;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -561,6 +567,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     dateFormat: normalizeDateFormat(row?.date_format),
     reviewRetention: clampRetention(row?.review_retention ?? DEFAULT_RETENTION),
     newCardsPerDay: clampNewCardsPerDay(row?.new_cards_per_day ?? DEFAULT_NEW_CARDS_PER_DAY),
+    flashcardAudioAutoplay: parseAudioAutoplayMode(row?.flashcard_audio_autoplay),
   };
 }
 
@@ -696,6 +703,13 @@ export async function setReviewSettings(settings: { retention?: number; newCards
       ...(settings.newCardsPerDay !== undefined && { new_cards_per_day: clampNewCardsPerDay(settings.newCardsPerDay) }),
       updated_at: nowUtc(),
     })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setFlashcardAudioAutoplay(mode: AudioAutoplayMode): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ flashcard_audio_autoplay: mode === "first" ? null : mode, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 

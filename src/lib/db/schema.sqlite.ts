@@ -151,6 +151,8 @@ export const app_settings = sqliteTable("app_settings", {
   review_retention: real("review_retention"),
   // How many never-seen cards the review queue introduces a day; null == 20.
   new_cards_per_day: integer("new_cards_per_day"),
+  // "first" | "sequence" (lib/audioAutoplay.ts); null == "first".
+  flashcard_audio_autoplay: text("flashcard_audio_autoplay"),
   // Set once the old SM-2 flashcard history has been replayed into
   // review_items (lib/review/legacyMigration.ts).
   fsrs_migrated_at: text("fsrs_migrated_at"),

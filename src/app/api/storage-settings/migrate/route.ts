@@ -776,6 +776,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "date_format",
               "review_retention",
               "new_cards_per_day",
+              "flashcard_audio_autoplay",
               "fsrs_migrated_at",
               "updated_at",
             ]),

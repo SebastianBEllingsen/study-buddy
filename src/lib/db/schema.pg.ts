@@ -191,6 +191,7 @@ export const app_settings = pgTable("app_settings", {
   // See the matching columns in schema.sqlite.ts.
   review_retention: real("review_retention"),
   new_cards_per_day: integer("new_cards_per_day"),
+  flashcard_audio_autoplay: text("flashcard_audio_autoplay"),
   fsrs_migrated_at: text("fsrs_migrated_at"),
   updated_at: text("updated_at").notNull(),
 });
