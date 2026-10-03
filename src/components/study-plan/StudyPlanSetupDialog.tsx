@@ -126,6 +126,7 @@ export function StudyPlanSetupDialog({
       webResources: d.webResources,
       topicLevels: d.topicLevels,
       practice: d.practice,
+      diagnostic: d.diagnostic,
       schedule: d.schedule,
     });
   }
@@ -292,6 +293,14 @@ export function StudyPlanSetupDialog({
               title="Practice and mastery per chapter"
               hint="Quiz, flashcard and notes buttons on each chapter; your results show how well you know it."
             />
+            {options.practice && (
+              <Toggle
+                checked={options.diagnostic}
+                onChange={(diagnostic) => update({ diagnostic })}
+                title="Pre-test each chapter"
+                hint="Makes a short quiz per chapter (one AI call each). Taking it before you study shows what you already know, so known chapters get less time."
+              />
+            )}
             <Toggle
               checked={options.schedule}
               onChange={(schedule) => update({ schedule })}

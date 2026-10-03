@@ -51,4 +51,9 @@ describe("resourceTarget", () => {
     expect(resourceTarget("normal")).toEqual({ min: 3, max: 5 });
     expect(resourceTarget("more")).toEqual({ min: 5, max: 7 });
   });
+
+  it("keeps pre-tests off unless asked for", () => {
+    expect(parseStudyPlanOptions({ preset: "guided" }).diagnostic).toBe(false);
+    expect(parseStudyPlanOptions({ preset: "guided", diagnostic: true }).diagnostic).toBe(true);
+  });
 });

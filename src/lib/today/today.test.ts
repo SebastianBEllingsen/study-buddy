@@ -13,8 +13,8 @@ const { createCourse, createGeneratedItem } = await import("../models");
 const store = await import("../studyPlan/store");
 const { DEFAULT_STUDY_PLAN_OPTIONS } = await import("../studyPlan/options");
 const { localToday } = await import("../studyPlan/schedule");
-const { loadToday, chapterCandidates } = await import("./loadToday");
-const { completeStep, parseCompletion } = await import("./complete");
+const { loadToday, chapterCandidates, openChapters } = await import("./loadToday");
+const { completeStep, parseCompletion, actualMinutes } = await import("./complete");
 const { recordQuizAnswers } = await import("../review/answers");
 const { setExamDate } = await import("../readiness/load");
 const { saveExamProfile } = await import("../exams/store");
@@ -217,6 +217,51 @@ describe("chapterCandidates", () => {
   });
 });
 
+describe("picking chapters", () => {
+  it("offers exactly the picked chapters, scheduled today or not, and lists the open ones", async () => {
+    const plan = await makePlan((await createCourse("A")).id, { ...DEFAULT_STUDY_PLAN_OPTIONS, schedule: true });
+    const today = "2026-03-02";
+    const [first, second] = plan.chapters;
+    const scheduled = {
+      ...plan,
+      sessions: [
+        { id: 1, plan_id: plan.id, chapter_id: first.id, date: today, minutes: 30, kind: "study" as const, done_at: null, google_event_id: null },
+      ],
+    };
+    const names = new Map([[plan.course_id, "A"]]);
+
+    // Only the second chapter picked: it isn't scheduled today, and still shows up.
+    const picked = chapterCandidates([scheduled], names, today, new Set([second.id]));
+    expect(picked.map((c) => [c.chapterId, c.session])).toEqual([[second.id, null]]);
+    // Both picked: today's session keeps its slot.
+    const both = chapterCandidates([scheduled], names, today, new Set([first.id, second.id]));
+    expect(both.map((c) => [c.chapterId, c.session?.minutes ?? null])).toEqual([
+      [first.id, 30],
+      [second.id, null],
+    ]);
+    expect(openChapters([scheduled], names).map((c) => c.chapterId)).toEqual(plan.chapters.map((c) => c.id));
+  });
+
+  it("skips a picked chapter that's finished and passed", async () => {
+    const plan = await makePlan((await createCourse("B")).id);
+    const done = { ...plan, chapters: plan.chapters.map((c, i) => (i === 0 ? { ...c, completed_at: "2026-01-01 00:00:00" } : c)) };
+    const names = new Map([[plan.course_id, "B"]]);
+    const ids = new Set(plan.chapters.map((c) => c.id));
+    expect(chapterCandidates([done], names, "2026-03-02", ids).map((c) => c.chapterId)).not.toContain(plan.chapters[0].id);
+    expect(openChapters([done], names).map((c) => c.chapterId)).not.toContain(plan.chapters[0].id);
+  });
+
+  it("loadToday plans the picked chapters and lists what's open", async () => {
+    const plan = await makePlan((await createCourse("C")).id);
+    const second = plan.chapters[1];
+    const today = await loadToday({ courseId: plan.course_id, minutes: 60, chapterIds: [second.id] });
+    expect(today.chapters.map((c) => c.chapterId)).toEqual(plan.chapters.map((c) => c.id));
+    const chapterSteps = today.steps.filter((s) => s.kind === "chapter");
+    expect(chapterSteps.length).toBeGreaterThan(0);
+    expect(chapterSteps.every((s) => s.id.startsWith(`chapter:${second.id}:`))).toBe(true);
+  });
+});
+
 describe("completeStep", () => {
   it("ticks off a resource and a subtopic, and marks a session done — only within its plan", async () => {
     const plan = await makePlan((await createCourse("Sample Course")).id);
@@ -246,5 +291,14 @@ describe("completeStep", () => {
     expect(parseCompletion({ type: "subtopic", planId: 1, chapterId: 2, index: -1 })).toBeNull();
     expect(parseCompletion({ type: "session", planId: "1", sessionId: 2 })).toBeNull();
     expect(parseCompletion({ type: "other", planId: 1 })).toBeNull();
+    expect(parseCompletion({ type: "session", planId: 1, sessionId: 2, minutes: 40 })).toMatchObject({ minutes: 40 });
+  });
+
+  it("only believes a measured session length that's plausible for the plan", () => {
+    expect(actualMinutes(30, 45)).toBe(45);
+    expect(actualMinutes(30, 4)).toBeUndefined(); // too short to mean anything
+    expect(actualMinutes(30, 5)).toBeUndefined(); // under a quarter of the plan
+    expect(actualMinutes(30, 200)).toBeUndefined(); // a tab left open
+    expect(actualMinutes(30, undefined)).toBeUndefined();
   });
 });

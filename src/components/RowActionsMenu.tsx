@@ -38,6 +38,9 @@ export interface RowActionsMenuProps {
   onDelete?: () => Promise<void> | void;
   deleteLabel?: string;
   deleteDescription?: string;
+  // Shown in the confirm dialog under the description — e.g. an option that
+  // widens what the delete removes.
+  deleteExtra?: ReactNode;
   // Overrides the trigger icon's color — e.g. a card that renders its own
   // cover photo as a background needs a light icon to stay legible, same as
   // the other icons drawn over that photo.
@@ -61,6 +64,7 @@ export function RowActionsMenu({
   onDelete,
   deleteLabel = "Delete",
   deleteDescription = "This can't be undone.",
+  deleteExtra,
   triggerIconClassName = "text-muted-foreground",
   triggerIcon: TriggerIcon = MoreHorizontal,
   triggerVariant = "ghost",
@@ -146,6 +150,7 @@ export function RowActionsMenu({
               <AlertDialogTitle>{deleteLabel}?</AlertDialogTitle>
               <AlertDialogDescription>{deleteDescription}</AlertDialogDescription>
             </AlertDialogHeader>
+            {deleteExtra}
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction variant="destructive" disabled={deleting} onClick={handleConfirmDelete}>

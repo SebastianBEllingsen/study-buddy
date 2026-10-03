@@ -83,4 +83,6 @@ export interface RunResult {
   // exception at the top level, timeout); null if it loaded fine.
   error: string | null;
   tests: TestOutcome[];
+  // Figures the code drew (Python, matplotlib), as PNG data URLs.
+  images?: string[];
 }

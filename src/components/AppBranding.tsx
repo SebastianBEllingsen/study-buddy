@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BookOpen } from "lucide-react";
 import useSWR from "swr";
 import type { AppSettings } from "@/lib/models";
+import { DEFAULT_APP_NAME } from "@/lib/useAppName";
 
 // The header wordmark — server-rendered correctly on first paint (see
 // layout.tsx, which fetches settings directly and passes them as `initial`
@@ -19,7 +20,7 @@ import type { AppSettings } from "@/lib/models";
 // value once its own fetch resolves.
 export default function AppBranding({ initial }: { initial: AppSettings }) {
   const { data } = useSWR<AppSettings>("/api/settings", { fallbackData: initial });
-  const name = data?.appName || "Study Buddy";
+  const name = data?.appName || DEFAULT_APP_NAME;
   const iconImage = data?.appIconImage;
   const icon = data?.appIcon;
 

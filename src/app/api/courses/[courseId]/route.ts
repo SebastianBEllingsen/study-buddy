@@ -69,6 +69,7 @@ export async function PATCH(request: Request, { params }: Params) {
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
     show_practice?: boolean;
+    show_study_tools?: boolean;
     lock_background_crop?: boolean;
     folder_chips?: string | null;
   } = {};
@@ -127,6 +128,12 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Invalid show_practice" }, { status: 400 });
     }
     customization.show_practice = body.show_practice;
+  }
+  if ("show_study_tools" in body) {
+    if (typeof body.show_study_tools !== "boolean") {
+      return Response.json({ error: "Invalid show_study_tools" }, { status: 400 });
+    }
+    customization.show_study_tools = body.show_study_tools;
   }
   // null == follow the global setting; otherwise { enabled, hidden } — see
   // lib/folderChips.ts.

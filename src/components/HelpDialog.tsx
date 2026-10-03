@@ -47,7 +47,11 @@ export default function HelpDialog() {
           <HelpSection title="Courses & material">
             Create a course, then upload PDFs (or paste text/images) into folders. Drag things
             between folders to reorganize. Folders can hold subfolders as many levels deep as you
-            like — drop a folder onto another folder&apos;s name to nest it inside.
+            like — drop a folder onto another folder&apos;s name to nest it inside. Equations come
+            out garbled from some PDFs, and scanned or handwritten pages can&apos;t be read at all:
+            a document&apos;s ⋯ menu has &quot;Transcribe with AI&quot;, which reads each page as an
+            image (the pages go to your AI provider) and writes it out with equations as LaTeX. That
+            text replaces the document&apos;s own, and you can go back to it from the same menu.
           </HelpSection>
           <HelpSection title="Generate">
             From a folder — or &quot;All course material&quot; — generate Notes, a Quiz, or
@@ -60,21 +64,35 @@ export default function HelpDialog() {
             study in order. Every link is checked. &quot;Full guided&quot; also asks what you already
             know, adds a quiz/flashcards/notes &quot;Test yourself&quot; to each chapter (your results
             become its mastery), and spreads the chapters over a study schedule that shows on your
-            calendar — Replan moves missed sessions and adds review where you&apos;re weak. Upload new
+            calendar. A chapter counts as done once a quiz scores 70% or more (or you mark it
+            complete); until then the schedule adds a short check session and the next chapter
+            waits. Chapters start once the chapters they build on are done, and time follows your
+            pace. &quot;Pre-test each chapter&quot; makes a quiz per chapter up front: a good score
+            shortens that chapter. Replan moves missed sessions and adds review where you&apos;re
+            weak; &quot;Just move them&quot; skips the AI. Upload new
             lectures later and the plan offers to fold them in. The plan&apos;s language follows
-            Settings → AI → Preferred language.
+            Settings → AI → Preferred language. Delete a plan from its ⋯ menu; you can delete the
+            quizzes and flashcards made for it too.
           </HelpSection>
           <HelpSection title="Study">
             Quizzes grade instantly and offer a &quot;Retry what you got wrong&quot;. Flashcards
-            only surface what&apos;s actually due, using real spaced repetition. Select any text (or
+            only surface what&apos;s actually due, using real spaced repetition. Generated cards test
+            ideas, not calculations (those belong in quizzes); on a deck, a banner lists older
+            calculation-style cards to remove. Select any text (or
             crop a region of a PDF) for a hint or explanation.
           </HelpSection>
           <HelpSection title="Today">
             The Today card on the dashboard (and on each course) plans one session to fit the minutes
             you pick: due reviews first, then mistakes you were sure about, then the next step of
-            your study plan, then your weakest concept. Start runs the focus timer and opens each step
-            in turn; the timer in the header shows the current step with Done, Later and Skip. Missed
-            plan days are rescheduled for you.
+            your most urgent chapters (nearest finish date, then weakest, mixed across courses and
+            sharing the time), then your weakest concept. &quot;Choose chapters&quot; swaps the
+            autopilot&apos;s pick for yours. Each step says why it&apos;s there. Start
+            runs the focus timer and opens each step in turn; the timer in the header shows the
+            current step with Done, Later and Skip. Finishing records how long each plan session
+            took. Missed plan days are rescheduled for you. In Settings → Appearance you can hide
+            the Today card. With transparent widgets on, every widget can sit on a frosted panel (see-through
+            but easy to read over a picture): switch them all at once there, one by one with the snowflake
+            on each tile in Customize, or the Today card on its own.
           </HelpSection>
           <HelpSection title="Exam prep">
             From a course&apos;s Exam prep page, pick its past exams and the AI works out their style,
@@ -98,7 +116,9 @@ export default function HelpDialog() {
             Problems (on a course or a plan chapter) teaches a method by fading support: a worked
             example, one where you fill in the missing steps, then two to solve on your own with
             step-by-step hints. Mixed sets shuffle problems from your weakest topics so you practise
-            choosing the method. Solved problems join your spaced review. The Concepts page can
+            choosing the method. On problems you solve alone, type your final answer too: computer
+            algebra in your browser checks it against the model&apos;s in any equivalent form, and
+            that result settles whether the answer is right. Solved problems join your spaced review. The Concepts page can
             draw a concept map onto a canvas, coloured by how well you recall each idea. On a
             revealed flashcard, &quot;Why?&quot; checks your reasoning and explains why the answer holds.
           </HelpSection>
@@ -106,16 +126,39 @@ export default function HelpDialog() {
             For programming, a course&apos;s Code page writes Python or JavaScript exercises on a
             chapter or topic, from a warm-up to something harder. Write your code in the editor and run
             it against the tests; hints and the reference solution are there when you&apos;re stuck. Code
-            runs only in your browser, cut off from the internet — nothing runs on a server. Tests the
+            runs only in your browser, cut off from the internet — nothing runs on a server. Python
+            exercises can use numpy, scipy, matplotlib (the plots they draw appear under the results)
+            and sympy, downloaded the first time they&apos;re needed. Tests the
             reference solution itself fails are skipped as likely wrong. Finished exercises join your
             reviews.
+          </HelpSection>
+          <HelpSection title="Drills">
+            Drills in the header gives you practice problems with fresh numbers every time: linear
+            algebra, calculus, modelling (Euler&apos;s method, equilibria, Markov chains) and quantum
+            (measurement probabilities, inner products, states after a gate). Type the answer as a
+            number or fraction, a list, a complex number or a polynomial. The answers are worked out
+            exactly in code, not by an AI, so it&apos;s instant, free and never wrong about its own key.
+            A wrong answer can be retried or explained step by step, and your streak and accuracy per
+            topic are kept on this device.
+          </HelpSection>
+          <HelpSection title="Quantum playground">
+            Quantum in the header is a circuit sandbox. Pick a gate and click a cell to place it (a
+            CNOT or Toffoli takes a click per wire; click a gate again, right-click or press Delete to
+            remove it). It shows the state as a formula, with each basis state&apos;s amplitude, probability
+            and phase, every qubit on its Bloch sphere (a qubit entangled with the others sits inside
+            the sphere), and a measure-1000-times histogram next to the odds the state predicts. Qubit 0
+            is the leftmost bit of the ket. The challenges ask you to prepare a state or build one gate
+            from others, and are checked by the simulator; your solved ones are remembered on this
+            device. Everything runs in your browser.
           </HelpSection>
           <HelpSection title="Review">
             Review in the header runs one mixed session over everything due: cards, plus quiz
             questions you&apos;ve answered before, scheduled with FSRS so each comes back just
             before you&apos;d forget it. Say how sure you are before seeing the answer. What you
             miss comes back until you get it and lands in the Mistake log, which can explain the
-            misconception behind each. A course&apos;s Concepts page shows how much of each topic
+            misconception behind each and label what kind of mistake it was (a careless slip, the wrong
+            method, a concept gap, a forgotten fact or a misread question), with a breakdown so you can
+            tell which one to work on. A course&apos;s Concepts page shows how much of each topic
             you&apos;d recall right now. Target recall and new cards a day are in Settings → Courses.
           </HelpSection>
           <HelpSection title="Sources and accuracy">

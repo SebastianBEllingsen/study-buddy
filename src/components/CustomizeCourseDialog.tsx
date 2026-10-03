@@ -53,6 +53,7 @@ export function CustomizeCourseDialog({
   const [showCoverOnCard, setShowCoverOnCard] = useState(course.show_cover_on_card);
   const [showIconFrame, setShowIconFrame] = useState(course.show_icon_frame);
   const [showPractice, setShowPractice] = useState(course.show_practice);
+  const [showStudyTools, setShowStudyTools] = useState(course.show_study_tools);
   const [lockBackgroundCrop, setLockBackgroundCrop] = useState(course.lock_background_crop);
   // null == follow the global folder tag setting (Settings → Display).
   const [folderChips, setFolderChips] = useState<FolderChipSettings | null>(() =>
@@ -91,6 +92,7 @@ export function CustomizeCourseDialog({
     setShowCoverOnCard(course.show_cover_on_card);
     setShowIconFrame(course.show_icon_frame);
     setShowPractice(course.show_practice);
+    setShowStudyTools(course.show_study_tools);
     setLockBackgroundCrop(course.lock_background_crop);
     setFolderChips(parseFolderChipSettings(course.folder_chips));
     setSeededFor(course.id);
@@ -156,6 +158,7 @@ export function CustomizeCourseDialog({
           show_cover_on_card: showCoverOnCard,
           show_icon_frame: showIconFrame,
           show_practice: showPractice,
+          show_study_tools: showStudyTools,
           lock_background_crop: lockBackgroundCrop,
           folder_chips: folderChips,
         }),
@@ -488,6 +491,18 @@ export function CustomizeCourseDialog({
                 className="size-4 shrink-0 accent-primary"
                 checked={showPractice}
                 onChange={(e) => setShowPractice(e.target.checked)}
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span className="flex items-center gap-1.5">
+                Show study tools
+                <HelpTooltip>The Review, Mistakes, Exam prep… buttons and the Today card. Hide them for courses you don&apos;t study.</HelpTooltip>
+              </span>
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-primary"
+                checked={showStudyTools}
+                onChange={(e) => setShowStudyTools(e.target.checked)}
               />
             </label>
             <label className="flex items-center justify-between gap-3 text-sm">

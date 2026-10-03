@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CHAPTER_MINUTES,
   buildSchedule,
+  carriedExtraReview,
+  learnedPace,
   chapterMinutesNeeded,
   localToday,
   missedSessions,
@@ -109,7 +111,8 @@ describe("buildSchedule", () => {
     const reviews = sessions.filter((s) => s.kind === "review");
     expect(reviews.map((s) => s.date)).toEqual(["2026-01-29", "2026-01-29", "2026-01-30", "2026-01-30"]);
     expect(reviews[0].chapterId).toBe(2);
-    expect(minutesFor(sessions.filter((s) => s.kind === "study"), 1)).toBe(120);
+    // Chapter 1 is untouched but already tested at 90%: 25% of 120.
+    expect(minutesFor(sessions.filter((s) => s.kind === "study"), 1)).toBe(30);
   });
 
   it("squeezes every chapter and warns when the work doesn't fit", () => {
@@ -199,5 +202,126 @@ describe("missedSessions / localToday", () => {
 
   it("formats the local date", () => {
     expect(localToday(new Date(2026, 0, 5, 23, 30))).toBe(MONDAY);
+  });
+});
+
+describe("carriedExtraReview", () => {
+  const s = (chapter_id: number, date: string, kind: "study" | "review", done_at: string | null = null) => ({
+    chapter_id,
+    date,
+    minutes: 30,
+    kind,
+    done_at,
+  });
+
+  it("keeps open review sessions that come before the first study session", () => {
+    const sessions = [
+      s(1, "2026-01-05", "review"),
+      s(1, "2026-01-06", "review"),
+      s(2, "2026-01-06", "review"),
+      s(1, "2026-01-07", "study"),
+      s(2, "2026-01-30", "review"), // a final review day
+    ];
+    expect(carriedExtraReview(sessions)).toEqual(
+      new Map([
+        [1, 60],
+        [2, 30],
+      ])
+    );
+  });
+
+  it("ignores finished sessions and carries nothing when no study is left", () => {
+    expect(carriedExtraReview([s(1, "2026-01-05", "review", "x"), s(1, "2026-01-07", "study")])).toEqual(new Map());
+    expect(carriedExtraReview([s(1, "2026-01-05", "review")])).toEqual(new Map());
+  });
+});
+
+describe("checks, diagnostics and pace", () => {
+  it("adds a short check session for a studied chapter that hasn't passed, before the next stage", () => {
+    const { sessions } = buildSchedule(
+      input({ chapters: [ch(1, { complete: true, needsCheck: true }), ch(2, { stage: 2 })] })
+    );
+    expect(sessions[0]).toEqual({ chapterId: 1, date: MONDAY, minutes: 20, kind: "check" });
+    expect(sessions[1]).toMatchObject({ chapterId: 2, date: MONDAY, kind: "study" });
+  });
+
+  it("needs nothing more from a passed chapter", () => {
+    expect(chapterMinutesNeeded(ch(1, { complete: true, needsCheck: false }))).toBe(0);
+  });
+
+  it("uses a good early test result to shrink an unstarted chapter, not a poor one", () => {
+    expect(chapterMinutesNeeded(ch(1, { mastery: 0.9 }))).toBe(30);
+    expect(chapterMinutesNeeded(ch(1, { mastery: 0.75 }))).toBe(70);
+    expect(chapterMinutesNeeded(ch(1, { mastery: 0.3, level: "known" }))).toBe(120);
+    // Starting the chapter doesn't bring the claimed level's estimate back.
+    expect(chapterMinutesNeeded(ch(1, { mastery: 0.9, doneMinutes: 15 }))).toBe(15);
+    expect(chapterMinutesNeeded(ch(1, { mastery: 0.9, doneMinutes: 15, progress: 0.1 }))).toBeLessThan(60);
+  });
+
+  it("measures pace against the same factor the chapter was scheduled with", () => {
+    // Pre-tested as known (30 of 120 minutes), finished in 30: exactly as estimated.
+    const finished = (id: number) => ch(id, { complete: true, doneMinutes: 30, mastery: 0.9 });
+    expect(learnedPace([finished(1), finished(2)])).toBe(1);
+  });
+
+  it("doesn't grow a check session on repeated reschedules", () => {
+    const chapters = [ch(1, { complete: true, needsCheck: true }), ch(2, { stage: 2, prerequisites: [1] })];
+    let extra: Map<number, number> | undefined;
+    for (let round = 0; round < 3; round++) {
+      const { sessions } = buildSchedule(input({ chapters, minutesPerDay: 20, extraReview: extra }));
+      expect(sessions.filter((s) => s.kind === "check").reduce((n, s) => n + s.minutes, 0)).toBe(20);
+      extra = carriedExtraReview(sessions.map((s) => ({ chapter_id: s.chapterId, date: s.date, minutes: s.minutes, kind: s.kind, done_at: null })));
+      expect(extra).toEqual(new Map());
+    }
+  });
+
+  it("keeps giving an unfinished chapter time after its estimate is used up", () => {
+    expect(chapterMinutesNeeded(ch(1, { doneMinutes: 120, progress: 0.5 }))).toBe(120); // projected: 240 in all
+    expect(chapterMinutesNeeded(ch(1, { doneMinutes: 150, progress: 0.99 }))).toBe(15);
+  });
+
+  it("learns the student's pace from finished chapters", () => {
+    const finished = (id: number, done: number) => ch(id, { complete: true, doneMinutes: done });
+    expect(learnedPace([finished(1, 240)])).toBe(1); // too few to say
+    expect(learnedPace([finished(1, 240), finished(2, 240), ch(3)])).toBe(2);
+    expect(learnedPace([finished(1, 30), finished(2, 30)])).toBe(0.5); // clamped
+    const { sessions } = buildSchedule(
+      input({ chapters: [finished(1, 240), finished(2, 240), ch(3, { stage: 2 })] })
+    );
+    expect(sessions.reduce((n, s) => n + s.minutes, 0)).toBe(240); // 120 × 2
+  });
+});
+
+describe("prerequisites", () => {
+  it("lets a chapter start once what it builds on is done, not the whole earlier stage", () => {
+    // Stage 1: chapters 1 (120) and 2 (120). Chapter 3 (stage 2) builds only on 1.
+    const { sessions } = buildSchedule(
+      input({
+        chapters: [ch(1), ch(2), ch(3, { stage: 2, prerequisites: [1] })],
+        minutesPerDay: 120,
+      })
+    );
+    // Day 1: chapter 1 finishes; chapter 3 can start before chapter 2 is done.
+    expect(sessions.filter((s) => s.date === "2026-01-06").map((s) => s.chapterId)).toContain(3);
+    const lastOf2 = sessions.filter((s) => s.chapterId === 2).map((s) => s.date).sort().pop() as string;
+    const firstOf3 = sessions.find((s) => s.chapterId === 3)?.date as string;
+    expect(firstOf3 <= lastOf2).toBe(true);
+    // ...but never before its own prerequisite is finished.
+    const lastOf1 = sessions.filter((s) => s.chapterId === 1).map((s) => s.date).sort().pop() as string;
+    expect(firstOf3 >= lastOf1).toBe(true);
+  });
+
+  it("still waits for the whole earlier stage when a chapter has no known prerequisites", () => {
+    const { sessions } = buildSchedule(input({ chapters: [ch(1), ch(2), ch(3, { stage: 2, prerequisites: [] })] }));
+    const firstOf3 = sessions.findIndex((s) => s.chapterId === 3);
+    const lastEarlier = sessions.map((s) => s.chapterId !== 3).lastIndexOf(true);
+    expect(firstOf3).toBeGreaterThan(lastEarlier);
+  });
+
+  it("treats a prerequisite that needs no work as already done", () => {
+    const { sessions } = buildSchedule(
+      input({ chapters: [ch(1, { complete: true }), ch(2, { stage: 2, prerequisites: [1] })] })
+    );
+    expect(sessions[0]).toMatchObject({ chapterId: 2, date: MONDAY });
   });
 });

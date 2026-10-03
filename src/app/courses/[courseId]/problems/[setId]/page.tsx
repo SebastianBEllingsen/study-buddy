@@ -8,10 +8,12 @@ import useSWR from "swr";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, Eye, Lightbulb, LoaderCircle, XCircle } from "lucide-react";
 import { cn } from "cn";
-import type { ProblemProgress, PublicProblem, Verdict } from "@/lib/problems/types";
+import type { FinalMatch, ProblemProgress, PublicProblem, Verdict } from "@/lib/problems/types";
+import { compareFinalAnswers } from "@/lib/problems/mathCheck";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { MathText } from "@/components/MathText";
@@ -45,6 +47,28 @@ function VerdictLine({ verdict, feedback }: { verdict: Verdict; feedback: string
   );
 }
 
+// What computer algebra made of the learner's final answer (mathCheck.ts).
+const FINAL_LINE: Record<FinalMatch, { icon: typeof CheckCircle2; tone: string; text: string }> = {
+  equal: { icon: CheckCircle2, tone: "text-sage", text: "Your final answer matches the model's." },
+  close: { icon: CircleAlert, tone: "text-amber", text: "Your final answer is close — check how you rounded." },
+  different: { icon: XCircle, tone: "text-clay", text: "Your final answer doesn't match the model's." },
+  unreadable: {
+    icon: CircleAlert,
+    tone: "text-muted-foreground",
+    text: "Couldn't read your final answer as math, so only your working was checked. Try a form like 2*x + 1 or \\frac{3}{4}.",
+  },
+};
+
+function FinalAnswerLine({ match }: { match: FinalMatch }) {
+  const { icon: Icon, tone, text } = FINAL_LINE[match];
+  return (
+    <p className="flex gap-2 text-sm">
+      <Icon className={cn("mt-0.5 size-4 shrink-0", tone)} />
+      <span>{text}</span>
+    </p>
+  );
+}
+
 export default function ProblemSetPage() {
   const { courseId, setId } = useParams<{ courseId: string; setId: string }>();
   const key = `/api/problem-sets/${setId}`;
@@ -67,6 +91,26 @@ export default function ProblemSetPage() {
       return;
     }
     void mutate(json, { revalidate: false });
+  }
+
+  // Checking the working: if a final answer was typed and there's a model
+  // answer to compare it with, computer algebra (in the browser) compares them
+  // first, and the result goes along as a fact for the check.
+  async function checkSolution(problemIndex: number, working: string, finalText: string, checkable: boolean) {
+    let final: { text: string; match: FinalMatch } | undefined;
+    if (checkable && finalText) {
+      setBusy("solve");
+      const res = await fetch(key, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expr", problem: problemIndex, text: finalText }),
+      }).catch(() => null);
+      const modelExpr: unknown = (await res?.json().catch(() => null))?.modelExpr;
+      if (typeof modelExpr === "string" && modelExpr) {
+        final = { text: finalText, match: (await compareFinalAnswers(finalText, modelExpr)).match };
+      }
+    }
+    await act({ action: "check", problem: problemIndex, text: working, ...(final ? { final } : {}) }, "solve");
   }
 
   if (error) return <p className="text-sm text-destructive">Couldn&apos;t load this problem set.</p>;
@@ -180,12 +224,29 @@ export default function ProblemSetPage() {
               </ol>
             )}
             <Textarea rows={8} value={draft("solution")} onChange={(e) => setDraft("solution", e.target.value)} placeholder="Your full solution — math like $x^2$ works." />
+            {problem.checkable && (
+              <div className="space-y-1">
+                <label htmlFor="final-answer" className="text-sm font-medium">
+                  Final answer <span className="font-normal text-muted-foreground">(optional)</span>
+                </label>
+                <Input
+                  id="final-answer"
+                  value={draft("final")}
+                  onChange={(e) => setDraft("final", e.target.value)}
+                  placeholder={"e.g. 2*x + 1, sqrt(3)/2 or \\frac{3}{4}"}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">Checked with computer algebra: any equivalent form counts.</p>
+              </div>
+            )}
             {progress.solution && <VerdictLine verdict={progress.solution.verdict} feedback={progress.solution.feedback} />}
+            {progress.solution?.finalAnswer && <FinalAnswerLine match={progress.solution.finalAnswer.match} />}
             <div className="flex flex-wrap gap-2">
               <Explain id="problems.check">
               <Button
                 disabled={busy !== null || !draft("solution").trim()}
-                onClick={() => void act({ action: "check", problem: current, text: draft("solution") }, "solve")}
+                onClick={() => void checkSolution(current, draft("solution"), draft("final").trim(), problem.checkable)}
               >
                 {busy === "solve" && <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />}
                 Check my solution
@@ -216,7 +277,10 @@ export default function ProblemSetPage() {
           </p>
         )}
         {problem.stage === "independent" && progress.done && progress.solution && (
-          <VerdictLine verdict={progress.solution.verdict} feedback={progress.solution.feedback} />
+          <>
+            <VerdictLine verdict={progress.solution.verdict} feedback={progress.solution.feedback} />
+            {progress.solution.finalAnswer && <FinalAnswerLine match={progress.solution.finalAnswer.match} />}
+          </>
         )}
 
         <div className="flex flex-wrap justify-end gap-2">

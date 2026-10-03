@@ -11,8 +11,8 @@ import { recordQuizAnswers } from "../review/answers";
 import type { Confidence } from "../review/types";
 import { getExamProfile } from "../exams/store";
 import { createProblemSet, getProblemSet, saveProgress, setProblemPracticeItem } from "./store";
-import type { Problem, ProblemProgress, ProblemSet, Verdict } from "./types";
-import { normalizeCheck, normalizeProblems } from "./validate";
+import type { FinalMatch, Problem, ProblemProgress, ProblemSet, Verdict } from "./types";
+import { normalizeCheck, normalizeProblems, reconcileVerdict } from "./validate";
 
 // Problem-solving practice: a coached set fades support over four problems
 // (worked → faded → two independent); a mixed set interleaves independent
@@ -98,17 +98,24 @@ export async function createMixedSet(courseId: number): Promise<ProblemSet> {
   return createProblemSet({ courseId, chapterId: null, kind: "mixed", title: `Mixed: ${topics.map((t) => t.name).join(", ")}`.slice(0, 200), problems });
 }
 
-async function check(set: ProblemSet, problem: Problem, target: { step: number } | "solution", text: string) {
+async function check(
+  set: ProblemSet,
+  problem: Problem,
+  target: { step: number } | "solution",
+  text: string,
+  final?: { text: string; match: FinalMatch }
+) {
   const ctx = await context(set.course_id);
-  return normalizeCheck(
+  const result = normalizeCheck(
     await generateStructured<unknown>({
       system: checkSystemPrompt(ctx.language),
-      user: checkUserPrompt(problem, target, text),
+      user: checkUserPrompt(problem, target, text, final),
       maxTokens: 1500,
       effort: "low",
       efficient: ctx.efficient,
     })
   );
+  return { ...result, verdict: reconcileVerdict(result.verdict, final?.match) };
 }
 
 function practiceContent(set: ProblemSet): QuizContent {
@@ -162,12 +169,26 @@ async function recordForReview(set: ProblemSet, index: number, verdict: Verdict,
 }
 
 export type ProblemAction =
-  | { action: "check"; problem: number; step?: number; text: string }
+  | { action: "check"; problem: number; step?: number; text: string; final?: { text: string; match: FinalMatch } }
+  | { action: "expr"; problem: number; text: string }
   | { action: "hint"; problem: number }
   | { action: "reveal"; problem: number; step?: number }
   | { action: "done"; problem: number };
 
-export async function actOnProblem(setId: number, act: ProblemAction): Promise<ProblemSet> {
+// The model's final answer as an expression, for the browser to compare a
+// learner's final answer against (mathCheck.ts). Only handed out on request
+// for an unfinished problem the learner is solving alone, and only when it has
+// one; the comparison itself happens in the browser's sandbox.
+export async function modelExpression(setId: number, problemIndex: number): Promise<string | null> {
+  const set = await getProblemSet(setId);
+  if (!set) throw new ProblemSetError("Problem set not found.");
+  const problem = set.problems[problemIndex];
+  if (!problem) throw new ProblemSetError("No such problem.");
+  if (problem.stage !== "independent") return null;
+  return problem.answerExpr ?? null;
+}
+
+export async function actOnProblem(setId: number, act: Exclude<ProblemAction, { action: "expr" }>): Promise<ProblemSet> {
   const set = await getProblemSet(setId);
   if (!set) throw new ProblemSetError("Problem set not found.");
   const problem = set.problems[act.problem];
@@ -205,11 +226,11 @@ export async function actOnProblem(setId: number, act: ProblemAction): Promise<P
       progress.done = problem.blanks.every((b) => progress.revealed.includes(b) || progress.stepAnswers[b]?.verdict === "correct");
     } else if (problem.stage === "independent") {
       if (progress.done) throw new ProblemSetError("This problem is finished.");
-      const result = await check(set, problem, "solution", text);
+      const result = await check(set, problem, "solution", text, act.final);
       // Only the first attempt is scored for review; later attempts are
       // for getting it right.
       const firstAttempt = !progress.solution;
-      progress.solution = { text, ...result };
+      progress.solution = { text, ...result, ...(act.final ? { finalAnswer: act.final } : {}) };
       if (firstAttempt) await recordForReview(set, act.problem, result.verdict, text, result.feedback);
       if (result.verdict === "correct") progress.done = true;
     } else {

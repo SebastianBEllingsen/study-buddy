@@ -36,6 +36,6 @@ export async function POST(request: Request, { params }: Params) {
     return Response.json({ error: "This attempt has already been handed in" }, { status: 409 });
   }
   if (answers) await saveAnswers(attempt.id, answers);
-  void gradeAttempt(attempt.id);
+  void gradeAttempt(attempt.id).catch((err) => console.error("Mock exam: grading crashed:", err));
   return Response.json({ ok: true }, { status: 202 });
 }

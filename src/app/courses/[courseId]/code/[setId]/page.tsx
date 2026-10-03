@@ -239,6 +239,18 @@ function Exercise({
               {skipped.size === 1 ? "it" : "them"} too, so {skipped.size === 1 ? "it's" : "they're"} likely wrong.
             </p>
           )}
+          {!!result.images?.length && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">{result.images.length === 1 ? "Plot" : "Plots"}</p>
+              <div className="flex flex-wrap gap-2">
+                {result.images.map((src, i) => (
+                  // A figure from the learner's own code, as a data URL — next/image has nothing to optimise.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img key={i} src={src} alt={`Plot ${i + 1} drawn by your code`} className="max-h-80 max-w-full rounded border bg-white" />
+                ))}
+              </div>
+            </div>
+          )}
           {result.stdout && (
             <div>
               <p className="text-xs text-muted-foreground">Output</p>

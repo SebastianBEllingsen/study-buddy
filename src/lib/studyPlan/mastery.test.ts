@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeChapterMastery, masteryLevel } from "./mastery";
+import { computeChapterMastery, hasPassed, masteryLevel } from "./mastery";
 
 const NOW = new Date("2026-03-01T12:00:00Z");
 
@@ -42,5 +42,14 @@ describe("masteryLevel", () => {
     expect(masteryLevel(0.3)).toBe("weak");
     expect(masteryLevel(0.6)).toBe("fair");
     expect(masteryLevel(0.85)).toBe("strong");
+  });
+});
+
+describe("hasPassed", () => {
+  it("passes on current mastery, or on a quiz that once hit the bar even after mastery faded", () => {
+    expect(hasPassed(0.75, [])).toBe(true);
+    expect(hasPassed(0.3, [45, 82])).toBe(true);
+    expect(hasPassed(0.3, [45, null])).toBe(false);
+    expect(hasPassed(null, [])).toBe(false);
   });
 });

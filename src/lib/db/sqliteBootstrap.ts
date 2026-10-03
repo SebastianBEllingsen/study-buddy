@@ -329,6 +329,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("courses", "show_practice")) {
     database.exec("ALTER TABLE courses ADD COLUMN show_practice INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("courses", "show_study_tools")) {
+    database.exec("ALTER TABLE courses ADD COLUMN show_study_tools INTEGER NOT NULL DEFAULT 1");
+  }
   if (!hasColumn("courses", "lock_background_crop")) {
     database.exec("ALTER TABLE courses ADD COLUMN lock_background_crop INTEGER NOT NULL DEFAULT 0");
   }
@@ -482,6 +485,12 @@ export function migrate(database: Database.Database) {
       "ALTER TABLE app_settings ADD COLUMN dashboard_transparent_widgets INTEGER NOT NULL DEFAULT 0"
     );
   }
+  if (!hasColumn("app_settings", "today_card_shown")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN today_card_shown INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!hasColumn("app_settings", "today_card_frosted")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN today_card_frosted INTEGER NOT NULL DEFAULT 1");
+  }
   if (!hasColumn("app_settings", "dashboard_lock_background_crop")) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN dashboard_lock_background_crop INTEGER NOT NULL DEFAULT 0"
@@ -565,6 +574,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "flashcard_audio_autoplay")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN flashcard_audio_autoplay TEXT");
   }
+  if (!hasColumn("app_settings", "deck_reminder_icons")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN deck_reminder_icons INTEGER NOT NULL DEFAULT 1");
+  }
   if (!hasColumn("mock_exam_attempts", "paused_at")) {
     database.exec("ALTER TABLE mock_exam_attempts ADD COLUMN paused_at TEXT");
   }
@@ -576,6 +588,12 @@ export function migrate(database: Database.Database) {
   }
   if (!hasColumn("documents", "trust")) {
     database.exec("ALTER TABLE documents ADD COLUMN trust TEXT NOT NULL DEFAULT 'official'");
+  }
+  if (!hasColumn("mistakes", "error_type")) {
+    database.exec("ALTER TABLE mistakes ADD COLUMN error_type TEXT");
+  }
+  if (!hasColumn("documents", "transcribed_at")) {
+    database.exec("ALTER TABLE documents ADD COLUMN transcribed_at TEXT");
   }
   if (!hasColumn("notes", "generation_source")) {
     database.exec("ALTER TABLE notes ADD COLUMN generation_source TEXT");

@@ -435,6 +435,41 @@
       "when": 1790675638246,
       "tag": "0061_condemned_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790701351948,
+      "tag": "0062_gray_spyke",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1790786852373,
+      "tag": "0063_transcribed_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1790789615282,
+      "tag": "0064_mistake_error_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1790792723060,
+      "tag": "0065_today_card_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1790851272752,
+      "tag": "0066_course_show_study_tools",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   setAiGradingEnabled,
   setUnlimitedUploads,
   setDocumentBadgesEnabled,
+  setDeckReminderIcons,
   setDocumentBadgeDetail,
   setFolderChips,
   setAppWallpaper,
@@ -143,6 +144,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "documentBadgesEnabled must be a boolean" }, { status: 400 });
     }
     await setDocumentBadgesEnabled(body.documentBadgesEnabled);
+  }
+
+  if (body?.deckReminderIcons !== undefined) {
+    if (typeof body.deckReminderIcons !== "boolean") {
+      return Response.json({ error: "deckReminderIcons must be a boolean" }, { status: 400 });
+    }
+    await setDeckReminderIcons(body.deckReminderIcons);
   }
 
   if (body?.documentBadgeDetail !== undefined) {
@@ -305,12 +313,13 @@ export async function POST(request: Request) {
           isNonNegativeNumber(w?.col) &&
           isNonNegativeNumber(w?.row) &&
           isNonNegativeNumber(w?.colSpan) &&
-          isNonNegativeNumber(w?.rowSpan)
+          isNonNegativeNumber(w?.rowSpan) &&
+          (w?.frosted === undefined || typeof w.frosted === "boolean")
       );
     if (!valid) {
       return Response.json(
         {
-          error: `homeWidgets must include each of ${HOME_WIDGET_IDS.join(", ")} exactly once, each with numeric col/row/colSpan/rowSpan`,
+          error: `homeWidgets must include each of ${HOME_WIDGET_IDS.join(", ")} exactly once, each with numeric col/row/colSpan/rowSpan (and frosted, if given, true or false)`,
         },
         { status: 400 }
       );
@@ -372,6 +381,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "dashboardTransparentWidgets must be a boolean" }, { status: 400 });
     }
     branding.dashboardTransparentWidgets = body.dashboardTransparentWidgets;
+  }
+  for (const field of ["todayCardShown", "todayCardFrosted"] as const) {
+    if (field in body) {
+      if (typeof body[field] !== "boolean") {
+        return Response.json({ error: `${field} must be a boolean` }, { status: 400 });
+      }
+      branding[field] = body[field];
+    }
   }
   if ("dashboardLockBackgroundCrop" in body) {
     if (typeof body.dashboardLockBackgroundCrop !== "boolean") {

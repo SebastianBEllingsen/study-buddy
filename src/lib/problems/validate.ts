@@ -1,6 +1,6 @@
 import { InvalidAiResponseError } from "../aiResponseValidation";
 import { cleanConceptName } from "../conceptName";
-import type { Problem, ProblemStage, ProblemStep, Verdict } from "./types";
+import type { FinalMatch, Problem, ProblemStage, ProblemStep, Verdict } from "./types";
 
 const STAGES: ProblemStage[] = ["worked", "faded", "independent"];
 
@@ -10,6 +10,13 @@ function obj(v: unknown): Record<string, unknown> {
 
 function str(v: unknown, max: number): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
+}
+
+// A final-answer expression is one line of plain math; anything else (a proof,
+// several answers) isn't something to compare symbolically.
+function expression(v: unknown): string | undefined {
+  const text = str(v, 200);
+  return text && !/[\n\r]/.test(text) ? text : undefined;
 }
 
 export function normalizeProblems(raw: unknown, kind: "coach" | "mixed"): { title: string; problems: Problem[] } {
@@ -40,6 +47,7 @@ export function normalizeProblems(raw: unknown, kind: "coach" | "mixed"): { titl
         steps,
         blanks: blanks.sort((a, b) => a - b),
         answer: str(o.answer, 2000) || steps[steps.length - 1].text,
+        ...(expression(o.answerExpr) && { answerExpr: expression(o.answerExpr) }),
       },
     ];
   });
@@ -62,6 +70,15 @@ export function interleaveByConcept<T extends { concept: string }>(items: T[]): 
     last = pick[0];
   }
   return out;
+}
+
+// A computer-algebra check of the final answer is fact, so it bounds what a
+// language model may conclude: a different final answer can't be fully
+// correct, and a right final answer isn't wholly wrong (the working is).
+export function reconcileVerdict(verdict: Verdict, match: FinalMatch | undefined): Verdict {
+  if (match === "different" && verdict === "correct") return "partial";
+  if (match === "equal" && verdict === "incorrect") return "partial";
+  return verdict;
 }
 
 export function normalizeCheck(raw: unknown): { verdict: Verdict; feedback: string } {

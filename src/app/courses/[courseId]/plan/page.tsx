@@ -13,11 +13,12 @@ import { buildIsStuck, chapterNumbers, linksAreStale, planProgress } from "@/lib
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import ModelBadge from "@/components/ModelBadge";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
-import { RowActionsMenu } from "@/components/RowActionsMenu";
+import { DeleteStudyPlanMenu } from "@/components/study-plan/DeleteStudyPlanMenu";
 import { RoadmapIndex } from "@/components/study-plan/RoadmapIndex";
 import { ChapterCard } from "@/components/study-plan/ChapterCard";
 import { ChapterEditDialog, type ChapterDraft } from "@/components/study-plan/ChapterEditDialog";
 import { TopicLevelStep } from "@/components/study-plan/TopicLevelStep";
+import { useAppName } from "@/lib/useAppName";
 import { ScheduleView } from "@/components/study-plan/ScheduleView";
 import { ScheduleSettingsDialog } from "@/components/study-plan/ScheduleSettingsDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -42,6 +43,7 @@ interface CourseDetail {
 }
 
 export default function StudyPlanPage() {
+  const appName = useAppName();
   const { courseId } = useParams<{ courseId: string }>();
   const router = useRouter();
   const aiEnabled = useAiEnabled();
@@ -205,13 +207,7 @@ export default function StudyPlanPage() {
     await mutate();
   }
 
-  async function handleDelete() {
-    if (!plan) return;
-    const res = await fetch(`/api/study-plans/${plan.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      toast.error("Couldn't delete the plan");
-      return;
-    }
+  async function handleDeleted() {
     await mutate();
     router.push(`/courses/${courseId}`);
   }
@@ -254,7 +250,7 @@ export default function StudyPlanPage() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href="/" />}>Study Buddy</BreadcrumbLink>
+              <BreadcrumbLink render={<Link href="/" />}>{appName}</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
@@ -300,8 +296,8 @@ export default function StudyPlanPage() {
               )}
               {checkingLinks ? "Checking links…" : "Check links"}
             </Button>
-            <RowActionsMenu
-              ariaLabel="Study plan actions"
+            <DeleteStudyPlanMenu
+              plan={plan}
               actions={[
                 {
                   label: "Rename",
@@ -321,9 +317,7 @@ export default function StudyPlanPage() {
                   onSelect: () => void updateOptions({ practice: !plan.options.practice }),
                 },
               ]}
-              deleteLabel="Delete study plan"
-              deleteDescription="Deletes the plan, its checklists and its links. Course documents aren't touched."
-              onDelete={handleDelete}
+              onDeleted={handleDeleted}
             />
           </div>
         </div>

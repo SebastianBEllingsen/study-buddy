@@ -9,12 +9,16 @@ import { chapterNumbers, formatDay, formatMinutes, nextChapter, planProgress } f
 import { localToday } from "@/lib/studyPlan/schedule";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { FROSTED_CARD, useTransparentWidgets } from "@/lib/useTransparentWidgets";
+import { cn } from "cn";
+import { DeleteStudyPlanMenu } from "./DeleteStudyPlanMenu";
 
 // Pinned at the top of a course page once the course has a study plan:
 // overall progress and the next chapter to work on, one click from the full
 // plan.
-export function StudyPlanCard({ courseId, plan }: { courseId: number; plan: StudyPlan }) {
+export function StudyPlanCard({ courseId, plan, onDeleted }: { courseId: number; plan: StudyPlan; onDeleted: () => void }) {
   const fmt = useDateFormatter();
+  const transparent = useTransparentWidgets();
   const progress = planProgress(plan);
   const next = nextChapter(plan);
   const numbers = chapterNumbers(plan.chapters);
@@ -23,10 +27,11 @@ export function StudyPlanCard({ courseId, plan }: { courseId: number; plan: Stud
   const nextSession = plan.options.schedule
     ? plan.sessions.find((s) => !s.done_at && s.date >= today)
     : undefined;
+  const deadlinePassed = plan.options.schedule && !!plan.options.deadline && plan.options.deadline < today;
   const nextSessionChapter = nextSession ? plan.chapters.find((c) => c.id === nextSession.chapter_id) : undefined;
 
   return (
-    <Card elevation="flat" className="py-0">
+    <Card className={cn("py-0", transparent && FROSTED_CARD)}>
       <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-1.5">
           <div className="flex items-center gap-2 font-heading text-base font-semibold">
@@ -75,17 +80,24 @@ export function StudyPlanCard({ courseId, plan }: { courseId: number; plan: Stud
               {formatMinutes(nextSession.minutes)} on {nextSessionChapter.title}
             </p>
           )}
+          {deadlinePassed && plan.status === "ready" && (
+            <p className="text-xs text-amber">
+              The finish date has passed — open the plan and pick a new one in the schedule settings.
+            </p>
+          )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 self-start sm:self-center"
-          nativeButton={false}
-          render={<Link href={`/courses/${courseId}/plan${next ? `#chapter-${next.id}` : ""}`} />}
-        >
-          {plan.status === "draft_topics" ? "Continue" : "Open plan"}
-          <ArrowRight className="size-3.5" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1.5 self-start sm:self-center">
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link href={`/courses/${courseId}/plan${next ? `#chapter-${next.id}` : ""}`} />}
+          >
+            {plan.status === "draft_topics" ? "Continue" : "Open plan"}
+            <ArrowRight className="size-3.5" />
+          </Button>
+          <DeleteStudyPlanMenu plan={plan} onDeleted={onDeleted} />
+        </div>
       </CardContent>
     </Card>
   );

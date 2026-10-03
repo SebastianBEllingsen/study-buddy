@@ -5,7 +5,7 @@ import type { StepCompletion } from "./planDay";
 // What a Today step's "Done" records: a resource ticked off, a subtopic
 // checked, or — when the day's session is finished — the plan's session.
 
-export type CompletionRequest = StepCompletion | { type: "session"; planId: number; sessionId: number };
+export type CompletionRequest = StepCompletion | { type: "session"; planId: number; sessionId: number; minutes?: number };
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0;
@@ -20,9 +20,21 @@ export function parseCompletion(body: Record<string, unknown>): CompletionReques
     return { type: "subtopic", planId: body.planId, chapterId: body.chapterId, index: body.index as number };
   }
   if (body.type === "session" && isId(body.sessionId)) {
-    return { type: "session", planId: body.planId, sessionId: body.sessionId };
+    return {
+      type: "session",
+      planId: body.planId,
+      sessionId: body.sessionId,
+      ...(Number.isInteger(body.minutes) ? { minutes: body.minutes as number } : {}),
+    };
   }
   return null;
+}
+
+// How long a session really took is only believed when it's plausible for
+// what was planned (a tab left open for hours says nothing).
+export function actualMinutes(planned: number, reported: number | undefined): number | undefined {
+  if (reported === undefined || reported < 5) return undefined;
+  return reported >= planned * 0.25 && reported <= planned * 2 ? reported : undefined;
 }
 
 // false when the thing named doesn't exist in that plan.
@@ -44,6 +56,6 @@ export async function completeStep(req: CompletionRequest): Promise<boolean> {
   }
   const session = await getSession(req.sessionId);
   if (!session || session.plan_id !== req.planId) return false;
-  await setSessionDone(session.id, true);
+  await setSessionDone(session.id, true, actualMinutes(session.minutes, req.minutes));
   return true;
 }

@@ -24,6 +24,7 @@ import { buildNoteLinkHref } from "@/lib/noteLinks";
 import { youTubeEmbedUrl } from "@/lib/youtube";
 import YouTubeEmbed from "@/components/YouTubeEmbed";
 import { cardAccentStyle, useCanvasActions } from "./CanvasContext";
+import { useAppName } from "@/lib/useAppName";
 
 const SIDE_POSITION: Record<CanvasSide, Position> = {
   top: Position.Top,
@@ -255,6 +256,7 @@ function ImageCard({ imageId }: { imageId: number }) {
 }
 
 export const FileNode = memo(function FileNode({ data, selected }: NodeProps<CanvasFlowNode>) {
+  const appName = useAppName();
   const ref = parseFileRef(data.file ?? "");
   const isImage = ref?.type === "image";
   return (
@@ -267,7 +269,7 @@ export const FileNode = memo(function FileNode({ data, selected }: NodeProps<Can
         {!ref ? (
           <>
             <CardHeader icon={FileQuestion} title={data.file ?? "Unknown file"} href={null} />
-            <MissingCard label="This card points at a file that isn't part of Study Buddy." />
+            <MissingCard label={`This card points at a file that isn't part of ${appName}.`} />
           </>
         ) : ref.type === "note" ? (
           <NoteCard noteId={ref.id} />

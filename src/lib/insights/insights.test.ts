@@ -86,5 +86,14 @@ describe("loadInsights", () => {
     expect(insights.calibration.find((r) => r.confidence === "sure")).toMatchObject({ answers: 1, correct: 0 });
     const all = await loadInsights(null);
     expect(all.week.reviews).toBe(2);
+
+    // The kinds of open mistake, once the AI has typed them.
+    expect(insights.mistakeTypes).toEqual([]);
+    const { listMistakes, setMistakeTypes } = await import("../review/mistakes");
+    const [miss] = await listMistakes({ courseId: course.id, status: "open" });
+    await setMistakeTypes(new Map([[miss.id, "slip"]]));
+    expect((await loadInsights(course.id)).mistakeTypes).toEqual([{ type: "slip", count: 1, share: 1 }]);
+    // Another course's mistakes aren't counted in this course's mix.
+    expect((await loadInsights(other.id)).mistakeTypes).toEqual([]);
   });
 });

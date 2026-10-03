@@ -1,0 +1,2 @@
+ALTER TABLE "app_settings" ADD COLUMN "today_card_shown" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_settings" ADD COLUMN "today_card_frosted" boolean DEFAULT true NOT NULL;

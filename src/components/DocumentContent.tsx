@@ -16,11 +16,20 @@ import {
 import { captureElementRegion } from "@/lib/cropCapture";
 import { scrollToHighlight } from "@/lib/scrollToHighlight";
 import PastedTextView from "@/components/PastedTextView";
-import DocxViewer from "@/components/DocxViewer";
 import ImageViewer from "@/components/ImageViewer";
 import { Download } from "lucide-react";
 import { extensionOf, isImageExtension } from "@/lib/documentFormats";
 import { useAiEnabled } from "@/lib/useAiEnabled";
+
+// The Word viewer's library is only needed when a .docx is opened.
+const DocxViewer = dynamic(() => import("@/components/DocxViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      Loading…
+    </div>
+  ),
+});
 
 // pdfjs-dist assumes a browser (Worker, DOM) — loaded client-only so its
 // module code never runs during SSR (it does, and warns, if imported

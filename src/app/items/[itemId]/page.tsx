@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useDateFormatter } from "@/components/DateFormatProvider";
@@ -9,6 +9,7 @@ import useSWR from "swr";
 import { saveStateLabel, useAutosave } from "@/lib/autosave";
 import { Bell, BellOff, Download, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { useAppName } from "@/lib/useAppName";
 import type { GeneratedItem, QuizAttempt } from "@/lib/models";
 import type { QuizContent, FlashcardsContent, NotesContent } from "@/lib/types";
 import QuizRunner from "@/components/QuizRunner";
@@ -16,7 +17,8 @@ import FlashcardViewer from "@/components/FlashcardViewer";
 import { FlaggedItemsPanel } from "@/components/sources/FlaggedItemsPanel";
 import { flaggedEntries } from "@/lib/sources/flags";
 import EditFlashcardsDialog from "@/components/EditFlashcardsDialog";
-import NoteEditor, { type NoteEditorHandle } from "@/components/NoteEditor";
+import { CalculationCardsPanel } from "@/components/CalculationCardsPanel";
+import type { NoteEditorHandle } from "@/components/NoteEditor";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
 import { useCropToAsk } from "@/components/ask-ai/useCropToAsk";
 import {
@@ -42,6 +44,11 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+
+// The notes editor (CodeMirror) is only needed for a notes item — quizzes and
+// flashcards don't download it. `lazy` keeps the ref working, which
+// next/dynamic doesn't.
+const NoteEditor = lazy(() => import("@/components/NoteEditor"));
 
 interface ItemDetail {
   item: GeneratedItem;
@@ -74,6 +81,7 @@ const MODE_UNIT: Record<GeneratedItem["mode"], string> = {
 
 
 export default function ItemPage() {
+  const appName = useAppName();
   const fmt = useDateFormatter();
   const params = useParams<{ itemId: string }>();
   const router = useRouter();
@@ -297,7 +305,7 @@ export default function ItemPage() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href="/" />}>Study Buddy</BreadcrumbLink>
+              <BreadcrumbLink render={<Link href="/" />}>{appName}</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
@@ -404,7 +412,11 @@ export default function ItemPage() {
             onMouseUp={handleNotesCropMouseUp}
           >
             <CardContent className="h-full p-0">
-              <NoteEditor ref={noteEditorRef} value={noteMarkdown} onChange={handleNotesChange} />
+              <Suspense
+                fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>}
+              >
+                <NoteEditor ref={noteEditorRef} value={noteMarkdown} onChange={handleNotesChange} />
+              </Suspense>
             </CardContent>
           </Card>
           <CropSelectionOverlay rect={notesCropRect} />
@@ -481,6 +493,10 @@ export default function ItemPage() {
               mode: "flashcards",
             }))}
             onChanged={() => void mutateItem()}
+          />
+          <CalculationCardsPanel
+            cards={(content as FlashcardsContent).cards}
+            onRemove={(cards, removedIndices) => saveContent({ ...content, cards }, removedIndices)}
           />
           <FlashcardViewer
             itemId={item.id}

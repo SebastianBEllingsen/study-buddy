@@ -10,6 +10,10 @@ import type { FlashcardResult } from "../models";
 export const HALF_LIFE_DAYS = 14;
 const QUIZ_WEIGHT = 5;
 
+// A finished chapter counts as learned once this well known: the "pass a
+// check before moving on" bar (studyPlanDisplay.ts, schedule.ts).
+export const PASS_MASTERY = 0.7;
+
 const CARD_VALUE: Record<FlashcardResult, number> = {
   again: 0,
   hard: 0.5,
@@ -57,4 +61,12 @@ export function masteryLevel(mastery: number | null): MasteryLevel {
   if (mastery < 0.5) return "weak";
   if (mastery < 0.8) return "fair";
   return "strong";
+}
+
+// Passed: known well right now, or a finished quiz on the chapter has ever
+// scored the pass bar. Mastery fades with time, but having passed doesn't —
+// a chapter passed weeks ago isn't sent back for another check.
+export function hasPassed(mastery: number | null, quizBestScores: (number | null)[]): boolean {
+  if (mastery !== null && mastery >= PASS_MASTERY) return true;
+  return quizBestScores.some((score) => score !== null && score / 100 >= PASS_MASTERY);
 }

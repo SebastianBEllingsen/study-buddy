@@ -255,6 +255,34 @@ describe("recoveredSinceLastMiss", () => {
   });
 });
 
+describe("a mistake's type", () => {
+  const miss = (itemId: number, given: string | null) =>
+    mistakesModule.logMistake({
+      generatedItemId: itemId, reviewItemId: null, conceptId: null, kind: "question", itemIndex: 0,
+      prompt: "Explain", givenAnswer: given, correctAnswer: "Because", confidence: null,
+    });
+
+  it("is saved with the note, kept for the same wrong answer, and cleared by a different one", async () => {
+    const { quiz } = await setup();
+    const first = await miss(quiz.id, "a guess");
+    expect(first.error_type).toBeNull();
+    await mistakesModule.setMisconceptions(new Map([[first.id, "Confuses cause and effect"]]));
+    await mistakesModule.setMistakeTypes(new Map([[first.id, "concept"]]));
+    const labelled = await mistakesModule.getMistake(first.id);
+    expect(labelled).toMatchObject({ misconception: "Confuses cause and effect", error_type: "concept" });
+
+    // The same wrong answer again: the note and type still fit.
+    const same = await miss(quiz.id, "a guess");
+    expect(same.id).toBe(first.id);
+    expect(same).toMatchObject({ misconception: "Confuses cause and effect", error_type: "concept" });
+
+    // A different wrong answer: neither does.
+    const different = await miss(quiz.id, "another guess");
+    expect(different.id).toBe(first.id);
+    expect(different).toMatchObject({ misconception: null, error_type: null });
+  });
+});
+
 describe("reconcileReviewItemsAfterRemoval", () => {
   it("drops removed cards' state and mistakes and shifts later ones down", async () => {
     const { deck } = await setup();

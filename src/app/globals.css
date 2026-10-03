@@ -2354,6 +2354,12 @@ html[data-header-brand="adapt"] [data-slot="app-brand"] {
   }
   html {
     @apply font-sans;
+    /* The full-bleed banners (w-screen, -mx-[50vw]) are 100vw wide, which
+       counts the vertical scrollbar, so they overshoot by its width and the
+       page scrolls sideways. On the root this applies to the viewport itself
+       (body's wouldn't); clip, unlike hidden, also blocks scripted scrolling and keeps sticky
+       headers working. */
+    overflow-x: clip;
   }
 }
 
@@ -2497,6 +2503,17 @@ html[data-header-brand="adapt"] [data-slot="app-brand"] {
    shows its scrollbar while the pointer is over it — the thumb is
    transparent at rest and only painted on :hover, rather than the
    scrollbar disappearing/reserving no space, so content never reflows. */
+/* Grows a small link or icon's click area to at least 24px without moving
+   anything: an invisible box around it, like the checkbox's own. */
+.tap-target {
+  position: relative;
+}
+.tap-target::after {
+  content: "";
+  position: absolute;
+  inset: -6px -8px;
+}
+
 .scrollbar-hover {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -2710,4 +2727,18 @@ html[data-header-brand="adapt"] [data-slot="app-brand"] {
 }
 .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 3;
+}
+
+
+/* "Frosted" widgets (Settings → Appearance, Customize): with transparent
+   widgets on, a widget marked data-frosted keeps its solid card but see-through
+   and blurred, so the picture shows while the text stays readable. The marker
+   goes on the widget's grid tile; the card is its first child, whether a Card
+   or a plain container with bg-card. Same look as FROSTED_CARD
+   (lib/useTransparentWidgets.ts). */
+[data-frosted] > :is([data-slot="card"], .bg-card) {
+  background-color: color-mix(in srgb, var(--card) 70%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  text-shadow: none;
 }

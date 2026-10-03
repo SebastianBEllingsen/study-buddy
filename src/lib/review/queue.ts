@@ -31,7 +31,11 @@ export async function loadQueueSources(courseId: number | null): Promise<LoadedS
   // Content from memory where it hasn't changed — see itemContentCache.ts.
   const [reviews, contents] = await Promise.all([listReviewItemsForItems(rows.map((r) => r.id)), itemContents(rows)]);
   const byItem = new Map<number, ReviewItemRow[]>();
-  for (const r of reviews) byItem.set(r.generated_item_id, [...(byItem.get(r.generated_item_id) ?? []), r]);
+  for (const r of reviews) {
+    const list = byItem.get(r.generated_item_id);
+    if (list) list.push(r);
+    else byItem.set(r.generated_item_id, [r]);
+  }
 
   const sources: LoadedSource[] = [];
   for (const row of rows) {

@@ -80,6 +80,9 @@ export const courses = pgTable("courses", {
   // False hides the course page's Practice card, for courses that aren't
   // studied with quizzes/flashcards. Defaults true (today's behavior).
   show_practice: boolean("show_practice").notNull().default(true),
+  // False hides the course page's tool buttons (Review, Mistakes, Exam prep, …)
+  // and Today card, for courses that aren't studied. Defaults true.
+  show_study_tools: boolean("show_study_tools").notNull().default(true),
   // The course-page counterpart of app_settings.dashboard_lock_background_crop:
   // true draws page_background_image at exactly the aspect ratio it was
   // cropped to, instead of a fixed-height banner that reframes on resize.
@@ -143,6 +146,9 @@ export const app_settings = pgTable("app_settings", {
   ai_grading_enabled: boolean("ai_grading_enabled").notNull().default(false),
   // See AppSettings.dashboardTransparentWidgets's doc comment in models.ts.
   dashboard_transparent_widgets: boolean("dashboard_transparent_widgets").notNull().default(false),
+  // See AppSettings.todayCardShown / todayCardFrosted in models.ts.
+  today_card_shown: boolean("today_card_shown").notNull().default(true),
+  today_card_frosted: boolean("today_card_frosted").notNull().default(true),
   // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
   dashboard_lock_background_crop: boolean("dashboard_lock_background_crop").notNull().default(false),
   // See AppSettings.dashboardBackdropFullPage's doc comment in models.ts.
@@ -192,6 +198,7 @@ export const app_settings = pgTable("app_settings", {
   review_retention: real("review_retention"),
   new_cards_per_day: integer("new_cards_per_day"),
   flashcard_audio_autoplay: text("flashcard_audio_autoplay"),
+  deck_reminder_icons: boolean("deck_reminder_icons").notNull().default(true),
   fsrs_migrated_at: text("fsrs_migrated_at"),
   updated_at: text("updated_at").notNull(),
 });
@@ -243,6 +250,8 @@ export const documents = pgTable(
     char_count: integer("char_count"),
     status: text("status").notNull().default("pending").$type<DocumentStatus>(),
     error_message: text("error_message"),
+    // See schema.sqlite.ts.
+    transcribed_at: text("transcribed_at"),
     // "official" (course material) or "personal" (the student's own notes) —
   // see the matching comment in schema.sql.
   trust: text("trust").notNull().default("official").$type<SourceTrust>(),
@@ -669,6 +678,8 @@ export const mistakes = pgTable(
     correct_answer: text("correct_answer").notNull(),
     confidence: text("confidence").$type<Confidence>(),
     misconception: text("misconception"),
+    // See schema.sqlite.ts.
+    error_type: text("error_type"),
     created_at: text("created_at").notNull(),
     resolved_at: text("resolved_at"),
   },

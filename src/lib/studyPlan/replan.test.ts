@@ -59,7 +59,15 @@ describe("replanStudyPlan", () => {
     generateStructured.mockRejectedValue(new Error("AI off"));
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await replanStudyPlan(1);
-    expect(reschedulePlan).toHaveBeenCalledWith(1, new Map());
+    expect(reschedulePlan).toHaveBeenCalledWith(1, undefined);
     expect(result.message).toBe("Moved 1 missed session forward from today.");
+  });
+
+  it("only moves the missed sessions, without calling the AI, when asked", async () => {
+    const result = await replanStudyPlan(1, { useAi: false });
+    expect(generateStructured).not.toHaveBeenCalled();
+    expect(reschedulePlan).toHaveBeenCalledWith(1, undefined);
+    expect(result.message).toBe("Moved 1 missed session forward from today.");
+    expect(result.extraReview).toEqual([]);
   });
 });

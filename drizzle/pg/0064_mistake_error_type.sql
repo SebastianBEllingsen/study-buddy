@@ -1,0 +1,1 @@
+ALTER TABLE "mistakes" ADD COLUMN "error_type" text;

@@ -20,7 +20,7 @@ vi.mock("./store", () => ({
   setSessionGoogleEventId: (...a: unknown[]) => setSessionGoogleEventId(...a),
 }));
 
-const { reschedulePlan, setGoogleCalendarSync, pushSessionsToGoogle } = await import("./scheduleService");
+const { reschedulePlan, setGoogleCalendarSync, pushSessionsToGoogle, removePlanFromGoogle } = await import("./scheduleService");
 const { PRESET_DEFAULTS } = await import("./options");
 
 function makePlan(options: Partial<StudyPlan["options"]>, sessions: StudyPlan["sessions"] = []): StudyPlan {
@@ -114,6 +114,26 @@ describe("Google Calendar sync", () => {
     await setGoogleCalendarSync(1, false);
     expect(setSessionGoogleEventId).toHaveBeenCalledWith(1, null);
     expect(setPlanOptions).toHaveBeenCalledWith(1, expect.objectContaining({ googleCalendar: false }));
+  });
+
+  it("removing a plan from Google takes out every event, finished sessions' too, even if one fails", async () => {
+    plan = makePlan({ schedule: true, googleCalendar: true }, [
+      session(1, { google_event_id: "a" }),
+      session(2, { google_event_id: "b", done_at: "2026-01-01 00:00:00" }),
+      session(3),
+    ]);
+    deleteEvent.mockRejectedValueOnce(new Error("offline"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await removePlanFromGoogle(1);
+    expect(deleteEvent).toHaveBeenCalledWith("a");
+    expect(deleteEvent).toHaveBeenCalledWith("b");
+    expect(deleteEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("removing a plan with no events calls nothing", async () => {
+    plan = makePlan({ schedule: true }, [session(1)]);
+    await removePlanFromGoogle(1);
+    expect(deleteEvent).not.toHaveBeenCalled();
   });
 
   it("switching on sets the flag before pushing", async () => {

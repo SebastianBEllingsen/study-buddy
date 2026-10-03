@@ -76,12 +76,10 @@ export function questionForQueue(q: QuizQuestion): QueueQuestion {
 // Round-robin across groups, each group keeping its own order.
 export function interleave<T>(groups: T[][]): T[] {
   const out: T[] = [];
-  const queues = groups.filter((g) => g.length > 0).map((g) => [...g]);
-  while (queues.some((q) => q.length > 0)) {
-    for (const q of queues) {
-      const next = q.shift();
-      if (next !== undefined) out.push(next);
-    }
+  let live = groups.filter((g) => g.length > 0);
+  for (let round = 0; live.length > 0; round++) {
+    for (const g of live) out.push(g[round]);
+    live = live.filter((g) => g.length > round + 1);
   }
   return out;
 }
@@ -95,7 +93,9 @@ export function buildQueue(
   const nowText = toUtcText(options.now);
   const counts: QueueCounts = { dueCards: 0, dueQuestions: 0, newCards: 0 };
   const dueGroups: { oldest: string; entries: QueueEntry[] }[] = [];
-  const newGroups: QueueEntry[][] = [];
+  // Never-seen cards stay light (source + index) until the daily allowance
+  // has picked which ones are shown — a big deck has thousands.
+  const newGroups: { source: QueueSource; index: number }[][] = [];
 
   for (const source of sources) {
     const base = {
@@ -106,7 +106,7 @@ export function buildQueue(
     };
     const byIndex = new Map<string, QueueReview>(source.reviews.map((r) => [`${r.kind}:${r.item_index}`, r]));
     const due: QueueEntry[] = [];
-    const fresh: QueueEntry[] = [];
+    const fresh: { source: QueueSource; index: number }[] = [];
     const entryKey = (kind: ReviewItemKind, index: number) => `${source.itemId}:${kind}:${index}`;
 
     if (source.mode === "flashcards") {
@@ -115,19 +115,22 @@ export function buildQueue(
       content.cards.forEach((card, index) => {
         if (card.flag) return;
         const review = byIndex.get(`card:${index}`);
-        const entry = {
+        if (!review) {
+          fresh.push({ source, index });
+          return;
+        }
+        if (review.due_at > nowText) return;
+        due.push({
           ...base,
           key: entryKey("card", index),
-          kind: "card" as const,
+          kind: "card",
           index,
           card,
           concept: card.concept ?? null,
           ...(card.source && { source: card.source }),
-          isNew: !review,
-          dueAt: review?.due_at ?? null,
-        };
-        if (!review) fresh.push(entry);
-        else if (review.due_at <= nowText) due.push(entry);
+          isNew: false,
+          dueAt: review.due_at,
+        });
       });
     } else {
       const content = source.content as QuizContent;
@@ -160,7 +163,25 @@ export function buildQueue(
   // Most overdue sets lead each round.
   dueGroups.sort((a, b) => a.oldest.localeCompare(b.oldest));
   const allowance = Math.max(0, options.newCardAllowance);
-  const newEntries = interleave(newGroups).slice(0, allowance);
+  const newEntries: QueueEntry[] = interleave(newGroups)
+    .slice(0, allowance)
+    .map(({ source, index }) => {
+      const card = (source.content as FlashcardsContent).cards[index];
+      return {
+        itemId: source.itemId,
+        itemTitle: source.itemTitle,
+        courseId: source.courseId,
+        courseName: source.courseName,
+        key: `${source.itemId}:card:${index}`,
+        kind: "card" as const,
+        index,
+        card,
+        concept: card.concept ?? null,
+        ...(card.source && { source: card.source }),
+        isNew: true,
+        dueAt: null,
+      };
+    });
   counts.newCards = newEntries.length;
 
   // New cards are spread through the due reviews rather than saved for
@@ -183,6 +204,15 @@ export function buildQueue(
 // order; anything that no longer exists is skipped.
 export function buildFocusQueue(sources: QueueSource[], keys: string[], limit: number): QueueEntry[] {
   const byItem = new Map(sources.map((s) => [s.itemId, s]));
+  const reviewsOf = new Map<QueueSource, Map<string, QueueReview>>();
+  const reviewFor = (source: QueueSource, kind: string, index: number) => {
+    let byKey = reviewsOf.get(source);
+    if (!byKey) {
+      byKey = new Map(source.reviews.map((r) => [`${r.kind}:${r.item_index}`, r]));
+      reviewsOf.set(source, byKey);
+    }
+    return byKey.get(`${kind}:${index}`);
+  };
   const seen = new Set<string>();
   const entries: QueueEntry[] = [];
   for (const key of keys) {
@@ -192,7 +222,7 @@ export function buildFocusQueue(sources: QueueSource[], keys: string[], limit: n
     const source = byItem.get(Number(itemId));
     const i = Number(index);
     if (!source || !Number.isInteger(i)) continue;
-    const review = source.reviews.find((r) => r.kind === kind && r.item_index === i);
+    const review = reviewFor(source, kind, i);
     const base = {
       key,
       itemId: source.itemId,
@@ -230,6 +260,7 @@ export function conceptKeys(sources: QueueSource[], conceptKey: string): string[
   const found: { key: string; last: string }[] = [];
   for (const source of sources) {
     const kind: ReviewItemKind = source.mode === "flashcards" ? "card" : "question";
+    const byKey = new Map(source.reviews.map((r) => [`${r.kind}:${r.item_index}`, r]));
     // Flagged items (held out of review) never match.
     const concepts =
       source.mode === "flashcards"
@@ -237,7 +268,7 @@ export function conceptKeys(sources: QueueSource[], conceptKey: string): string[
         : (source.content as QuizContent).questions.map((q) => (q.flag ? undefined : q.concept));
     concepts.forEach((name, index) => {
       if (name?.trim().toLowerCase() !== conceptKey) return;
-      const review = source.reviews.find((r) => r.kind === kind && r.item_index === index);
+      const review = byKey.get(`${kind}:${index}`);
       found.push({ key: `${source.itemId}:${kind}:${index}`, last: review?.due_at ?? "" });
     });
   }

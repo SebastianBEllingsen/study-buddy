@@ -1,6 +1,8 @@
 "use client";
 
 import { Explain } from "@/components/Explain";
+import { cn } from "cn";
+import type { ExplanationId } from "@/lib/explanations";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -8,6 +10,7 @@ import { useDateFormatter } from "@/components/DateFormatProvider";
 import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import {
+  Bell,
   Brain,
   ChevronRight,
   ChevronsDownUp,
@@ -33,6 +36,7 @@ import {
   Palette,
   PenLine,
   Pencil,
+  ScanText,
   Plus,
   Repeat,
   Route,
@@ -72,6 +76,7 @@ import { useViewTransitionRouter } from "@/lib/useViewTransitionRouter";
 import { useShowModelBadge } from "@/lib/useShowModelBadge";
 import { useDocumentBadgeSettings } from "@/lib/useDocumentBadgeSettings";
 import { useAiEnabled } from "@/lib/useAiEnabled";
+import { canTranscribe, TranscribeDialog } from "@/components/TranscribeDialog";
 import ModelBadge from "@/components/ModelBadge";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
 import { FolderCustomizeFields } from "@/components/FolderCustomizeFields";
@@ -130,6 +135,7 @@ import DocumentViewer, { type ViewedDocument } from "@/components/DocumentViewer
 import { CourseCanvasSection } from "@/components/canvas/CourseCanvasSection";
 import { StudyPlanCard } from "@/components/study-plan/StudyPlanCard";
 import { TodayCard } from "@/components/today/TodayCard";
+import { useAppName } from "@/lib/useAppName";
 import { StudyPlanSetupDialog } from "@/components/study-plan/StudyPlanSetupDialog";
 import type { StudyPlan } from "@/lib/studyPlan/types";
 import { resizeImageToDataUrl } from "@/lib/resizeImage";
@@ -401,7 +407,9 @@ function DocumentList({
   // deleteTargetId elsewhere in this app.
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [nameDraft, setNameDraft] = useState("");
+  const [transcribing, setTranscribing] = useState<DocumentSummaryRow | null>(null);
   const documentBadges = useDocumentBadgeSettings();
+  const aiEnabled = useAiEnabled();
 
   function startRename(doc: DocumentSummaryRow) {
     setRenamingId(doc.id);
@@ -508,7 +516,13 @@ function DocumentList({
               )}
               {documentBadges.enabled && doc.status === "extracted" && (
                 <Badge className="ml-1 border-sage/30 bg-sage/10 text-sage" variant="outline">
-                  {documentBadges.detail === "minimal" ? `${doc.page_count}p` : `extracted, ${doc.page_count}p`}
+                  {doc.transcribed_at
+                    ? documentBadges.detail === "minimal"
+                      ? `${doc.page_count}p · AI`
+                      : `transcribed, ${doc.page_count}p`
+                    : documentBadges.detail === "minimal"
+                      ? `${doc.page_count}p`
+                      : `extracted, ${doc.page_count}p`}
                 </Badge>
               )}
               {documentBadges.enabled && doc.status === "failed" && (
@@ -518,7 +532,7 @@ function DocumentList({
               )}
               {documentBadges.enabled && doc.status === "image" && (
                 <Badge variant="secondary" className="ml-1">
-                  {documentBadges.detail === "minimal" ? "image" : "image, not used for generation"}
+                  {documentBadges.detail === "minimal" ? "image" : "image, not used until transcribed"}
                 </Badge>
               )}
             </div>
@@ -527,7 +541,18 @@ function DocumentList({
             {renamingId !== doc.id && (
               <RowActionsMenu
                 ariaLabel={`Actions for ${doc.filename}`}
-                actions={[{ label: "Rename", icon: Pencil, onSelect: () => startRename(doc) }]}
+                actions={[
+                  { label: "Rename", icon: Pencil, onSelect: () => startRename(doc) },
+                  ...(aiEnabled && canTranscribe(doc.filename)
+                    ? [
+                        {
+                          label: doc.transcribed_at ? "Transcribe again…" : "Transcribe with AI…",
+                          icon: ScanText,
+                          onSelect: () => setTranscribing(doc),
+                        },
+                      ]
+                    : []),
+                ]}
                 deleteLabel="Delete document"
                 onDelete={() => onDelete(doc.id)}
               />
@@ -535,8 +560,36 @@ function DocumentList({
           </div>
         </li>
       ))}
+      {transcribing && (
+        <TranscribeDialog key={transcribing.id} doc={transcribing} open onOpenChange={(o) => !o && setTranscribing(null)} />
+      )}
     </>
   );
+}
+
+// The course's practice and progress tools, as two aligned rows of five: what
+// you practise with first, then how you're preparing and doing.
+function courseTools(courseId: number): {
+  id: ExplanationId;
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  // A shorter name for narrow screens, where the full one doesn't fit its tile.
+  short?: string;
+  primary?: boolean;
+}[] {
+  return [
+    { id: "course.review", href: `/review?courseId=${courseId}`, icon: Repeat, label: "Review this course", short: "Review", primary: true },
+    { id: "course.mistakes", href: `/mistakes?courseId=${courseId}`, icon: CircleAlert, label: "Mistakes" },
+    { id: "course.problems", href: `/courses/${courseId}/problems`, icon: Footprints, label: "Problems" },
+    { id: "course.code", href: `/courses/${courseId}/code`, icon: Code2, label: "Code" },
+    { id: "course.explain", href: `/courses/${courseId}/explain`, icon: PenLine, label: "Blurt / explain" },
+    { id: "course.examPrep", href: `/courses/${courseId}/exams`, icon: GraduationCap, label: "Exam prep" },
+    { id: "course.readiness", href: `/courses/${courseId}/readiness`, icon: Gauge, label: "Readiness" },
+    { id: "course.concepts", href: `/courses/${courseId}/knowledge`, icon: Brain, label: "Concepts" },
+    { id: "course.week", href: `/insights?courseId=${courseId}`, icon: LineChart, label: "Your week" },
+    { id: "course.sources", href: `/courses/${courseId}/sources`, icon: ShieldCheck, label: "Sources" },
+  ];
 }
 
 function GeneratedItemList({
@@ -566,6 +619,8 @@ function GeneratedItemList({
 }) {
   const { push: pushWithTransition } = useViewTransitionRouter();
   const modelBadge = useShowModelBadge();
+  const { data: settingsData } = useSWR<Pick<AppSettings, "deckReminderIcons">>("/api/settings");
+  const showReminderIcons = settingsData?.deckReminderIcons ?? true;
   const fmt = useDateFormatter();
 
   // See DocumentList's handleDrop — same reorder-by-drop-on-a-sibling-row
@@ -632,6 +687,14 @@ function GeneratedItemList({
                 {item.title}
               </Link>
               {modelBadge.show && <ModelBadge info={item} detail={modelBadge.detail} />}
+              {showReminderIcons && item.mode === "flashcards" && !item.reminders_off && (
+                <Bell
+                  aria-label="Review reminders on"
+                  className="size-3 shrink-0 text-amber"
+                >
+                  <title>Review reminders on</title>
+                </Bell>
+              )}
               {!!dueByItemId.get(item.id) && (
                 <span className="shrink-0 rounded-full bg-amber/15 px-1.5 py-0.5 text-xs font-medium text-amber">
                   {dueByItemId.get(item.id)} due
@@ -1257,6 +1320,7 @@ function BulkActionBar({
 }
 
 export default function CoursePage() {
+  const appName = useAppName();
   const params = useParams<{ courseId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -2258,9 +2322,7 @@ export default function CoursePage() {
               <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
-                    <BreadcrumbLink render={<Link href="/" />}>
-                      Study Buddy
-                    </BreadcrumbLink>
+                    <BreadcrumbLink render={<Link href="/" />}>{appName}</BreadcrumbLink>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>
@@ -2328,7 +2390,7 @@ export default function CoursePage() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href="/" />}>Study Buddy</BreadcrumbLink>
+              <BreadcrumbLink render={<Link href="/" />}>{appName}</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
@@ -2429,52 +2491,40 @@ export default function CoursePage() {
 
       {/* Course-wide practice: one mixed review session, concept recall and
           the mistake log, all narrowed to this course. */}
-      <nav aria-label="Practice this course" className="flex flex-wrap gap-1.5">
-        <Explain id="course.review"><Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/review?courseId=${courseId}`} />}>
-          <Repeat className="size-3.5" />
-          Review this course
-        </Button></Explain>
-        <Explain id="course.concepts"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/knowledge`} />}>
-          <Brain className="size-3.5" />
-          Concepts
-        </Button></Explain>
-        <Explain id="course.mistakes"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/mistakes?courseId=${courseId}`} />}>
-          <CircleAlert className="size-3.5" />
-          Mistakes
-        </Button></Explain>
-        <Explain id="course.examPrep"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/exams`} />}>
-          <GraduationCap className="size-3.5" />
-          Exam prep
-        </Button></Explain>
-        <Explain id="course.problems"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/problems`} />}>
-          <Footprints className="size-3.5" />
-          Problems
-        </Button></Explain>
-        <Explain id="course.code"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/code`} />}>
-          <Code2 className="size-3.5" />
-          Code
-        </Button></Explain>
-        <Explain id="course.readiness"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/readiness`} />}>
-          <Gauge className="size-3.5" />
-          Readiness
-        </Button></Explain>
-        <Explain id="course.explain"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/explain`} />}>
-          <PenLine className="size-3.5" />
-          Blurt / explain
-        </Button></Explain>
-        <Explain id="course.week"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/insights?courseId=${courseId}`} />}>
-          <LineChart className="size-3.5" />
-          Your week
-        </Button></Explain>
-        <Explain id="course.sources"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/courses/${courseId}/sources`} />}>
-          <ShieldCheck className="size-3.5" />
-          Sources
-        </Button></Explain>
-      </nav>
+      {detail.course.show_study_tools && (
+        <>
+          <nav aria-label="Practice this course" className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+            {courseTools(Number(courseId)).map(({ id, href, icon: Icon, label, short, primary }) => (
+              <Explain key={id} id={id}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "h-8 w-full min-w-0 justify-center gap-1.5",
+                    primary && "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                  )}
+                  nativeButton={false}
+                  render={<Link href={href} />}
+                >
+                  <Icon className="size-3.5" />
+                  {short ? (
+                    <>
+                      <span className="truncate lg:hidden">{short}</span>
+                      <span className="hidden truncate lg:inline">{label}</span>
+                    </>
+                  ) : (
+                    <span className="truncate">{label}</span>
+                  )}
+                </Button>
+              </Explain>
+            ))}
+          </nav>
 
-      <TodayCard courseId={Number(courseId)} />
+          <TodayCard courseId={Number(courseId)} />
+        </>
+      )}
 
-      {detail.studyPlan && <StudyPlanCard courseId={Number(courseId)} plan={detail.studyPlan} />}
+      {detail.studyPlan && <StudyPlanCard courseId={Number(courseId)} plan={detail.studyPlan} onDeleted={() => void refresh()} />}
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { concepts, courses, db, generated_items, mistakes, review_logs } from "../db";
 import { nowUtc } from "../time";
+import type { MistakeType } from "./mistakeTypes";
 import type { Confidence, ReviewItemKind } from "./types";
 
 // The mistake log: every quiz question answered wrong and every card rated
@@ -52,7 +53,12 @@ export async function logMistake(input: NewMistake): Promise<MistakeRow> {
   if (open) {
     const [row] = await db
       .update(mistakes)
-      .set({ ...fields, misconception: open.given_answer === input.givenAnswer ? open.misconception : null })
+      // A new wrong answer means the old note, and the type written with it, no longer fit.
+      .set({
+        ...fields,
+        misconception: open.given_answer === input.givenAnswer ? open.misconception : null,
+        error_type: open.given_answer === input.givenAnswer ? open.error_type : null,
+      })
       .where(eq(mistakes.id, open.id))
       .returning();
     return row;
@@ -161,6 +167,12 @@ export async function setMistakeResolved(id: number, resolved: boolean): Promise
     .update(mistakes)
     .set({ resolved_at: resolved ? nowUtc() : null })
     .where(eq(mistakes.id, id));
+}
+
+export async function setMistakeTypes(types: Map<number, MistakeType>): Promise<void> {
+  for (const [id, error_type] of types) {
+    await db.update(mistakes).set({ error_type }).where(eq(mistakes.id, id));
+  }
 }
 
 export async function setMisconceptions(labels: Map<number, string>): Promise<void> {

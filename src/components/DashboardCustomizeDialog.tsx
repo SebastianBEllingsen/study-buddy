@@ -2,11 +2,12 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { EyeOff, GripVertical, Link2, Maximize2, Minimize2, Pencil, Plus } from "lucide-react";
+import { EyeOff, GripVertical, Link2, Maximize2, Minimize2, Pencil, Plus, Snowflake } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import type { HomeWidgetConfig, HomeWidgetId, HomeWidgetZone } from "@/lib/models";
 import { HOME_WIDGET_META } from "@/lib/homeWidgetMeta";
+import { useTransparentWidgets } from "@/lib/useTransparentWidgets";
 import { LinksEditorDialog } from "@/components/LinksWidget";
 import {
   GRID_COLS,
@@ -121,6 +122,7 @@ function WidgetTile({
   onResizeStart,
   onHide,
   onRename,
+  onToggleFrosted,
 }: {
   widget: HomeWidgetConfig;
   children: ReactNode;
@@ -129,12 +131,19 @@ function WidgetTile({
   onResizeStart: (e: React.PointerEvent) => void;
   onHide: () => void;
   onRename: (label: string | null) => void;
+  onToggleFrosted: () => void;
 }) {
   const { label: defaultLabel } = HOME_WIDGET_META[widget.id];
   const label = widget.label ?? defaultLabel;
   const [editingLinks, setEditingLinks] = useState(false);
+  // The frosted panel only exists when widgets are transparent.
+  const transparent = useTransparentWidgets();
   return (
-    <div className={cn("dashboard-tile relative h-full touch-none", dimmed && "opacity-40")} style={tileGridStyle(widget)}>
+    <div
+      className={cn("dashboard-tile relative h-full touch-none", dimmed && "opacity-40")}
+      style={tileGridStyle(widget)}
+      data-frosted={transparent && widget.frosted ? "" : undefined}
+    >
       <div className="pointer-events-none h-full [&_a]:pointer-events-none">{children}</div>
       <button
         type="button"
@@ -172,6 +181,21 @@ function WidgetTile({
           </button>
           <LinksEditorDialog open={editingLinks} onOpenChange={setEditingLinks} />
         </>
+      )}
+      {transparent && (
+        <button
+          type="button"
+          onClick={onToggleFrosted}
+          aria-label={`Frosted panel for ${label}`}
+          aria-pressed={!!widget.frosted}
+          title={widget.frosted ? "Frosted panel: on" : "Frosted panel: off"}
+          className={cn(
+            "absolute bottom-1.5 right-9 flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-80 backdrop-blur-sm hover:opacity-100",
+            widget.frosted && "bg-focus/25 text-focus opacity-100"
+          )}
+        >
+          <Snowflake className="size-3.5" />
+        </button>
       )}
       <button
         type="button"
@@ -238,6 +262,7 @@ function ZoneGrid({
   onResizeStart,
   onHide,
   onRename,
+  onToggleFrosted,
   renderContent,
   emptyLabel,
   bleed = false,
@@ -251,6 +276,7 @@ function ZoneGrid({
   onResizeStart: (e: React.PointerEvent, widget: HomeWidgetConfig) => void;
   onHide: (id: HomeWidgetId) => void;
   onRename: (id: HomeWidgetId, label: string | null) => void;
+  onToggleFrosted: (id: HomeWidgetId) => void;
   renderContent: (widget: HomeWidgetConfig) => ReactNode;
   emptyLabel: string;
   // Pulls the grid's own padding out past its container, so the tiles span
@@ -273,6 +299,7 @@ function ZoneGrid({
           onResizeStart={(e) => onResizeStart(e, widget)}
           onHide={() => onHide(widget.id)}
           onRename={(label) => onRename(widget.id, label)}
+          onToggleFrosted={() => onToggleFrosted(widget.id)}
         >
           {renderContent(widget)}
         </WidgetTile>
@@ -439,9 +466,14 @@ export function DashboardCustomizeDialog({
   }
 
   const ghostWidget = ghost ? widgets.find((w) => w.id === ghost.id) : null;
+  const transparentNow = useTransparentWidgets();
 
   function handleRename(id: HomeWidgetId, label: string | null) {
     onChange(widgets.map((w) => (w.id === id ? { ...w, label: label ?? undefined } : w)));
+  }
+
+  function handleToggleFrosted(id: HomeWidgetId) {
+    onChange(widgets.map((w) => (w.id === id ? { ...w, frosted: !w.frosted } : w)));
   }
 
   return (
@@ -510,6 +542,7 @@ export function DashboardCustomizeDialog({
               onResizeStart={startResize}
               onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
               onRename={handleRename}
+              onToggleFrosted={handleToggleFrosted}
               renderContent={renderContent}
               emptyLabel="Nothing here — drag a widget up from Hidden."
               bleed={fullscreen}
@@ -530,6 +563,7 @@ export function DashboardCustomizeDialog({
               onResizeStart={startResize}
               onHide={(id) => onChange(setWidgetEnabled(widgets, id, false))}
               onRename={handleRename}
+              onToggleFrosted={handleToggleFrosted}
               renderContent={renderContent}
               emptyLabel="Nothing here — drag a widget down from Hidden or from the grid above."
               bleed={fullscreen}
@@ -564,6 +598,7 @@ export function DashboardCustomizeDialog({
         createPortal(
           <div
             className="pointer-events-none fixed z-[70] opacity-70 [&_a]:pointer-events-none"
+            data-frosted={transparentNow && ghostWidget.frosted ? "" : undefined}
             style={{
               left: ghost.clientX - ghost.grabOffsetX,
               top: ghost.clientY - ghost.grabOffsetY,

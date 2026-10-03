@@ -14,6 +14,7 @@ import { buildMaterialDigest } from "./materialDigest";
 import { resolveStages } from "./roadmap";
 import { findChapterResources, StudyPlanNotFoundError } from "./resources";
 import { rescheduleQuietly } from "./scheduleService";
+import { makeDiagnosticQuizzes } from "./diagnostic";
 import {
   getStudyPlan,
   replaceAiResources,
@@ -196,6 +197,11 @@ export async function buildPlanResources(planId: number, levels: Map<number, Cha
       linksCheckedAt: plan.options.webResources ? nowUtc() : null,
     });
     if (plan.options.schedule) await rescheduleQuietly(planId);
+    // In the background: the plan is usable now, the pre-tests turn up as
+    // they're made.
+    if (plan.options.practice && plan.options.diagnostic) {
+      void makeDiagnosticQuizzes(planId).catch((err) => console.warn("Study plan: pre-tests failed:", err));
+    }
   } catch (err) {
     await setPlanStatus(planId, "failed", {
       errorMessage: err instanceof Error ? err.message : "Building the plan failed.",

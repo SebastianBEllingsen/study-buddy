@@ -59,6 +59,8 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
   tests: CodeTest[];
   language: CodeLanguage;
+  // Downloading the packages the code imports (numpy, matplotlib, …).
+  loadingPackages?: boolean;
 }
 
 let frame: HTMLIFrameElement | null = null;
@@ -73,17 +75,28 @@ function failed(message: string, tests: CodeTest[]): RunResult {
 
 function onMessage(event: MessageEvent) {
   if (!frame || event.source !== frame.contentWindow) return;
-  const { id, result, failure, loaded } = (event.data ?? {}) as {
+  const { id, result, failure, loaded, loading } = (event.data ?? {}) as {
     id?: number;
     result?: RunResult;
     failure?: string;
     loaded?: boolean;
+    loading?: boolean;
   };
   const entry = id === undefined ? undefined : pending.get(id);
+  if (loading) {
+    // Packages are downloading: that gets the long limit, not the run's.
+    if (entry) {
+      entry.loadingPackages = true;
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => timeOut(id!), PYODIDE_LOAD_TIMEOUT_MS);
+    }
+    return;
+  }
   if (loaded) {
     pythonReady = true;
     // Loading done: the run itself now gets the normal time limit.
     if (entry) {
+      entry.loadingPackages = false;
       clearTimeout(entry.timer);
       entry.timer = setTimeout(() => timeOut(id!), RUN_TIMEOUT_MS);
     }
@@ -136,7 +149,9 @@ function timeOut(id: number) {
   discardFrame(
     entry.language === "python" && !pythonReady
       ? "Python couldn't load — check your internet connection and try again."
-      : `Stopped after ${RUN_TIMEOUT_MS / 1000} seconds — is there an endless loop?`
+      : entry.loadingPackages
+        ? "The Python packages this code uses took too long to load — check your internet connection and try again."
+        : `Stopped after ${RUN_TIMEOUT_MS / 1000} seconds — is there an endless loop?`
   );
 }
 

@@ -245,7 +245,7 @@ export default function TimetableWidget({
           {focus && (
             <span className="text-xs text-muted-foreground">{dayLabel(focus.day, today)}</span>
           )}
-          <Link href={href} aria-label="Open timetable" className="text-muted-foreground hover:text-foreground">
+          <Link href={href} aria-label="Open timetable" className="tap-target text-muted-foreground hover:text-foreground">
             <ArrowUpRight className="size-4" />
           </Link>
         </span>

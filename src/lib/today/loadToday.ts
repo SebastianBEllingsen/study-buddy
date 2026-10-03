@@ -2,7 +2,7 @@ import { listCourseNames } from "../models";
 import { localToday, missedSessions } from "../studyPlan/schedule";
 import { reschedulePlan } from "../studyPlan/scheduleService";
 import { getStudyPlan, listReadyStudyPlans } from "../studyPlan/store";
-import { nextChapter } from "../studyPlanDisplay";
+import { chapterIsComplete, chapterIsPassed, nextChapter } from "../studyPlanDisplay";
 import type { StudyPlan } from "../studyPlan/types";
 import { summarizeKnowledge } from "../review/knowledgeSummary";
 import { listMistakes } from "../review/mistakes";
@@ -24,6 +24,9 @@ import {
 // every course, or one.
 
 export const DEFAULT_TODAY_MINUTES = 45;
+export const MAX_DEFAULT_TODAY_MINUTES = 120;
+// Most chapters one session takes on when the learner picks them.
+export const MAX_PICKED_CHAPTERS = 5;
 
 // A weak concept needs a few reviewed items before its recall means much,
 // and has to actually be weak: a concept you'd recall 80%+ of right now
@@ -34,42 +37,109 @@ export const WEAK_RECALL = 0.8;
 // Missed plan sessions are absorbed automatically: the schedule is rebuilt
 // from today, so the autopilot never shows a backlog of past days (Replan
 // stays available for the AI-assisted version).
-async function absorbMissedDays(plan: StudyPlan, today: string): Promise<StudyPlan> {
-  if (!plan.options.schedule || missedSessions(plan.sessions, today).length === 0) return plan;
-  try {
-    await reschedulePlan(plan.id);
-    return (await getStudyPlan(plan.id)) ?? plan;
-  } catch (err) {
-    console.error(`Today: couldn't reschedule study plan ${plan.id}:`, err);
-    return plan;
-  }
+// Loads of Today can overlap (a refresh, two tabs); one reschedule per plan
+// at a time, or each would recreate the plan's Google Calendar events.
+const rescheduling = new Map<number, Promise<StudyPlan>>();
+
+function absorbMissedDays(plan: StudyPlan, today: string): Promise<StudyPlan> {
+  if (!plan.options.schedule || missedSessions(plan.sessions, today).length === 0) return Promise.resolve(plan);
+  const running = rescheduling.get(plan.id);
+  if (running) return running;
+  const run = (async () => {
+    try {
+      await reschedulePlan(plan.id);
+      return (await getStudyPlan(plan.id)) ?? plan;
+    } catch (err) {
+      console.error(`Today: couldn't reschedule study plan ${plan.id}:`, err);
+      return plan;
+    } finally {
+      rescheduling.delete(plan.id);
+    }
+  })();
+  rescheduling.set(plan.id, run);
+  return run;
+}
+
+// A chapter with something left to do: not finished, or finished but its
+// check not passed yet.
+function chapterIsOpen(chapter: StudyPlan["chapters"][number]): boolean {
+  return !chapterIsComplete(chapter) || !chapterIsPassed(chapter);
+}
+
+// What the picker offers: every open chapter of the plans in scope, in
+// roadmap order within each course.
+export interface OpenChapter {
+  planId: number;
+  courseId: number;
+  courseName: string;
+  chapterId: number;
+  chapterTitle: string;
+}
+
+export function openChapters(plans: StudyPlan[], courseNames: Map<number, string>): OpenChapter[] {
+  return plans.flatMap((plan) =>
+    [...plan.chapters]
+      .sort((a, b) => a.stage - b.stage || a.position - b.position)
+      .filter(chapterIsOpen)
+      .map((c) => ({
+        planId: plan.id,
+        courseId: plan.course_id,
+        courseName: courseNames.get(plan.course_id) ?? plan.title,
+        chapterId: c.id,
+        chapterTitle: c.title,
+      }))
+  );
 }
 
 // Scheduled plans offer today's sessions; unscheduled ones their next
-// chapter. Today's sessions come first.
-export function chapterCandidates(plans: StudyPlan[], courseNames: Map<number, string>, today: string): ChapterCandidate[] {
+// chapter. Today's sessions come first. With `only` (chapters the learner
+// picked), exactly those chapters are offered instead, scheduled today or not.
+export function chapterCandidates(
+  plans: StudyPlan[],
+  courseNames: Map<number, string>,
+  today: string,
+  only?: ReadonlySet<number>
+): ChapterCandidate[] {
   const scheduled: ChapterCandidate[] = [];
   const open: ChapterCandidate[] = [];
   for (const plan of plans) {
     const courseName = courseNames.get(plan.course_id) ?? plan.title;
-    const base = { planId: plan.id, courseId: plan.course_id, courseName };
-    if (plan.options.schedule) {
-      for (const session of plan.sessions.filter((s) => s.date === today && !s.done_at)) {
+    const deadline = plan.options.deadline;
+    const daysLeft = deadline ? Math.round((Date.parse(deadline) - Date.parse(today)) / 86_400_000) : null;
+    const base = { planId: plan.id, courseId: plan.course_id, courseName, deadline, daysLeft };
+    const candidate = (
+      chapter: StudyPlan["chapters"][number],
+      session: { id: number; minutes: number; kind: string } | null
+    ): ChapterCandidate => ({
+      ...base,
+      chapterId: chapter.id,
+      chapterTitle: chapter.title,
+      mastery: chapter.mastery,
+      awaitingCheck: chapterIsComplete(chapter) && !chapterIsPassed(chapter),
+      session: session ? { id: session.id, minutes: session.minutes } : null,
+      next: nextChapterStep(chapter, (!!session && session.kind !== "study") || chapterIsComplete(chapter), {
+        pretest: plan.options.diagnostic,
+      }),
+    });
+    const todaysSessions = plan.options.schedule
+      ? plan.sessions.filter((s) => s.date === today && !s.done_at)
+      : [];
+    if (only) {
+      const picked = [...plan.chapters]
+        .sort((a, b) => a.stage - b.stage || a.position - b.position)
+        .filter((c) => only.has(c.id) && chapterIsOpen(c));
+      for (const chapter of picked) {
+        const session = todaysSessions.find((s) => s.chapter_id === chapter.id) ?? null;
+        (session ? scheduled : open).push(candidate(chapter, session));
+      }
+    } else if (plan.options.schedule) {
+      for (const session of todaysSessions) {
         const chapter = plan.chapters.find((c) => c.id === session.chapter_id);
-        if (!chapter) continue;
-        scheduled.push({
-          ...base,
-          chapterId: chapter.id,
-          chapterTitle: chapter.title,
-          session: { id: session.id, minutes: session.minutes },
-          next: nextChapterStep(chapter, session.kind === "review"),
-        });
+        if (chapter) scheduled.push(candidate(chapter, session));
       }
     } else {
-      const chapter = nextChapter(plan);
-      if (chapter) {
-        open.push({ ...base, chapterId: chapter.id, chapterTitle: chapter.title, session: null, next: nextChapterStep(chapter) });
-      }
+      const chapter = nextChapter(plan, plan.options.practice);
+      if (chapter) open.push(candidate(chapter, null));
     }
   }
   return [...scheduled, ...open];
@@ -79,12 +149,16 @@ export interface TodayPlan {
   minutes: number;
   steps: TodayStep[];
   date: string;
+  // Every open chapter in scope, for picking what to study today.
+  chapters: OpenChapter[];
 }
 
 export async function loadToday(options: {
   courseId: number | null;
   minutes?: number;
   dayStart?: string;
+  // Chapters the learner picked to study today; none means the autopilot chooses.
+  chapterIds?: number[];
   now?: Date;
 }): Promise<TodayPlan> {
   const now = options.now ?? new Date();
@@ -116,8 +190,10 @@ export async function loadToday(options: {
       [...examInfo].filter(([, i]) => i.mode.mockExamDue).map(async ([id]) => [id, await getExamProfile(id)] as const)
     )
   );
-  const chapters = chapterCandidates(plans, courseNames, today).filter(
-    (c) => !examInfo.get(c.courseId)?.mode.noNewMaterial
+  // A picked chapter is studied even in an exam's final days: it was asked for.
+  const picked = options.chapterIds?.length ? new Set(options.chapterIds) : undefined;
+  const chapters = chapterCandidates(plans, courseNames, today, picked).filter(
+    (c) => picked || !examInfo.get(c.courseId)?.mode.noNewMaterial
   );
   const mockExams: MockExamDue[] = [...examInfo]
     .filter(([, i]) => i.mode.mockExamDue)
@@ -148,7 +224,8 @@ export async function loadToday(options: {
 
   // Default length: today's scheduled plan time, if any, else a standard session.
   const scheduledMinutes = chapters.reduce((n, c) => n + (c.session?.minutes ?? 0), 0);
-  const minutes = options.minutes ?? Math.max(DEFAULT_TODAY_MINUTES, scheduledMinutes + 15);
+  // Capped: several courses' sessions on one day shouldn't inflate it.
+  const minutes = options.minutes ?? Math.max(DEFAULT_TODAY_MINUTES, Math.min(scheduledMinutes + 15, MAX_DEFAULT_TODAY_MINUTES));
 
   const steps = planDay({
     minutes,
@@ -159,6 +236,7 @@ export async function loadToday(options: {
     chapters,
     weakConcepts: weak.sort((a, b) => a.recall - b.recall),
     examMode: inExamMode,
+    maxChapterSteps: picked ? Math.min(picked.size, MAX_PICKED_CHAPTERS) : undefined,
   });
-  return { minutes, steps, date: today };
+  return { minutes, steps, date: today, chapters: openChapters(plans, courseNames) };
 }

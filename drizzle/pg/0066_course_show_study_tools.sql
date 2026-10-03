@@ -1,0 +1,1 @@
+ALTER TABLE "courses" ADD COLUMN "show_study_tools" boolean DEFAULT true NOT NULL;

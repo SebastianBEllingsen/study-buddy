@@ -4,11 +4,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // date format.
 const setReviewSettings = vi.fn();
 const setDateFormat = vi.fn();
+const setAppBranding = vi.fn();
 const getAppSettings = vi.fn();
 vi.mock("@/lib/models", () => ({
   getAppSettings: (...a: unknown[]) => getAppSettings(...a),
   setReviewSettings: (...a: unknown[]) => setReviewSettings(...a),
   setDateFormat: (...a: unknown[]) => setDateFormat(...a),
+  setAppBranding: (...a: unknown[]) => setAppBranding(...a),
   MAX_NEW_CARDS_PER_DAY: 200,
   HOME_WIDGET_IDS: [],
   IMAGE_CAPABLE_BACKENDS: [],
@@ -23,6 +25,7 @@ const post = (body: unknown) =>
 beforeEach(() => {
   setReviewSettings.mockReset();
   setDateFormat.mockReset();
+  setAppBranding.mockReset();
   getAppSettings.mockReset().mockResolvedValue({ reviewRetention: 0.9, newCardsPerDay: 20 });
 });
 
@@ -58,5 +61,21 @@ describe("POST /api/settings date format", () => {
       expect((await post({ dateFormat })).status).toBe(400);
     }
     expect(setDateFormat).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/settings Today card", () => {
+  it("saves whether the card shows and whether it's frosted", async () => {
+    expect((await post({ todayCardShown: false })).status).toBe(200);
+    expect(setAppBranding).toHaveBeenLastCalledWith({ todayCardShown: false });
+    expect((await post({ todayCardFrosted: false, todayCardShown: true })).status).toBe(200);
+    expect(setAppBranding).toHaveBeenLastCalledWith({ todayCardShown: true, todayCardFrosted: false });
+  });
+
+  it("only takes true or false", async () => {
+    for (const body of [{ todayCardShown: "no" }, { todayCardShown: 0 }, { todayCardFrosted: null }, { todayCardFrosted: [] }]) {
+      expect((await post(body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(setAppBranding).not.toHaveBeenCalled();
   });
 });

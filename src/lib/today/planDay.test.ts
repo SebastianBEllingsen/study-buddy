@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextChapterStep, planDay, type ChapterCandidate, type TodayInput } from "./planDay";
+import { chapterWhy, nextChapterStep, planDay, rankChapters, type ChapterCandidate, type TodayInput } from "./planDay";
 
 const none: TodayInput = {
   minutes: 45,
@@ -150,5 +150,117 @@ describe("planDay in exam mode", () => {
   it("skips a mock exam when there isn't time for one", () => {
     const steps = planDay({ ...none, minutes: 20, mockExams: [{ courseId: 2, courseName: "S", daysLeft: 3, minutes: 90 }] });
     expect(steps).toEqual([]);
+  });
+});
+
+describe("planDay across courses", () => {
+  it("ranks by nearest deadline, then scheduled, then weakest", () => {
+    const ranked = rankChapters([
+      chapter(1, { deadline: null }),
+      chapter(2, { deadline: "2026-03-01", mastery: 0.9 }),
+      chapter(3, { deadline: "2026-02-01" }),
+      chapter(4, { deadline: "2026-03-01", mastery: 0.2 }),
+      chapter(5, { deadline: "2026-03-01", mastery: 0.9, session: { id: 1, minutes: 30 } }),
+    ]);
+    expect(ranked.map((c) => c.chapterId)).toEqual([3, 5, 4, 2, 1]);
+  });
+
+  it("shares the time between chapters instead of the first taking it all", () => {
+    const steps = planDay({
+      ...none,
+      minutes: 60,
+      chapters: [
+        chapter(1, { session: { id: 1, minutes: 60 } }),
+        chapter(2, { courseId: 3, session: { id: 2, minutes: 60 } }),
+      ],
+    });
+    expect(steps.map((s) => s.minutes)).toEqual([30, 30]);
+  });
+
+  it("takes on as many chapters as were picked, not the usual two", () => {
+    const chapters = [1, 2, 3, 4].map((id) => chapter(id, { courseId: id }));
+    expect(planDay({ ...none, minutes: 60, chapters }).filter((s) => s.kind === "chapter")).toHaveLength(2);
+    const picked = planDay({ ...none, minutes: 60, chapters, maxChapterSteps: 4 }).filter((s) => s.kind === "chapter");
+    expect(picked).toHaveLength(4);
+    expect(picked.reduce((n, s) => n + s.minutes, 0)).toBeLessThanOrEqual(60);
+  });
+
+  it("keeps a slot for a weak concept when there's time for both", () => {
+    const steps = planDay({
+      ...none,
+      minutes: 60,
+      chapters: [chapter(1, { session: { id: 1, minutes: 90 } })],
+      weakConcepts: [{ courseId: 2, courseName: "Sample Course", name: "Recursion", recall: 0.3 }],
+    });
+    expect(steps.map((s) => [s.kind, s.minutes])).toEqual([
+      ["chapter", 50],
+      ["concept", 10],
+    ]);
+  });
+
+  it("mixes in a third chapter only with lots of time", () => {
+    const chapters = [1, 2, 3].map((i) => chapter(i, { courseId: i }));
+    expect(planDay({ ...none, minutes: 60, chapters }).filter((s) => s.kind === "chapter")).toHaveLength(2);
+    expect(planDay({ ...none, minutes: 120, chapters }).filter((s) => s.kind === "chapter")).toHaveLength(3);
+  });
+});
+
+describe("chapterWhy", () => {
+  it("says what makes a chapter today's pick", () => {
+    expect(chapterWhy(chapter(1, { daysLeft: 12, mastery: 0.3 }))).toBe("12 days to your finish date · a weak spot");
+    expect(chapterWhy(chapter(1, { awaitingCheck: true }))).toBe("passing it unlocks the next chapter");
+    expect(chapterWhy(chapter(1, { session: { id: 1, minutes: 30 } }))).toBe("on today's plan");
+    expect(chapterWhy(chapter(1))).toBe("next in your roadmap");
+  });
+});
+
+describe("test-yourself step", () => {
+  it("asks for the quiz to be made when the chapter has none, and links the existing one otherwise", () => {
+    const none = planDay({ ...baseInput(), chapters: [chapter(4, { next: { type: "practice", itemId: null, itemTitle: null } })] });
+    expect(none[0].generateQuiz).toEqual({ planId: 1, chapterId: 4 });
+    const some = planDay({ ...baseInput(), chapters: [chapter(4, { next: { type: "practice", itemId: 8, itemTitle: "Quiz" } })] });
+    expect(some[0].generateQuiz).toBeUndefined();
+    expect(some[0].href).toBe("/items/8");
+  });
+});
+
+function baseInput(): TodayInput {
+  return { ...none, minutes: 45 };
+}
+
+describe("pre-test step", () => {
+  const untouched = {
+    subtopics: [{ text: "a", done: false }],
+    resources: [],
+    items: [
+      { id: 7, mode: "quiz", title: "Pre-test quiz", best_score: null },
+      { id: 8, mode: "flashcards", title: "Cards", best_score: null },
+    ],
+  };
+
+  it("sends an unstarted chapter to its untaken quiz first, only when pre-tests are on", () => {
+    expect(nextChapterStep(untouched, false, { pretest: true })).toEqual({
+      type: "practice",
+      itemId: 7,
+      itemTitle: "Pre-test quiz",
+      pretest: true,
+    });
+    expect(nextChapterStep(untouched).type).toBe("subtopic");
+  });
+
+  it("goes back to studying once the quiz is taken or the chapter is under way", () => {
+    const taken = { ...untouched, items: [{ id: 7, mode: "quiz", title: "Q", best_score: 40 }] };
+    expect(nextChapterStep(taken, false, { pretest: true }).type).toBe("subtopic");
+    const started = { ...untouched, subtopics: [{ text: "a", done: true }, { text: "b", done: false }] };
+    expect(nextChapterStep(started, false, { pretest: true }).type).toBe("subtopic");
+  });
+
+  it("titles the step as a pre-test", () => {
+    const [step] = planDay({
+      ...none,
+      chapters: [chapter(2, { next: { type: "practice", itemId: 7, itemTitle: "Pre-test quiz", pretest: true } })],
+    });
+    expect(step.title).toBe("Pre-test: Chapter 2");
+    expect(step.href).toBe("/items/7");
   });
 });

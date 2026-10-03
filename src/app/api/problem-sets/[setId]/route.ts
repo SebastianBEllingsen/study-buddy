@@ -1,5 +1,5 @@
 import { AiDisabledError, describeAiError } from "@/lib/aiClient";
-import { ProblemSetError, actOnProblem } from "@/lib/problems/service";
+import { ProblemSetError, actOnProblem, modelExpression } from "@/lib/problems/service";
 import { deleteProblemSet, getProblemSet } from "@/lib/problems/store";
 import { parseProblemAction, publicSet } from "@/lib/problems/requests";
 import { parseId } from "@/lib/routeParams";
@@ -15,13 +15,16 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 // One action on one problem: check work, take a hint, reveal, or finish a
-// worked example. Body: { action, problem, step?, text? }.
+// worked example. Body: { action, problem, step?, text?, final? }. The "expr"
+// action returns { modelExpr } for a final-answer comparison, not the set.
 export async function POST(request: Request, { params }: Params) {
   const id = parseId((await params).setId);
   if (id === null) return Response.json({ error: "Problem set not found" }, { status: 404 });
   const act = parseProblemAction(await parseJsonObjectBody(request));
   if (!act) return Response.json({ error: "Invalid action" }, { status: 400 });
   try {
+    // The browser compares the learner's final answer with this itself.
+    if (act.action === "expr") return Response.json({ modelExpr: await modelExpression(id, act.problem) });
     return Response.json({ set: publicSet(await actOnProblem(id, act)) });
   } catch (err) {
     if (err instanceof ProblemSetError || err instanceof AiDisabledError) {

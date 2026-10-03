@@ -11,9 +11,16 @@ export interface CodeTopic {
 }
 
 const TEST_STYLE: Record<CodeLanguage, string> = {
-  python: `Each test is Python code run after the learner's code, in the same module scope: plain \`assert\` statements, each with a message, e.g. \`assert add(2, 3) == 5, "add(2, 3) should be 5"\`. Only the standard library; no input(), files, network or randomness without a fixed seed.`,
+  python: `Each test is Python code run after the learner's code, in the same module scope: plain \`assert\` statements, each with a message, e.g. \`assert add(2, 3) == 5, "add(2, 3) should be 5"\`. No input(), files or network, and no randomness without a fixed seed.`,
   javascript: `Each test is JavaScript run after the learner's code, in the same scope: calls to \`assert(condition, "message")\` or \`assert.equal(actual, expected, "message")\` (deep equality). Plain JavaScript — no imports, DOM, network, or timers.`,
 };
+
+// What a Python exercise may import: the standard library, plus the numerical
+// packages the runner downloads on demand (lib/code/workerSource.ts). Their
+// results are floats, so tests compare with a tolerance.
+const PYTHON_LIBRARIES = `This runs in Python with numpy, scipy, matplotlib and sympy available, which suits modelling, simulation and linear algebra topics — use them when the topic calls for it, and otherwise stay with the standard library. Tests on floating-point results compare with a tolerance (e.g. \`abs(a - b) < 1e-6\` or \`numpy.allclose\`), never \`==\`. A plot the learner's code draws is shown to them but is never tested: tests check numbers and return values.
+
+`;
 
 export function codeExercisesSystemPrompt(
   courseName: string,
@@ -31,7 +38,7 @@ export function codeExercisesSystemPrompt(
     .join("\n");
   return `You write programming exercises in ${name} for "${courseName}", on the topic "${topic.name}".${outline ? `\n${outline}` : ""}
 
-Write 4 exercises that build on each other, from a warm-up to one that needs real thought. Each asks the learner to write something testable — usually a function with a clear name and signature.
+${language === "python" ? PYTHON_LIBRARIES : ""}Write 4 exercises that build on each other, from a warm-up to one that needs real thought. Each asks the learner to write something testable — usually a function with a clear name and signature.
 
 For each exercise:
 - "title": a few words.

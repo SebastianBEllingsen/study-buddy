@@ -70,10 +70,11 @@ export function useTodaySession(): TodaySession | null {
   return session && session.date === localToday() ? session : null;
 }
 
-export function todayUrl(courseId: number | null, minutes?: number): string {
+export function todayUrl(courseId: number | null, minutes?: number, chapterIds: number[] = []): string {
   const params = new URLSearchParams({ dayStart: localDayStart() });
   if (courseId !== null) params.set("courseId", String(courseId));
   if (minutes !== undefined) params.set("minutes", String(minutes));
+  if (chapterIds.length > 0) params.set("chapters", chapterIds.join(","));
   return `/api/today?${params}`;
 }
 
@@ -81,7 +82,7 @@ export function todayUrl(courseId: number | null, minutes?: number): string {
 // ticked off, and a chapter's next step shows up. Fetched without a time
 // limit (see mergeFresh).
 export function useTodaySync(session: TodaySession | null) {
-  const { data } = useSWR<{ steps: TodayStep[] }>(session ? todayUrl(session.courseId, 480) : null, {
+  const { data } = useSWR<{ steps: TodayStep[] }>(session ? todayUrl(session.courseId, 480, session.chapterIds) : null, {
     revalidateOnFocus: true,
   });
   useEffect(() => {

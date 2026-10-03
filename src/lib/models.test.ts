@@ -776,6 +776,24 @@ describe("course page display settings", () => {
     await setAppBranding({ dashboardBackdropBlur: 0 });
   });
 
+  it("shows the Today card, frosted, until told otherwise — and remembers each choice separately", async () => {
+    let settings = await getAppSettings();
+    expect([settings.todayCardShown, settings.todayCardFrosted]).toEqual([true, true]);
+    await setAppBranding({ todayCardFrosted: false });
+    settings = await getAppSettings();
+    expect([settings.todayCardShown, settings.todayCardFrosted]).toEqual([true, false]);
+    await setAppBranding({ todayCardShown: false });
+    settings = await getAppSettings();
+    expect([settings.todayCardShown, settings.todayCardFrosted]).toEqual([false, false]);
+    // A save that mentions neither leaves both alone.
+    await setAppBranding({ dashboardBackdropBlur: 0 });
+    settings = await getAppSettings();
+    expect([settings.todayCardShown, settings.todayCardFrosted]).toEqual([false, false]);
+    await setAppBranding({ todayCardShown: true, todayCardFrosted: true });
+    settings = await getAppSettings();
+    expect([settings.todayCardShown, settings.todayCardFrosted]).toEqual([true, true]);
+  });
+
   it("round-trips dashboard links, empty by default", async () => {
     expect((await getAppSettings()).dashboardLinks).toEqual([]);
     const links = [{ id: "a", title: "Lectures", url: "https://youtube.com/", icon: "brand:youtube" }];
@@ -798,6 +816,18 @@ describe("course page display settings", () => {
     await setHomeWidgets(before);
     const links = (await getAppSettings()).homeWidgets.find((w) => w.id === "links");
     expect(links?.enabled).toBe(false);
+  });
+
+  it("remembers which widgets are frosted, and none are until chosen", async () => {
+    const widgets = (await getAppSettings()).homeWidgets;
+    expect(widgets.some((w) => w.frosted)).toBe(false);
+    await setHomeWidgets(widgets.map((w) => (w.id === "due" || w.id === "recent" ? { ...w, frosted: true } : w)));
+    const saved = (await getAppSettings()).homeWidgets;
+    expect(saved.filter((w) => w.frosted).map((w) => w.id).sort()).toEqual(["due", "recent"]);
+    // Anything that isn't a plain true is read as not frosted.
+    await setHomeWidgets(saved.map((w) => ({ ...w, frosted: ("yes" as unknown) as boolean })));
+    expect((await getAppSettings()).homeWidgets.some((w) => w.frosted)).toBe(false);
+    await setHomeWidgets(widgets);
   });
 
   it("round-trips the nav bar color mode, static by default", async () => {

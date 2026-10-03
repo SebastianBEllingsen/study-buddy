@@ -84,6 +84,14 @@ describe("prompt", () => {
     expect(codeExercisesSystemPrompt("Sample Course", topic, "python", "English", [])).toContain("`assert` statements");
     expect(codeExercisesSystemPrompt("Sample Course", topic, "javascript", "English", [])).toContain("assert.equal");
   });
+
+  it("offers the numerical packages to Python exercises only, and asks for tolerant float tests", () => {
+    const topic = { name: "ODEs", summary: "", subtopics: [] };
+    const python = codeExercisesSystemPrompt("Sample Course", topic, "python", "English", []);
+    expect(python).toContain("numpy, scipy, matplotlib and sympy");
+    expect(python).toContain("tolerance");
+    expect(codeExercisesSystemPrompt("Sample Course", topic, "javascript", "English", [])).not.toContain("numpy");
+  });
 });
 
 describe("allPassed", () => {

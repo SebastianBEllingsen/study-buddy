@@ -12,7 +12,8 @@ import { cn } from "cn";
 import type { AppSettings } from "@/lib/models";
 import type { ChapterItem, StudyPlanChapter } from "@/lib/studyPlan/types";
 import type { QuizGenerationSettings } from "@/lib/types";
-import { masteryLevel, type MasteryLevel } from "@/lib/studyPlan/mastery";
+import { masteryLevel, PASS_MASTERY, type MasteryLevel } from "@/lib/studyPlan/mastery";
+import { chapterIsComplete, chapterIsPassed } from "@/lib/studyPlanDisplay";
 import { QuizGenerationDialog } from "@/components/QuizGenerationDialog";
 import { Button } from "@/components/ui/button";
 
@@ -158,6 +159,12 @@ export function ChapterPractice({
           </div>
         )}
       </div>
+      {aiEnabled && chapterIsComplete(chapter) && !chapterIsPassed(chapter) && (
+        <p className="text-xs text-muted-foreground">
+          Score {Math.round(PASS_MASTERY * 100)}% or more on a quiz to finish this chapter and move on. Already know it? Mark
+          the chapter complete instead.
+        </p>
+      )}
       {chapter.items.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
           {chapter.items.map((item) => {

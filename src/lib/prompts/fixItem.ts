@@ -1,6 +1,7 @@
 import { InvalidAiResponseError } from "../aiResponseValidation";
 import { cleanEntry, FlagError, type FlaggableEntry, type FlaggableMode } from "../sources/flags";
 import { SOURCE_TRUST_RULE } from "./sources";
+import { CARD_SCOPE_RULE } from "./flashcards";
 import { describeCard, describeQuestion } from "./factCheck";
 import type { Flashcard, QuizQuestion } from "../types";
 
@@ -20,7 +21,7 @@ Decide whether the item is actually correct.
 - If it's wrong, ambiguous, or incomplete, write a corrected version. Keep it as close to the original as you can: same topic, same kind of item, only change what's needed.
 
 ${SOURCE_TRUST_RULE}
-If no material is given, rely on well-established knowledge of the subject.
+${mode === "flashcards" ? `${CARD_SCOPE_RULE} If the card is a calculation exercise, fix it into a conceptual card on the same idea.\n` : ""}If no material is given, rely on well-established knowledge of the subject.
 
 Write "note" (one or two sentences, in ${language}) explaining your decision. Write the item in the same language as the original. Use $...$ for inline math.
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { allFrosted, withFrosted } from "@/lib/frostedWidgets";
 import { useEffect, useRef, useState } from "react";
 import { FolderChipsPicker } from "@/components/FolderChipsPicker";
 import { HEADER_TINT_LABELS, HEADER_TINT_MODES, type HeaderTintMode } from "@/lib/headerTint";
@@ -63,7 +64,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { IMAGE_CAPABLE_BACKENDS } from "@/lib/aiBackendChoices";
-import type { AiBackend, AppSettings } from "@/lib/models";
+import type { AiBackend, AppSettings, HomeWidgetConfig } from "@/lib/models";
 import { FONT_CHOICES } from "@/lib/fontChoices";
 
 const AI_LABELS: Record<AiBackend, string> = {
@@ -1607,6 +1608,9 @@ type BrandingFields = {
   dashboardBackgroundImage?: string | null;
   dashboardBannerStyle?: AppSettings["dashboardBannerStyle"] | null;
   dashboardTransparentWidgets?: boolean;
+  todayCardShown?: boolean;
+  todayCardFrosted?: boolean;
+  homeWidgets?: HomeWidgetConfig[];
   dashboardLockBackgroundCrop?: boolean;
   dashboardBackdropFullPage?: boolean;
   dashboardBackdropBlur?: number;
@@ -1898,6 +1902,34 @@ function BackgroundsSection() {
         checked={settings.dashboardTransparentWidgets}
         onChange={(checked) => saveBranding({ dashboardTransparentWidgets: checked })}
       />
+      {settings.dashboardTransparentWidgets && (
+        <SettingGroup>
+          <SettingToggle
+            label="Frosted widgets"
+            help="Gives every widget, the Today card included, a see-through frosted panel so it's easy to read over a picture. Set one widget on its own in Customize (the snowflake on each tile), or the Today card just below."
+            checked={allFrosted(settings)}
+            onChange={(checked) =>
+              saveBranding({ homeWidgets: withFrosted(settings.homeWidgets, checked), todayCardFrosted: checked })
+            }
+          />
+        </SettingGroup>
+      )}
+      <SettingToggle
+        label="Today card"
+        help="The plan for today's study session, on the dashboard and in each course. Off hides it."
+        checked={settings.todayCardShown}
+        onChange={(checked) => saveBranding({ todayCardShown: checked })}
+      />
+      {settings.todayCardShown && settings.dashboardTransparentWidgets && (
+        <SettingGroup>
+          <SettingToggle
+            label="Frosted Today card"
+            help="Gives the Today card a see-through frosted panel so it's easy to read over a picture. Off: plain text straight on the picture, like the other widgets."
+            checked={settings.todayCardFrosted}
+            onChange={(checked) => saveBranding({ todayCardFrosted: checked })}
+          />
+        </SettingGroup>
+      )}
       <AppWallpaperSettings />
       <ImageCropDialog
         open={cropOpen}
@@ -2062,7 +2094,7 @@ function DisplaySection() {
   const [saving, setSaving] = useState(false);
 
   async function handleToggle(
-    field: "showModelBadge" | "autoOpenGeneratedItems" | "documentBadgesEnabled",
+    field: "showModelBadge" | "autoOpenGeneratedItems" | "documentBadgesEnabled" | "deckReminderIcons",
     next: boolean
   ) {
     if (!settings) return;
@@ -2240,6 +2272,13 @@ function DisplaySection() {
           </Select>
         </div>
       )}
+      <SettingToggle
+        label="Show a bell on decks with reminders on"
+        help="Flashcard decks whose review reminders are on get a small bell icon."
+        checked={settings.deckReminderIcons}
+        disabled={saving}
+        onChange={(checked) => handleToggle("deckReminderIcons", checked)}
+      />
     </div>
   );
 }

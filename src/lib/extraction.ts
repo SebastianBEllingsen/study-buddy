@@ -10,7 +10,7 @@ export interface ExtractionResult {
 export class ScannedPdfError extends Error {
   constructor() {
     super(
-      "This looks like a scanned or image-only PDF — OCR isn't supported yet."
+      "This looks like a scanned or image-only PDF — use “Transcribe with AI” in its menu to read it."
     );
     this.name = "ScannedPdfError";
   }

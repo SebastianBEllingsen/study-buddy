@@ -1,3 +1,4 @@
+import { parseJsonObjectBody } from "@/lib/requestBody";
 import { getGeneratedItem } from "@/lib/models";
 import type { FlashcardResult } from "@/lib/models";
 import type { FlashcardsContent } from "@/lib/types";
@@ -23,7 +24,7 @@ export async function POST(request: Request, { params }: Params) {
     }
     const cards = (JSON.parse(item.content_json) as FlashcardsContent).cards;
 
-    const body = await request.json();
+    const body = await parseJsonObjectBody(request);
     const cardIndex = Number(body?.cardIndex);
     const result = body?.result as FlashcardResult;
     const confidence = body?.confidence ?? null;

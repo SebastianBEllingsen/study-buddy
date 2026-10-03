@@ -1,7 +1,8 @@
 import { createEvent, deleteEvent } from "../googleCalendar";
 import { getCourse } from "../models";
-import { buildSchedule, localToday, scheduleInputFromPlan, type ScheduleWarning } from "./schedule";
+import { buildSchedule, carriedExtraReview, localToday, scheduleInputFromPlan, type ScheduleWarning } from "./schedule";
 import { StudyPlanNotFoundError } from "./resources";
+import { sessionKindLabel } from "../studyPlanDisplay";
 import {
   getStudyPlan,
   replaceOpenSessions,
@@ -42,7 +43,7 @@ export async function pushSessionsToGoogle(planId: number): Promise<void> {
     if (session.done_at || session.google_event_id) continue;
     const chapter = titles.get(session.chapter_id) ?? "Study";
     const event = await createEvent({
-      title: `${session.kind === "review" ? "Review" : "Study"}: ${chapter}`,
+      title: `${sessionKindLabel(session.kind)}: ${chapter}`,
       description: `${session.minutes} minutes${course ? ` · ${course.name}` : ""} — from your study plan.`,
       start: session.date,
       end: addDay(session.date),
@@ -53,8 +54,9 @@ export async function pushSessionsToGoogle(planId: number): Promise<void> {
 }
 
 // Rebuilds the plan's open sessions from today. Finished sessions are kept
-// (and count toward their chapters). With the schedule switched off, the
-// open sessions are cleared instead.
+// (and count toward their chapters). Without an explicit extraReview, the
+// extra review a replan added earlier is kept too. With the schedule
+// switched off, the open sessions are cleared instead.
 export async function reschedulePlan(
   planId: number,
   extraReview?: Map<number, number>
@@ -67,7 +69,7 @@ export async function reschedulePlan(
     await replaceOpenSessions(planId, []);
     return { warnings: [] };
   }
-  const { sessions, warnings } = buildSchedule(scheduleInputFromPlan(plan, localToday(), extraReview));
+  const { sessions, warnings } = buildSchedule(scheduleInputFromPlan(plan, localToday(), extraReview ?? carriedExtraReview(plan.sessions)));
   await replaceOpenSessions(planId, sessions);
   if (plan.options.googleCalendar) {
     try {
@@ -87,6 +89,14 @@ export async function rescheduleQuietly(planId: number): Promise<void> {
   } catch (err) {
     console.error("Study plan: rescheduling failed:", err);
   }
+}
+
+// Takes the plan's events out of Google Calendar, ahead of deleting the plan
+// (its sessions, and so the events' ids, go with it). Best effort, like any
+// removal of these events: a failure never blocks the delete.
+export async function removePlanFromGoogle(planId: number): Promise<void> {
+  const plan = await getStudyPlan(planId);
+  if (plan?.sessions.some((s) => s.google_event_id)) await removeGoogleEvents(plan, false);
 }
 
 // Switches mirroring to Google Calendar on (adding every open session) or

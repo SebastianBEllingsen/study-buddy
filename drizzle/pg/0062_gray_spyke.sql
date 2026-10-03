@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "deck_reminder_icons" boolean DEFAULT true NOT NULL;

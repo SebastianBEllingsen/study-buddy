@@ -22,6 +22,7 @@ import type {
   LinkStatus,
   ResourceKind,
   ResourceOrigin,
+  SessionKind,
   StudyPlan,
   StudyPlanChapter,
   StudyPlanOptions,
@@ -411,8 +412,21 @@ export async function setPlanOptions(id: number, options: StudyPlanOptions): Pro
     .where(eq(study_plans.id, id));
 }
 
-export async function deleteStudyPlan(id: number): Promise<void> {
-  await db.delete(study_plans).where(eq(study_plans.id, id));
+// `deleteItems` also removes the quizzes, flashcards and notes made for the
+// plan's chapters — with their reviews, quiz attempts and mistakes. Without
+// it they stay in the course, just no longer tied to a chapter. Done before
+// the plan goes, while the items still point at its chapters.
+export async function deleteStudyPlan(id: number, options: { deleteItems?: boolean } = {}): Promise<void> {
+  await runTransaction(async (tx) => {
+    if (options.deleteItems) {
+      const chapters = await tx.select({ id: study_plan_chapters.id }).from(study_plan_chapters).where(eq(study_plan_chapters.plan_id, id));
+      const chapterIds = chapters.map((c) => c.id);
+      if (chapterIds.length > 0) {
+        await tx.delete(generated_items).where(inArray(generated_items.study_plan_chapter_id, chapterIds));
+      }
+    }
+    await tx.delete(study_plans).where(eq(study_plans.id, id));
+  });
 }
 
 export async function setPlanStatus(
@@ -685,7 +699,7 @@ export interface NewSession {
   chapterId: number;
   date: string;
   minutes: number;
-  kind: "study" | "review";
+  kind: SessionKind;
 }
 
 // Swaps the plan's not-yet-done sessions for a freshly built schedule.
@@ -717,10 +731,12 @@ export async function getSession(id: number): Promise<StudyPlanSession | undefin
   return row;
 }
 
-export async function setSessionDone(id: number, done: boolean): Promise<void> {
+// `minutes`, when given, replaces the planned length with how long the
+// session really took.
+export async function setSessionDone(id: number, done: boolean, minutes?: number): Promise<void> {
   await db
     .update(study_plan_sessions)
-    .set({ done_at: done ? nowUtc() : null })
+    .set({ done_at: done ? nowUtc() : null, ...(done && minutes !== undefined ? { minutes } : {}) })
     .where(eq(study_plan_sessions.id, id));
 }
 
@@ -736,7 +752,7 @@ export interface CalendarSessionRow {
   id: number;
   date: string;
   minutes: number;
-  kind: "study" | "review";
+  kind: SessionKind;
   chapter_id: number;
   chapter_title: string;
   course_id: number;

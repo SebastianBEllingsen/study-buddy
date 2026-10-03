@@ -2,7 +2,7 @@ import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
 import { deleteStudyPlan, getStudyPlan, renameStudyPlan, setPlanOptions } from "@/lib/studyPlan/store";
 import { parseStudyPlanOptions } from "@/lib/studyPlan/options";
-import { reschedulePlan } from "@/lib/studyPlan/scheduleService";
+import { removePlanFromGoogle, reschedulePlan } from "@/lib/studyPlan/scheduleService";
 import type { ScheduleWarning } from "@/lib/studyPlan/schedule";
 
 type Params = { params: Promise<{ planId: string }> };
@@ -48,10 +48,12 @@ export async function PATCH(request: Request, { params }: Params) {
   return Response.json({ plan: await getStudyPlan(id), warnings });
 }
 
-export async function DELETE(_request: Request, { params }: Params) {
+// ?deleteItems=1 also deletes the quizzes, flashcards and notes made for the plan.
+export async function DELETE(request: Request, { params }: Params) {
   const { planId } = await params;
   const id = parseId(planId);
   if (id === null) return Response.json({ error: "Study plan not found" }, { status: 404 });
-  await deleteStudyPlan(id);
+  await removePlanFromGoogle(id);
+  await deleteStudyPlan(id, { deleteItems: new URL(request.url).searchParams.get("deleteItems") === "1" });
   return Response.json({ ok: true });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Explain } from "@/components/Explain";
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
@@ -9,6 +9,8 @@ import { toast } from "sonner";
 import { Check, Lightbulb, LoaderCircle, RotateCcw, Sparkles } from "lucide-react";
 import type { MistakeListEntry, MistakeStatus } from "@/lib/review/mistakes";
 import { CONFIDENCE_LABELS } from "@/lib/review/calibration";
+import { MISTAKE_TYPE_ADVICE, MISTAKE_TYPE_LABELS, parseMistakeType, summarizeMistakeTypes, type MistakeType } from "@/lib/review/mistakeTypes";
+import { cn } from "cn";
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +42,11 @@ function MistakeCard({ mistake, onToggle }: { mistake: MistakeListEntry; onToggl
           {mistake.confidence && (
             <Badge variant="outline" className={mistake.confidence === "sure" ? "border-clay/40 text-clay" : undefined}>
               {CONFIDENCE_LABELS[mistake.confidence]}
+            </Badge>
+          )}
+          {parseMistakeType(mistake.error_type) && (
+            <Badge variant="outline" className="border-focus/40 text-focus">
+              {MISTAKE_TYPE_LABELS[parseMistakeType(mistake.error_type) as MistakeType]}
             </Badge>
           )}
           {mistake.resolved_at && <Badge variant="outline">Resolved</Badge>}
@@ -89,8 +96,12 @@ function MistakesPageInner() {
   const params = new URLSearchParams({ status });
   if (courseId !== null) params.set("courseId", String(courseId));
   const { data, error, mutate } = useSWR<{ mistakes: MistakeListEntry[] }>(`/api/mistakes?${params}`);
-  const mistakes = data?.mistakes ?? [];
-  const unexplained = mistakes.filter((m) => !m.resolved_at && !m.misconception).length;
+  const [typeFilter, setTypeFilter] = useState<MistakeType | null>(null);
+  const all = useMemo(() => data?.mistakes ?? [], [data]);
+  const mistakes = typeFilter ? all.filter((m) => m.error_type === typeFilter) : all;
+  const typeMix = useMemo(() => summarizeMistakeTypes(all), [all]);
+  // Waiting for a note, a type, or both.
+  const unexplained = all.filter((m) => !m.resolved_at && (!m.misconception || !m.error_type)).length;
   const courseName = courseId !== null ? mistakes[0]?.course_name : null;
 
   async function toggle(mistake: MistakeListEntry) {
@@ -204,6 +215,30 @@ function MistakesPageInner() {
           </Explain>
         )}
       </div>
+
+      {typeMix.length > 0 && (
+        <div className="space-y-2" aria-label="What kind of mistakes">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm text-muted-foreground">Kinds of mistake</span>
+            {typeMix.map(({ type, count }) => (
+              <button
+                key={type}
+                type="button"
+                aria-pressed={typeFilter === type}
+                onClick={() => setTypeFilter(typeFilter === type ? null : type)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-sm transition-colors",
+                  typeFilter === type ? "border-focus bg-focus/10 font-medium" : "hover:bg-muted"
+                )}
+              >
+                {MISTAKE_TYPE_LABELS[type]}
+                <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground">{MISTAKE_TYPE_ADVICE[typeFilter ?? typeMix[0].type]}</p>
+        </div>
+      )}
 
       {error ? (
         <p className="text-sm text-destructive">Couldn&apos;t load your mistakes.</p>

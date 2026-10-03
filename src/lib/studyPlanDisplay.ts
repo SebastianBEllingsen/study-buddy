@@ -1,6 +1,7 @@
 import type { DateFormatter } from "./dateFormat";
-import type { LinkStatus, ResourceKind, StudyPlan, StudyPlanChapter } from "./studyPlan/types";
+import type { LinkStatus, ResourceKind, SessionKind, StudyPlan, StudyPlanChapter } from "./studyPlan/types";
 import { groupStages } from "./studyPlan/roadmap";
+import { hasPassed } from "./studyPlan/mastery";
 import type { ScheduleWarning } from "./studyPlan/schedule";
 
 // Pure view logic for the study plan page and the course page's plan card —
@@ -34,6 +35,25 @@ export function chapterIsComplete(chapter: StudyPlanChapter): boolean {
   return chapter.subtopics.length > 0 && chapter.subtopics.every((s) => s.done);
 }
 
+// Studied and tested: ticking a chapter complete by hand counts as passed,
+// otherwise its quizzes and flashcards have to show it's known — see
+// hasPassed (a pass, once earned, sticks).
+export function chapterIsPassed(chapter: StudyPlanChapter): boolean {
+  return (
+    !!chapter.completed_at ||
+    hasPassed(
+      chapter.mastery,
+      chapter.items.filter((i) => i.mode === "quiz").map((i) => i.best_score)
+    )
+  );
+}
+
+const SESSION_KIND_LABEL: Record<SessionKind, string> = { study: "Study", review: "Review", check: "Check" };
+
+export function sessionKindLabel(kind: SessionKind): string {
+  return SESSION_KIND_LABEL[kind];
+}
+
 export interface PlanProgress {
   chaptersDone: number;
   chaptersTotal: number;
@@ -65,9 +85,11 @@ export function planProgress(plan: Pick<StudyPlan, "chapters">): PlanProgress {
 }
 
 // The first unfinished chapter in roadmap order (earliest stage first).
-export function nextChapter(plan: Pick<StudyPlan, "chapters">): StudyPlanChapter | null {
+// With `requirePass`, a chapter that's studied but not yet passed still
+// counts as unfinished — the next stage waits for its check.
+export function nextChapter(plan: Pick<StudyPlan, "chapters">, requirePass = false): StudyPlanChapter | null {
   for (const stage of groupStages(plan.chapters)) {
-    const open = stage.find((c) => !chapterIsComplete(c));
+    const open = stage.find((c) => !chapterIsComplete(c) || (requirePass && !chapterIsPassed(c)));
     if (open) return open;
   }
   return null;
@@ -168,7 +190,7 @@ export function scheduleWarningText(warning: ScheduleWarning): string {
     case "no_study_days":
       return "Pick at least one study day.";
     case "deadline_passed":
-      return "The finish date has passed, so sessions carry on without one.";
+      return "The finish date has passed, so sessions carry on without one. Pick a new date in the schedule settings.";
     case "not_enough_time":
       return `About ${formatMinutes(Math.round((warning.neededMinutes - warning.availableMinutes) / 5) * 5)} of study doesn't fit before the finish date, so sessions are shortened. Add study days or minutes, or move the date.`;
     case "too_long":

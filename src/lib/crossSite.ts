@@ -33,3 +33,34 @@ export function isCrossSiteWrite(
   // Neither header: not a browser (curl, scripts) — nothing to forge.
   return false;
 }
+
+// DNS rebinding guard: a web page can point its own hostname at 127.0.0.1
+// after the page has loaded, and then its requests to this app look
+// same-origin to the browser — so the check above lets them through. What
+// still gives them away is the Host header, which carries their hostname.
+// Only the machine's own names are accepted; STUDY_BUDDY_ALLOWED_HOSTS
+// (comma-separated hostnames) adds others, for someone who reaches the app
+// through a name of their own.
+const OWN_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function hostnameOf(host: string): string {
+  // "[::1]:3000" / "localhost:3000" / "localhost" → the name without the port.
+  const end = host.startsWith("[") ? host.indexOf("]") + 1 : host.indexOf(":");
+  return (end > 0 ? host.slice(0, end) : host).toLowerCase();
+}
+
+export function isUntrustedHost(
+  headers: { get(name: string): string | null },
+  extraHosts: string | undefined = undefined,
+): boolean {
+  const host = headers.get("host");
+  // No Host header: not a browser (HTTP/1.1 clients always send one).
+  if (!host) return false;
+  const name = hostnameOf(host);
+  if (OWN_HOSTS.has(name) || name.endsWith(".localhost")) return false;
+  const extra = (extraHosts ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return !extra.includes(name);
+}

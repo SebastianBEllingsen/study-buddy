@@ -265,6 +265,37 @@ describe("study plan store", () => {
     expect(second.chapters[0].resources.map((r) => [r.url, !!r.done_at])).toEqual([["https://example.org/a", true]]);
   });
 
+  it("deletes a plan but keeps its generated items, unless asked to delete them too", async () => {
+    const course = await createCourse("Sample Course");
+    const item = (chapterId: number | null, title: string) =>
+      createGeneratedItem({
+        courseId: course.id,
+        folderId: null,
+        sourceFolderId: null,
+        sourceHandpicked: false,
+        mode: "quiz",
+        title,
+        contentJson: { questions: [] },
+        sourceDocumentIds: [],
+        studyPlanChapterId: chapterId,
+      });
+
+    const keep = await store.replaceStudyPlan(newPlan(course.id, [chapter("A")]));
+    const kept = await item(keep.chapters[0].id, "Quiz — A");
+    await store.deleteStudyPlan(keep.id);
+    expect(await store.getStudyPlan(keep.id)).toBeUndefined();
+    expect((await getGeneratedItem(kept.id))?.study_plan_chapter_id).toBeNull();
+
+    const wipe = await store.replaceStudyPlan(newPlan(course.id, [chapter("B")]));
+    const tied = await item(wipe.chapters[0].id, "Quiz — B");
+    const unrelated = await item(null, "My own quiz");
+    await store.deleteStudyPlan(wipe.id, { deleteItems: true });
+    expect(await store.getStudyPlan(wipe.id)).toBeUndefined();
+    expect(await getGeneratedItem(tied.id)).toBeUndefined();
+    expect(await getGeneratedItem(unrelated.id)).toBeDefined();
+    expect(await getGeneratedItem(kept.id)).toBeDefined();
+  });
+
   it("lists a chapter's generated items with their best score, and its mastery", async () => {
     const course = await createCourse("Sample Course");
     const plan = await store.replaceStudyPlan(newPlan(course.id, [chapter("A"), chapter("B")]));

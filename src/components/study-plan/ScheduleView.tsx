@@ -13,6 +13,7 @@ import {
   formatMinutes,
   groupSessionsByWeek,
   scheduleWarningText,
+  sessionKindLabel,
 } from "@/lib/studyPlanDisplay";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -78,15 +79,19 @@ export function ScheduleView({
   const warnings = buildSchedule(scheduleInputFromPlan(plan, today)).warnings;
   const shown = showAll ? open : open.slice(0, INITIAL_SESSIONS_SHOWN);
   const weeks = groupSessionsByWeek(shown, today);
+  // Totals over every open session, so a week cut off by "show fewer" isn't undercounted.
+  const weekMinutes = new Map(
+    groupSessionsByWeek(open, today).map((w) => [w.label, w.sessions.reduce((n, s) => n + s.minutes, 0)])
+  );
   const { deadline, studyDays, minutesPerDay } = plan.options;
 
   async function toggleSession(session: StudyPlanSession, isDone: boolean) {
     if (await send(`/api/study-plans/${plan.id}/sessions/${session.id}`, "PATCH", { done: isDone })) onChanged();
   }
 
-  async function replan() {
+  async function replan(useAi = true) {
     setReplanning(true);
-    const res = await send(`/api/study-plans/${plan.id}/replan`, "POST");
+    const res = await send(`/api/study-plans/${plan.id}/replan`, "POST", { useAi });
     setReplanning(false);
     if (!res) return;
     const data = await res.json();
@@ -131,7 +136,7 @@ export function ScheduleView({
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Explain id="plan.replan">
-          <Button variant="outline" size="sm" onClick={replan} disabled={replanning}>
+          <Button variant="outline" size="sm" onClick={() => replan()} disabled={replanning}>
             {replanning ? (
               <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" />
             ) : (
@@ -161,7 +166,12 @@ export function ScheduleView({
       {missed.length > 0 && (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {missed.length} session{missed.length === 1 ? "" : "s"} missed — Replan moves them forward, with extra review
-          where your quiz and flashcard results are weak.
+          where your quiz and flashcard results are weak.{" "}
+          <Explain id="plan.replanNoAi">
+            <button type="button" className="underline" disabled={replanning} onClick={() => replan(false)}>
+              Just move them, no AI
+            </button>
+          </Explain>
         </p>
       )}
 
@@ -180,6 +190,8 @@ export function ScheduleView({
                     : week.label === "next"
                       ? "Next week"
                       : `Week of ${formatDay(fmt, week.label, { day: "numeric", month: "short" })}`}
+                  {" · "}
+                  {formatMinutes(weekMinutes.get(week.label) ?? 0)}
                 </h3>
                 <ul className="divide-y divide-border/60">
                   {week.sessions.map((session) => (
@@ -193,7 +205,7 @@ export function ScheduleView({
                         {session.date === today ? "Today" : formatDay(fmt, session.date)}
                       </span>
                       <a href={`#chapter-${session.chapter_id}`} className="min-w-0 flex-1 truncate hover:underline">
-                        {session.kind === "review" && <span className="text-muted-foreground">Review · </span>}
+                        {session.kind !== "study" && <span className="text-muted-foreground">{sessionKindLabel(session.kind)} · </span>}
                         {chapterNumbers.get(session.chapter_id)}. {titles.get(session.chapter_id)}
                       </a>
                       <span className="shrink-0 text-xs text-muted-foreground">{formatMinutes(session.minutes)}</span>

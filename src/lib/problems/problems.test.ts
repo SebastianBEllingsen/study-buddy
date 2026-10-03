@@ -11,8 +11,9 @@ const generateStructured = vi.fn();
 vi.mock("../aiClient", () => ({ generateStructured: (...a: unknown[]) => generateStructured(...a) }));
 
 const { createCourse } = await import("../models");
-const { createCoachSet, createMixedSet, actOnProblem, reviewVerdict, ProblemSetError } = await import("./service");
-const { normalizeProblems, interleaveByConcept } = await import("./validate");
+const { createCoachSet, createMixedSet, actOnProblem, modelExpression, reviewVerdict, ProblemSetError } = await import("./service");
+const { normalizeProblems, interleaveByConcept, reconcileVerdict } = await import("./validate");
+const { checkUserPrompt, checkSystemPrompt, coachSystemPrompt } = await import("../prompts/problems");
 const { publicProblem } = await import("./view");
 const { parseProblemAction } = await import("./requests");
 const reviewStore = await import("../review/store");
@@ -80,6 +81,60 @@ describe("publicProblem", () => {
   });
 });
 
+describe("final-answer expressions", () => {
+  const withExpr = (answerExpr: unknown, stage = "independent") =>
+    normalizeProblems(
+      { problems: [{ stage, concept: "Sums", statement: "s", steps: [step("a"), step("b")], blanks: [1], answer: "55", answerExpr }] },
+      "coach"
+    ).problems[0];
+
+  it("keeps a one-line expression and drops anything else", () => {
+    expect(withExpr("n*(n+1)/2").answerExpr).toBe("n*(n+1)/2");
+    expect(withExpr("  3/4  ").answerExpr).toBe("3/4");
+    for (const bad of ["", "   ", "a\nb", 42, null, undefined]) expect(withExpr(bad).answerExpr).toBeUndefined();
+    expect(withExpr("x".repeat(500)).answerExpr).toHaveLength(200);
+  });
+
+  it("never reaches the browser — it only learns there's one to check against", () => {
+    const problem = withExpr("n*(n+1)/2");
+    const shown = publicProblem(problem, emptyProgress());
+    expect(shown.checkable).toBe(true);
+    expect(JSON.stringify(shown)).not.toContain("n*(n+1)/2");
+    expect(publicProblem(problem, { ...emptyProgress(), done: true })).not.toHaveProperty("answerExpr");
+    // No expression, or not a problem solved alone: nothing to check.
+    expect(publicProblem(withExpr(""), emptyProgress()).checkable).toBe(false);
+    expect(publicProblem(withExpr("3/4", "faded"), emptyProgress()).checkable).toBe(false);
+  });
+
+  it("is asked for when a set is written, and handed to the prompt as fact when checking", () => {
+    const topic = { name: "Sums", summary: "", subtopics: [] };
+    expect(coachSystemPrompt("Sample Course", topic, "English", null)).toContain('"answerExpr"');
+    const problem = withExpr("3/4");
+    const prompt = (match: "equal" | "close" | "different" | "unreadable") =>
+      checkUserPrompt(problem, "solution", "my work", { text: "0.75", match });
+    expect(prompt("equal")).toContain('"0.75" is EQUIVALENT to the model');
+    expect(prompt("different")).toContain("NOT equivalent to");
+    expect(prompt("close")).toContain("numerically close");
+    // Unreadable (or no answer typed) says nothing, and the model answer's expression isn't in the prompt.
+    expect(prompt("unreadable")).not.toContain("Computer algebra");
+    expect(checkUserPrompt(problem, "solution", "my work")).not.toContain("Computer algebra");
+    expect(prompt("equal")).not.toContain("3/4\nComputer");
+    expect(checkSystemPrompt("English")).toContain("computer algebra check");
+  });
+
+  it("bounds the language model's verdict by what algebra found", () => {
+    expect(reconcileVerdict("correct", "different")).toBe("partial");
+    expect(reconcileVerdict("incorrect", "equal")).toBe("partial");
+    // Everything else is left to the model.
+    for (const [verdict, match] of [
+      ["correct", "equal"], ["correct", "close"], ["correct", "unreadable"], ["correct", undefined],
+      ["partial", "different"], ["incorrect", "different"], ["incorrect", "close"], ["partial", "equal"],
+    ] as const) {
+      expect(reconcileVerdict(verdict, match)).toBe(verdict);
+    }
+  });
+});
+
 describe("reviewVerdict", () => {
   it("discounts correct solutions that leaned on hints", () => {
     expect(reviewVerdict("correct", 0)).toEqual({ verdict: "correct", confidence: null });
@@ -96,6 +151,19 @@ describe("parseProblemAction", () => {
     expect(parseProblemAction({ action: "check", problem: 1, text: 3 })).toBeNull();
     expect(parseProblemAction({ action: "nope", problem: 1 })).toBeNull();
     expect(parseProblemAction({ action: "hint", problem: -1 })).toBeNull();
+  });
+
+  it("takes a final answer and its comparison with a check, and asks for the model's expression", () => {
+    const final = { text: " 3/4 ", match: "equal" };
+    expect(parseProblemAction({ action: "check", problem: 2, text: "w", final })).toMatchObject({ final: { text: "3/4", match: "equal" } });
+    // A malformed one is dropped, not an error: the check still goes ahead.
+    for (const bad of [null, "x", {}, { text: "3", match: "yes" }, { text: "  ", match: "equal" }, { text: "x".repeat(501), match: "equal" }]) {
+      expect(parseProblemAction({ action: "check", problem: 2, text: "w", final: bad })).toMatchObject({ action: "check", final: undefined });
+    }
+    expect(parseProblemAction({ action: "expr", problem: 2, text: " 3/4 " })).toEqual({ action: "expr", problem: 2, text: "3/4" });
+    for (const bad of [{ action: "expr", problem: 2 }, { action: "expr", problem: 2, text: " " }, { action: "expr", problem: 2, text: 5 }]) {
+      expect(parseProblemAction(bad)).toBeNull();
+    }
   });
 });
 
@@ -137,6 +205,29 @@ describe("problem set flow", () => {
 
     await expect(actOnProblem(set.id, { action: "check", problem: 0, text: "x" })).rejects.toBeInstanceOf(ProblemSetError);
     await expect(actOnProblem(set.id, { action: "hint", problem: 1 })).rejects.toBeInstanceOf(ProblemSetError);
+  });
+
+  it("hands out the model's expression only for a problem solved alone, and clamps the verdict by the algebra check", async () => {
+    const course = await createCourse("Expr Course");
+    generateStructured.mockResolvedValueOnce({
+      title: "x",
+      problems: [
+        { stage: "worked", concept: "Sums", statement: "a", steps: [step("s")], answer: "1", answerExpr: "1" },
+        { stage: "independent", concept: "Sums", statement: "Sum 1..10", steps: [step("formula"), step("55")], answer: "55", answerExpr: "55" },
+      ],
+    });
+    const set = await createCoachSet(course.id, { topic: "Sums" });
+    expect(await modelExpression(set.id, 0)).toBeNull(); // the worked example
+    expect(await modelExpression(set.id, 1)).toBe("55");
+    await expect(modelExpression(set.id, 9)).rejects.toBeInstanceOf(ProblemSetError);
+
+    // The AI says correct, but the algebra says the final answer differs: partial, and the check is recorded.
+    generateStructured.mockResolvedValueOnce({ verdict: "correct", feedback: "Looks right." });
+    const s = await actOnProblem(set.id, { action: "check", problem: 1, text: "my work", final: { text: "56", match: "different" } });
+    expect(s.progress[1].solution).toMatchObject({ verdict: "partial", finalAnswer: { text: "56", match: "different" } });
+    expect(s.progress[1].done).toBe(false);
+    // The prompt carried the fact.
+    expect(generateStructured.mock.calls.at(-1)?.[0].user).toContain("NOT equivalent to");
   });
 
   it("needs two topics for a mixed set", async () => {

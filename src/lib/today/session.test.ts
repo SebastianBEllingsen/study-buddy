@@ -79,7 +79,7 @@ describe("step actions", () => {
     s = setStepStatus(s, "chapter:5:resource:9", "done");
     expect(currentStep(s)?.id).toBe("concept:2:graphs");
     expect(sessionProgress(s)).toEqual({ done: 1, total: 3, minutesDone: 25 });
-    expect(finishedPlanSessions(s)).toEqual([{ planId: 1, sessionId: 40 }]);
+    expect(finishedPlanSessions(s)).toMatchObject([{ planId: 1, sessionId: 40 }]);
     expect(snoozeStep(s, "mistakes")).toBe(s);
   });
 
@@ -96,5 +96,50 @@ describe("parseSession", () => {
     expect(parseSession({ date: "x" })).toBeNull();
     expect(parseSession(null)).toBeNull();
     expect(parseSession({ ...s, steps: [{}] })).toBeNull();
+  });
+});
+
+describe("chosen chapters in a session", () => {
+  it("are kept with the session, and default to none for an older saved one", () => {
+    const s = startSession({ date: "2026-03-02", courseId: null, minutes: 60, steps: base, chapterIds: [4, 9], now: 1 });
+    expect(parseSession(JSON.parse(JSON.stringify(s)))?.chapterIds).toEqual([4, 9]);
+    const old: Record<string, unknown> = JSON.parse(JSON.stringify(s));
+    delete old.chapterIds;
+    expect(parseSession(old)?.chapterIds).toEqual([]);
+  });
+});
+
+describe("measuring how long plan sessions took", () => {
+  const MIN = 60_000;
+  const t0 = 1_700_000_000_000;
+  const started = () =>
+    startSession({
+      date: "2026-01-05",
+      courseId: null,
+      minutes: 60,
+      now: t0,
+      steps: [
+        step("a", "chapter", { sessionId: { planId: 1, sessionId: 40 } }),
+        step("b", "chapter", { sessionId: { planId: 1, sessionId: 40 } }),
+        step("c", "chapter", { sessionId: { planId: 1, sessionId: 41 } }),
+      ],
+    });
+
+  it("adds up the time from one tick to the next, per plan session", () => {
+    let s = setStepStatus(started(), "a", "done", t0 + 20 * MIN);
+    s = setStepStatus(s, "b", "done", t0 + 35 * MIN);
+    s = setStepStatus(s, "c", "done", t0 + 50 * MIN);
+    expect(finishedPlanSessions(s)).toEqual([
+      { planId: 1, sessionId: 40, minutes: 35 },
+      { planId: 1, sessionId: 41, minutes: 15 },
+    ]);
+  });
+
+  it("gives no measurement when a step has no timestamp, or the time is trivially short", () => {
+    const untimed = { ...started(), steps: started().steps.map((x, i) => (i === 0 ? { ...x, status: "done" as const } : x)) };
+    expect(finishedPlanSessions(untimed)).toEqual([{ planId: 1, sessionId: 40 }]);
+    expect(finishedPlanSessions(setStepStatus(started(), "c", "done", t0 + 10_000))).toEqual([
+      { planId: 1, sessionId: 41 },
+    ]);
   });
 });

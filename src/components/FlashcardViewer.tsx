@@ -187,7 +187,9 @@ export default function FlashcardViewer({
         </div>
         <Button
           onClick={() => {
-            setQueue(dueCardIndices.length > 0 ? dueCardIndices : null);
+            // dueCardIndices is from page load and now stale — everything in
+            // it was just reviewed, so land on "all caught up", not a replay.
+            setQueue(null);
             setPosition(0);
             setLogged(0);
           }}

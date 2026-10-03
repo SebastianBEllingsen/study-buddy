@@ -94,6 +94,16 @@ describe("nextChapter", () => {
     expect(nextChapter(plan)?.id).toBe(3);
     expect(nextChapter({ chapters: [chapter({ completed_at: "x" })] })).toBeNull();
   });
+
+  it("with requirePass, keeps a studied-but-untested chapter as next", () => {
+    const studied = chapter({ id: 1, stage: 1, subtopics: [{ text: "a", done: true }], mastery: 0.4 });
+    const plan = { chapters: [studied, chapter({ id: 2, position: 1, stage: 2 })] };
+    expect(nextChapter(plan)?.id).toBe(2);
+    expect(nextChapter(plan, true)?.id).toBe(1);
+    // Passing it (or ticking it complete by hand) lets the plan move on.
+    expect(nextChapter({ chapters: [{ ...studied, mastery: 0.8 }, plan.chapters[1]] }, true)?.id).toBe(2);
+    expect(nextChapter({ chapters: [{ ...studied, completed_at: "x" }, plan.chapters[1]] }, true)?.id).toBe(2);
+  });
 });
 
 describe("linksAreStale", () => {

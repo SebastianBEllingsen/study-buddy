@@ -2,6 +2,9 @@ import type { Problem, ProblemProgress, PublicProblem } from "./types";
 
 // See PublicProblem in types.ts. Client-safe and pure.
 export function publicProblem(problem: Problem, progress: ProblemProgress): PublicProblem {
+  // The model's final expression stays on the server; the browser only learns
+  // whether there is one to check against.
+  const { answerExpr, ...rest } = problem;
   const earned = (i: number) => {
     if (progress.done || problem.stage === "worked") return true;
     if (problem.stage === "faded") {
@@ -11,7 +14,8 @@ export function publicProblem(problem: Problem, progress: ProblemProgress): Publ
     return false;
   };
   return {
-    ...problem,
+    ...rest,
+    checkable: problem.stage === "independent" && !!answerExpr,
     steps: problem.steps.map((s, i) => ({
       text: earned(i) ? s.text : null,
       // Independent problems hand out hints one at a time, in order.

@@ -1,3 +1,4 @@
+import { parseJsonObjectBody } from "@/lib/requestBody";
 import {
   getGeneratedItem,
   listRecentQuizAttemptsForItem,
@@ -96,13 +97,14 @@ export async function PATCH(request: Request, { params }: Params) {
     const { itemId } = await params;
     const id = parseId(itemId);
     if (id === null) return Response.json({ error: "Item not found" }, { status: 404 });
-    const body = await request.json();
+    const body = await parseJsonObjectBody(request);
 
     if (body?.folderId !== undefined) {
-      if (body.folderId !== null && !Number.isInteger(body.folderId)) {
+      const folderId = body.folderId;
+      if (folderId !== null && (typeof folderId !== "number" || !Number.isInteger(folderId))) {
         return Response.json({ error: "folderId is required" }, { status: 400 });
       }
-      await moveGeneratedItem(id, body.folderId);
+      await moveGeneratedItem(id, folderId);
       return Response.json({ ok: true });
     }
 

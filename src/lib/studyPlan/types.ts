@@ -7,7 +7,7 @@ export type StudyPlanStatus = "draft_topics" | "generating" | "ready" | "failed"
 export type StudyPlanPreset = "roadmap" | "guided";
 export type ChapterLevel = "new" | "familiar" | "known";
 export type ResourceOrigin = "ai" | "user";
-export type SessionKind = "study" | "review";
+export type SessionKind = "study" | "review" | "check";
 
 export const RESOURCE_KINDS = ["video", "playlist", "course", "article", "interactive", "book"] as const;
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
@@ -35,6 +35,9 @@ export interface StudyPlanOptions {
   topicLevels: boolean;
   // Quiz / flashcards / notes buttons per chapter, and mastery from them.
   practice: boolean;
+  // A short pre-test quiz per chapter, made once the plan is built and taken
+  // before a chapter is studied — measures what's already known.
+  diagnostic: boolean;
   // Spread chapters over dated study sessions.
   schedule: boolean;
   // YYYY-MM-DD, or null for no deadline (sessions just run on in order).

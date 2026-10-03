@@ -570,7 +570,7 @@ function UpcomingEventsWidget({
           <CalendarDays className="size-4 text-focus" />
           {label ?? "Upcoming"}
         </span>
-        <Link href="/calendar" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+        <Link href="/calendar" className="tap-target text-xs text-muted-foreground hover:text-foreground hover:underline">
           Open calendar
         </Link>
       </div>
@@ -726,7 +726,7 @@ function AssignmentsWidget({
         </span>
         <Link
           href="/calendar?view=assignments"
-          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+          className="tap-target text-xs text-muted-foreground hover:text-foreground hover:underline"
         >
           Open calendar
         </Link>
@@ -1063,16 +1063,20 @@ function HomePageContent() {
   );
 
   const transparentWidgets = settings?.dashboardTransparentWidgets ?? false;
+  // A frosted widget keeps its solid card (drawn by the tile's data-frosted,
+  // see globals.css); the others are plain on the picture.
+  const isFrosted = (widget: HomeWidgetConfig) => transparentWidgets && !!widget.frosted;
 
   function renderWidget(widget: HomeWidgetConfig) {
     const layout: WidgetLayout = { colSpan: widget.colSpan, rowSpan: widget.rowSpan };
+    const plainOnPicture = transparentWidgets && !widget.frosted;
     switch (widget.id) {
       case "streak":
-        return stats && <StreakWidget key="streak" stats={stats} transparent={transparentWidgets} />;
+        return stats && <StreakWidget key="streak" stats={stats} transparent={plainOnPicture} />;
       case "due":
         return (
           stats && (
-            <DueCardsWidget key="due" stats={stats} layout={layout} transparent={transparentWidgets} />
+            <DueCardsWidget key="due" stats={stats} layout={layout} transparent={plainOnPicture} />
           )
         );
       case "heatmap":
@@ -1082,7 +1086,7 @@ function HomePageContent() {
               key="heatmap"
               activity={stats.activity}
               layout={layout}
-              transparent={transparentWidgets}
+              transparent={plainOnPicture}
             />
           )
         );
@@ -1093,7 +1097,7 @@ function HomePageContent() {
             connected={!!settings?.googleCalendarConnected || !!settings?.hasCalendarFeeds}
             layout={layout}
             label={widget.label}
-            transparent={transparentWidgets}
+            transparent={plainOnPicture}
           />
         );
       case "assignments":
@@ -1103,7 +1107,7 @@ function HomePageContent() {
             feeds={feeds}
             layout={layout}
             label={widget.label}
-            transparent={transparentWidgets}
+            transparent={plainOnPicture}
           />
         );
       case "recent":
@@ -1112,18 +1116,18 @@ function HomePageContent() {
             key="recent"
             layout={layout}
             label={widget.label}
-            transparent={transparentWidgets}
+            transparent={plainOnPicture}
           />
         );
       case "pomodoro":
         return (
-          <PomodoroWidget key="pomodoro" layout={layout} label={widget.label} transparent={transparentWidgets} />
+          <PomodoroWidget key="pomodoro" layout={layout} label={widget.label} transparent={plainOnPicture} />
         );
       case "links":
-        return <LinksWidget key="links" layout={layout} label={widget.label} transparent={transparentWidgets} />;
+        return <LinksWidget key="links" layout={layout} label={widget.label} transparent={plainOnPicture} />;
       case "timetable":
         return (
-          <TimetableWidget key="timetable" layout={layout} label={widget.label} transparent={transparentWidgets} />
+          <TimetableWidget key="timetable" layout={layout} label={widget.label} transparent={plainOnPicture} />
         );
     }
   }
@@ -1176,7 +1180,7 @@ function HomePageContent() {
       ) : (
         <div className="dashboard-grid">
           {topWidgets.map((w) => (
-            <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
+            <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)} data-frosted={isFrosted(w) ? "" : undefined}>
               {renderWidget(w)}
             </div>
           ))}
@@ -1249,7 +1253,7 @@ function HomePageContent() {
   const bottomWidgetsSection = bottomWidgets.length > 0 && (
     <div className="dashboard-grid">
       {bottomWidgets.map((w) => (
-        <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)}>
+        <div key={w.id} className="dashboard-tile" style={tileGridStyle(w)} data-frosted={isFrosted(w) ? "" : undefined}>
           {renderWidget(w)}
         </div>
       ))}

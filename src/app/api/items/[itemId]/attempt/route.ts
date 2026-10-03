@@ -1,3 +1,4 @@
+import { parseJsonObjectBody } from "@/lib/requestBody";
 import { getGeneratedItem, createQuizAttempt, completeQuizAttempt, deleteQuizAttempt } from "@/lib/models";
 import { describeAiError } from "@/lib/aiClient";
 import { gradeQuizAnswers, scoreFromResults, type QuizAnswer } from "@/lib/quizGrading";
@@ -24,7 +25,7 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Quiz item not found" }, { status: 404 });
     }
 
-    const body = await request.json();
+    const body = await parseJsonObjectBody(request);
     const answers: QuizAnswer[] = Array.isArray(body?.answers) ? body.answers : [];
     // Per-question confidence ("guess" | "unsure" | "sure"), tapped before
     // submitting; missing or unknown entries count as not given.

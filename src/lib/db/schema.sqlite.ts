@@ -56,6 +56,7 @@ export const courses = sqliteTable("courses", {
   show_icon_frame: integer("show_icon_frame", { mode: "boolean" }).notNull().default(true),
   // See the matching columns in schema.pg.ts.
   show_practice: integer("show_practice", { mode: "boolean" }).notNull().default(true),
+  show_study_tools: integer("show_study_tools", { mode: "boolean" }).notNull().default(true),
   lock_background_crop: integer("lock_background_crop", { mode: "boolean" }).notNull().default(false),
   folder_chips: text("folder_chips"),
   page_background_image: text("page_background_image"),
@@ -102,6 +103,9 @@ export const app_settings = sqliteTable("app_settings", {
   dashboard_transparent_widgets: integer("dashboard_transparent_widgets", { mode: "boolean" })
     .notNull()
     .default(false),
+  // See AppSettings.todayCardShown / todayCardFrosted in models.ts.
+  today_card_shown: integer("today_card_shown", { mode: "boolean" }).notNull().default(true),
+  today_card_frosted: integer("today_card_frosted", { mode: "boolean" }).notNull().default(true),
   // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
   dashboard_lock_background_crop: integer("dashboard_lock_background_crop", { mode: "boolean" })
     .notNull()
@@ -153,6 +157,8 @@ export const app_settings = sqliteTable("app_settings", {
   new_cards_per_day: integer("new_cards_per_day"),
   // "first" | "sequence" (lib/audioAutoplay.ts); null == "first".
   flashcard_audio_autoplay: text("flashcard_audio_autoplay"),
+  // The bell next to decks with review reminders on, on course pages.
+  deck_reminder_icons: integer("deck_reminder_icons", { mode: "boolean" }).notNull().default(true),
   // Set once the old SM-2 flashcard history has been replayed into
   // review_items (lib/review/legacyMigration.ts).
   fsrs_migrated_at: text("fsrs_migrated_at"),
@@ -205,6 +211,10 @@ export const documents = sqliteTable("documents", {
   char_count: integer("char_count"),
   status: text("status").notNull().default("pending").$type<DocumentStatus>(),
   error_message: text("error_message"),
+  // When the text was transcribed from page images by the AI (equations as
+  // LaTeX, scans and handwriting read) instead of taken from the file's text
+  // layer; null otherwise. See lib/transcribe/.
+  transcribed_at: text("transcribed_at"),
   // "official" (course material) or "personal" (the student's own notes) —
   // see the matching comment in schema.sql.
   trust: text("trust").notNull().default("official").$type<SourceTrust>(),
@@ -583,6 +593,9 @@ export const mistakes = sqliteTable(
     correct_answer: text("correct_answer").notNull(),
     confidence: text("confidence").$type<Confidence>(),
     misconception: text("misconception"),
+    // What kind of mistake it was (lib/review/mistakeTypes.ts): written with
+    // the misconception note; null until then.
+    error_type: text("error_type"),
     created_at: text("created_at").notNull(),
     resolved_at: text("resolved_at"),
   },

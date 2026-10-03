@@ -1,3 +1,4 @@
+import { summarizeMistakeTypes, type MistakeTypeShare } from "../review/mistakeTypes";
 import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
 import {
   db,
@@ -29,6 +30,8 @@ export interface Insights {
   calibrationVerdict: string | null;
   week: WeekSummary;
   misconceptions: { misconception: string; concept: string | null }[];
+  // What kind of mistakes the open ones are, most common first.
+  mistakeTypes: MistakeTypeShare[];
 }
 
 export async function loadInsights(courseId: number | null, now = new Date()): Promise<Insights> {
@@ -93,5 +96,6 @@ export async function loadInsights(courseId: number | null, now = new Date()): P
       activeDays: new Set(weekLogs.map((l) => l.reviewed_at.slice(0, 10))).size,
     },
     misconceptions: topMisconceptions(open),
+    mistakeTypes: summarizeMistakeTypes(open),
   };
 }

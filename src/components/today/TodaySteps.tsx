@@ -15,6 +15,7 @@ import {
   type SessionStep,
   type TodaySession,
 } from "@/lib/today/session";
+import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Button } from "@/components/ui/button";
 import { saveTodaySession, updateTodaySession } from "./todayStore";
 
@@ -32,11 +33,41 @@ async function post(url: string, body: unknown): Promise<boolean> {
 }
 
 // Opens a step: an external resource in a new tab, anything else in place.
+// A "test yourself" step with no quiz yet makes one first (when AI is on),
+// falling back to the chapter's plan page if that fails.
 export function useOpenStep() {
   const router = useRouter();
-  return (step: Pick<TodayStep, "href" | "external">) => {
-    if (step.external) window.open(step.href, "_blank", "noopener,noreferrer");
-    else router.push(step.href);
+  const aiEnabled = useAiEnabled();
+  return (step: Pick<TodayStep, "href" | "external" | "generateQuiz">) => {
+    if (step.external) {
+      window.open(step.href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const { generateQuiz } = step;
+    if (!generateQuiz || !aiEnabled) {
+      router.push(step.href);
+      return;
+    }
+    void (async () => {
+      const toastId = toast.loading("Making your quiz…");
+      try {
+        const res = await fetch(`/api/study-plans/${generateQuiz.planId}/chapters/${generateQuiz.chapterId}/generate/quiz`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const item = await res.json().catch(() => ({}));
+        if (res.ok && typeof item.id === "number") {
+          toast.dismiss(toastId);
+          router.push(`/items/${item.id}`);
+          return;
+        }
+        toast.error(item.error ?? "Couldn't make the quiz", { id: toastId });
+      } catch {
+        toast.error("Couldn't make the quiz", { id: toastId });
+      }
+      router.push(step.href);
+    })();
   };
 }
 
@@ -107,6 +138,7 @@ export function StepLine({ step, current }: { step: TodayStep & { status?: Sessi
         {step.courseName && ` · ${step.courseName}`}
         {step.detail && ` · ${step.detail}`}
       </p>
+      {step.why && <p className="truncate text-xs text-muted-foreground/80 italic">Why now: {step.why}</p>}
     </div>
   );
 }

@@ -6,8 +6,9 @@
 //  1. due reviews — spaced retrieval is the highest-value minute there is
 //  2. mistakes you were sure about — confident errors are the ones that stick
 //  3. a mock exam, when exam mode says one is due (lib/readiness/examMode.ts)
-//  4. the next step of the current study plan chapter (none in an exam's
-//     final days)
+//  4. the next step of up to a few plan chapters, most urgent first (nearest
+//     deadline, then weakest) and mixed across courses; they share the time
+//     left between them (none in an exam's final days)
 //  5. one weak concept, if time is left — two in exam mode, for more
 //     mixed practice
 
@@ -27,6 +28,11 @@ export interface TodayStep {
   href: string;
   external: boolean;
   courseName: string | null;
+  // Why this is on today's list, in a few words.
+  why?: string;
+  // Set on a "test yourself" step with no quiz made yet: opening it makes
+  // the chapter's quiz first (needs AI), then goes to it.
+  generateQuiz?: { planId: number; chapterId: number };
   completion: StepCompletion | null;
   // The plan session this step belongs to, marked done when the day's
   // session is finished.
@@ -36,7 +42,7 @@ export interface TodayStep {
 export type ChapterNextStep =
   | { type: "resource"; resourceId: number; title: string; kind: string; url: string; provider: string | null }
   | { type: "subtopic"; index: number; text: string }
-  | { type: "practice"; itemId: number | null; itemTitle: string | null };
+  | { type: "practice"; itemId: number | null; itemTitle: string | null; pretest?: boolean };
 
 export interface ChapterCandidate {
   planId: number;
@@ -47,6 +53,15 @@ export interface ChapterCandidate {
   // Today's scheduled session for this chapter, if the plan has a schedule.
   session: { id: number; minutes: number } | null;
   next: ChapterNextStep;
+  // The plan's deadline (YYYY-MM-DD) and the chapter's mastery (0–1), for
+  // ranking what needs the time most.
+  deadline?: string | null;
+  mastery?: number | null;
+  // Days until that deadline, when there is one.
+  daysLeft?: number | null;
+  // Studied but not yet tested: this step is the check that unlocks the
+  // next chapter.
+  awaitingCheck?: boolean;
 }
 
 export interface WeakConcept {
@@ -73,6 +88,8 @@ export interface TodayInput {
   // Weakest first; exam mode uses up to two.
   weakConcepts: WeakConcept[];
   examMode?: boolean;
+  // Overrides how many chapters share the time (picked by the learner).
+  maxChapterSteps?: number;
 }
 
 // Rough minutes per item, for fitting steps into the budget.
@@ -83,6 +100,11 @@ export const MIN_CHAPTER_STEP_MINUTES = 10;
 export const CONCEPT_MINUTES = 10;
 export const MIN_CONCEPT_MINUTES = 5;
 export const MAX_CHAPTER_STEPS = 2;
+// With this many minutes to spend, a third chapter is worth mixing in.
+export const THREE_CHAPTER_MINUTES = 90;
+// Chapters don't take the last minutes a weak concept needs, once there's
+// time for both.
+export const CONCEPT_RESERVE_FROM_MINUTES = 40;
 export const MIN_MOCK_EXAM_MINUTES = 30;
 
 const RESOURCE_VERBS: Record<string, string> = {
@@ -105,12 +127,25 @@ function withCourse(href: string, courseId: number | null, extra: Record<string,
   return query ? `${href}?${query}` : href;
 }
 
+// Why a chapter made today's list: what makes it the one to work on.
+export function chapterWhy(c: ChapterCandidate): string {
+  const parts: string[] = [];
+  if (c.awaitingCheck) parts.push("passing it unlocks the next chapter");
+  if (c.daysLeft !== null && c.daysLeft !== undefined && c.daysLeft >= 0 && c.daysLeft <= 60) {
+    parts.push(c.daysLeft === 0 ? "finish date is today" : `${plural(c.daysLeft, "day")} to your finish date`);
+  }
+  if (c.mastery !== null && c.mastery !== undefined && c.mastery < 0.5) parts.push("a weak spot");
+  if (parts.length === 0) parts.push(c.session ? "on today's plan" : "next in your roadmap");
+  return parts.join(" · ");
+}
+
 function chapterStep(c: ChapterCandidate, minutes: number): TodayStep {
   const planHref = `/courses/${c.courseId}/plan#chapter-${c.chapterId}`;
   const base = {
     kind: "chapter" as const,
     minutes,
     courseName: c.courseName,
+    why: chapterWhy(c),
     sessionId: c.session ? { planId: c.planId, sessionId: c.session.id } : null,
   };
   if (c.next.type === "resource") {
@@ -139,12 +174,28 @@ function chapterStep(c: ChapterCandidate, minutes: number): TodayStep {
   return {
     ...base,
     id: `chapter:${c.chapterId}:practice`,
-    title: `Test yourself: ${c.chapterTitle}`,
-    detail: c.next.itemTitle ?? "Make a quiz for this chapter from its plan page",
+    title: `${c.next.pretest ? "Pre-test" : "Test yourself"}: ${c.chapterTitle}`,
+    detail: c.next.itemTitle ?? "A quiz for this chapter gets made when you open it",
+    ...(c.next.itemId === null ? { generateQuiz: { planId: c.planId, chapterId: c.chapterId } } : {}),
     href: c.next.itemId !== null ? `/items/${c.next.itemId}` : planHref,
     external: false,
     completion: null,
   };
+}
+
+// Most urgent first: the nearest deadline (none last), then today's
+// scheduled sessions before unscheduled chapters, then the weakest chapter.
+export function rankChapters(chapters: ChapterCandidate[]): ChapterCandidate[] {
+  return chapters
+    .map((c, i) => ({ c, i }))
+    .sort(
+      (a, b) =>
+        (a.c.deadline ?? "9999-12-31").localeCompare(b.c.deadline ?? "9999-12-31") ||
+        Number(!!b.c.session) - Number(!!a.c.session) ||
+        (a.c.mastery ?? 0.5) - (b.c.mastery ?? 0.5) ||
+        a.i - b.i
+    )
+    .map(({ c }) => c);
 }
 
 export function planDay(input: TodayInput): TodayStep[] {
@@ -213,13 +264,33 @@ export function planDay(input: TodayInput): TodayStep[] {
     });
   }
 
-  for (const candidate of input.chapters.slice(0, MAX_CHAPTER_STEPS)) {
-    if (left < MIN_CHAPTER_STEP_MINUTES) break;
-    const wanted = candidate.session?.minutes ?? DEFAULT_CHAPTER_STEP_MINUTES;
-    const minutes = Math.min(Math.max(wanted, MIN_CHAPTER_STEP_MINUTES), left);
+  // Chapters share what's left after reserving a slot for a weak concept:
+  // each asks for its session's minutes, and when they don't all fit every
+  // one is scaled down (never below the minimum) rather than the first
+  // taking everything.
+  const maxSteps =
+    input.maxChapterSteps ?? (left >= THREE_CHAPTER_MINUTES ? MAX_CHAPTER_STEPS + 1 : MAX_CHAPTER_STEPS);
+  const reserve =
+    input.weakConcepts.length > 0 && left >= CONCEPT_RESERVE_FROM_MINUTES ? CONCEPT_MINUTES : 0;
+  const available = left - reserve;
+  const chosen: { candidate: ChapterCandidate; wanted: number }[] = [];
+  for (const candidate of rankChapters(input.chapters).slice(0, maxSteps)) {
+    if ((chosen.length + 1) * MIN_CHAPTER_STEP_MINUTES > available) break;
+    chosen.push({
+      candidate,
+      wanted: Math.max(candidate.session?.minutes ?? DEFAULT_CHAPTER_STEP_MINUTES, MIN_CHAPTER_STEP_MINUTES),
+    });
+  }
+  const wantedTotal = chosen.reduce((n, c) => n + c.wanted, 0);
+  const factor = wantedTotal > available ? available / wantedTotal : 1;
+  let room = available;
+  chosen.forEach(({ candidate, wanted }, i) => {
+    const keepForRest = MIN_CHAPTER_STEP_MINUTES * (chosen.length - 1 - i);
+    const minutes = Math.max(MIN_CHAPTER_STEP_MINUTES, Math.min(Math.floor(wanted * factor), room - keepForRest));
+    room -= minutes;
     left -= minutes;
     steps.push(chapterStep(candidate, minutes));
-  }
+  });
 
   for (const c of input.weakConcepts.slice(0, input.examMode ? 2 : 1)) {
     if (left < MIN_CONCEPT_MINUTES) break;
@@ -250,7 +321,17 @@ interface ChapterLike {
 // What to do next in a chapter: the next unfinished resource in study
 // order, then the next unchecked subtopic, then testing yourself. A review
 // session skips straight to testing.
-export function nextChapterStep(chapter: ChapterLike, reviewSession = false): ChapterNextStep {
+export function nextChapterStep(
+  chapter: ChapterLike,
+  reviewSession = false,
+  options: { pretest?: boolean } = {}
+): ChapterNextStep {
+  // A chapter not started yet, with a pre-test made and not taken: that first.
+  const untouched = !chapter.subtopics.some((s) => s.done) && !chapter.resources.some((r) => r.done_at);
+  if (options.pretest && !reviewSession && untouched) {
+    const pretest = chapter.items.find((i) => i.mode === "quiz" && i.best_score === null);
+    if (pretest) return { type: "practice", itemId: pretest.id, itemTitle: pretest.title, pretest: true };
+  }
   if (!reviewSession) {
     const resource = [...chapter.resources]
       .sort((a, b) => a.position - b.position)

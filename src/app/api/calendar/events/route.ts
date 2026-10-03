@@ -4,7 +4,7 @@ import { listCalendarFeeds } from "@/lib/models";
 import type { CalendarEvent } from "@/lib/googleCalendar";
 import { listCalendarSessions } from "@/lib/studyPlan/store";
 import { localToday } from "@/lib/studyPlan/schedule";
-import { STUDY_PLAN_EVENT_SOURCE } from "@/lib/studyPlanDisplay";
+import { sessionKindLabel, STUDY_PLAN_EVENT_SOURCE } from "@/lib/studyPlanDisplay";
 
 function nextDay(date: string): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -22,7 +22,7 @@ async function studySessionEvents(range: { timeMin: Date; timeMax: Date } | null
   const rows = await listCalendarSessions(from, to);
   return rows.map((row) => ({
     id: `${STUDY_PLAN_EVENT_SOURCE}:${row.id}`,
-    title: `${row.kind === "review" ? "Review" : "Study"}: ${row.chapter_title}`,
+    title: `${sessionKindLabel(row.kind)}: ${row.chapter_title}`,
     description: `${row.minutes} minutes · ${row.course_name} — from your study plan.`,
     start: row.date,
     end: nextDay(row.date),

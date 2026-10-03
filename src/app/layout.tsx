@@ -22,7 +22,7 @@ import {
   Syne,
   Bangers,
 } from "next/font/google";
-import { Calendar, Repeat } from "lucide-react";
+import { Atom, Calendar, Dumbbell, Repeat } from "lucide-react";
 import { Explain, ExplainProvider } from "@/components/Explain";
 import SearchDialog from "@/components/SearchDialog";
 import SettingsDialog from "@/components/SettingsDialog";
@@ -212,6 +212,32 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                         <Calendar className="size-3.5" />
                         <span className="hidden sm:inline">Calendar</span>
                       </Button>
+                      <Explain id="nav.quantum" side="bottom">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 px-2 text-xs sm:px-3"
+                          aria-label="Quantum playground"
+                          nativeButton={false}
+                          render={<Link href="/quantum" />}
+                        >
+                          <Atom className="size-3.5" />
+                          <span className="hidden sm:inline">Quantum</span>
+                        </Button>
+                      </Explain>
+                      <Explain id="nav.drills" side="bottom">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 px-2 text-xs sm:px-3"
+                          aria-label="Drills"
+                          nativeButton={false}
+                          render={<Link href="/drills" />}
+                        >
+                          <Dumbbell className="size-3.5" />
+                          <span className="hidden sm:inline">Drills</span>
+                        </Button>
+                      </Explain>
                       <Explain id="nav.review" side="bottom">
                         <Button
                           variant="ghost"

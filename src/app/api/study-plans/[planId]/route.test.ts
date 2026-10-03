@@ -3,16 +3,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getStudyPlan = vi.fn();
 const setPlanOptions = vi.fn();
 const renameStudyPlan = vi.fn();
+const deleteStudyPlan = vi.fn();
 vi.mock("@/lib/studyPlan/store", () => ({
   getStudyPlan: (...a: unknown[]) => getStudyPlan(...a),
   setPlanOptions: (...a: unknown[]) => setPlanOptions(...a),
   renameStudyPlan: (...a: unknown[]) => renameStudyPlan(...a),
-  deleteStudyPlan: vi.fn(),
+  deleteStudyPlan: (...a: unknown[]) => deleteStudyPlan(...a),
 }));
 const reschedulePlan = vi.fn();
-vi.mock("@/lib/studyPlan/scheduleService", () => ({ reschedulePlan: (...a: unknown[]) => reschedulePlan(...a) }));
+const removePlanFromGoogle = vi.fn();
+vi.mock("@/lib/studyPlan/scheduleService", () => ({
+  reschedulePlan: (...a: unknown[]) => reschedulePlan(...a),
+  removePlanFromGoogle: (...a: unknown[]) => removePlanFromGoogle(...a),
+}));
 
-const { PATCH } = await import("./route");
+const { PATCH, DELETE } = await import("./route");
 const { PRESET_DEFAULTS } = await import("@/lib/studyPlan/options");
 
 const patch = (body: unknown) => new Request("http://localhost/x", { method: "PATCH", body: JSON.stringify(body) });
@@ -46,5 +51,26 @@ describe("PATCH /api/study-plans/[planId]", () => {
     expect((await PATCH(patch({ title: " " }), params)).status).toBe(400);
     expect((await PATCH(patch({ options: [1] }), params)).status).toBe(400);
     expect(setPlanOptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/study-plans/[planId]", () => {
+  const del = (query = "") => DELETE(new Request(`http://localhost/x${query}`, { method: "DELETE" }), params);
+
+  it("takes the plan's Google Calendar events out before deleting it", async () => {
+    const order: string[] = [];
+    removePlanFromGoogle.mockImplementation(async () => void order.push("calendar"));
+    deleteStudyPlan.mockImplementation(async () => void order.push("plan"));
+    await del();
+    expect(order).toEqual(["calendar", "plan"]);
+  });
+
+  it("deletes the plan, and its generated items only when asked", async () => {
+    expect((await del()).status).toBe(200);
+    expect(deleteStudyPlan).toHaveBeenLastCalledWith(1, { deleteItems: false });
+    await del("?deleteItems=1");
+    expect(deleteStudyPlan).toHaveBeenLastCalledWith(1, { deleteItems: true });
+    await del("?deleteItems=true");
+    expect(deleteStudyPlan).toHaveBeenLastCalledWith(1, { deleteItems: false });
   });
 });

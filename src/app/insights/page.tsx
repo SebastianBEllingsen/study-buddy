@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { Lightbulb, LineChart } from "lucide-react";
+import { MISTAKE_TYPE_ADVICE, MISTAKE_TYPE_LABELS } from "@/lib/review/mistakeTypes";
 import type { Insights } from "@/lib/insights/load";
 import { CONFIDENCE_LABELS } from "@/lib/review/calibration";
 import { Card, CardContent } from "@/components/ui/card";
@@ -86,6 +87,26 @@ function InsightsInner() {
           </CardContent>
         </Card>
       </section>
+
+      {data.mistakeTypes.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="font-heading text-base font-semibold">What kind of mistakes</h2>
+          <ul className="space-y-1.5" aria-label="Kinds of open mistake">
+            {data.mistakeTypes.map(({ type, count, share }) => (
+              <li key={type} className="grid grid-cols-[9.5rem_minmax(0,1fr)_auto] items-center gap-3 text-sm">
+                <span>{MISTAKE_TYPE_LABELS[type]}</span>
+                <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share * 100)}>
+                  <div className="h-full rounded-full bg-focus" style={{ width: `${Math.round(share * 100)}%` }} />
+                </div>
+                <span className="text-right text-xs text-muted-foreground tabular-nums">
+                  {count} · {Math.round(share * 100)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted-foreground">{MISTAKE_TYPE_ADVICE[data.mistakeTypes[0].type]}</p>
+        </section>
+      )}
 
       <section className="space-y-2">
         <h2 className="font-heading text-base font-semibold">Top misconceptions</h2>

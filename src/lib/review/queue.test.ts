@@ -46,7 +46,40 @@ describe("interleave", () => {
   });
 });
 
+// The original algorithm, kept as the reference for the faster one.
+function interleaveReference<T>(groups: T[][]): T[] {
+  const out: T[] = [];
+  const queues = groups.filter((g) => g.length > 0).map((g) => [...g]);
+  while (queues.some((q) => q.length > 0)) {
+    for (const q of queues) {
+      const next = q.shift();
+      if (next !== undefined) out.push(next);
+    }
+  }
+  return out;
+}
+
+describe("interleave, compared with the reference", () => {
+  it("gives the same order for any mix of group sizes", () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let run = 0; run < 200; run++) {
+      const groups = Array.from({ length: Math.floor(random() * 6) }, (_, g) =>
+        Array.from({ length: Math.floor(random() * 8) }, (_, i) => `${g}.${i}`)
+      );
+      expect(interleave(groups)).toEqual(interleaveReference(groups));
+    }
+  });
+});
+
 describe("buildQueue", () => {
+  it("only shows the new cards the daily allowance lets through, even from a huge deck", () => {
+    const { entries, counts } = buildQueue([deck(1, 5000), deck(2, 5000)], { now: NOW, newCardAllowance: 6, limit: 100 });
+    expect(counts.newCards).toBe(6);
+    expect(entries.map((e) => e.key)).toEqual(["1:card:0", "2:card:0", "1:card:1", "2:card:1", "1:card:2", "2:card:2"]);
+    expect(entries.every((e) => e.isNew && e.dueAt === null && e.kind === "card")).toBe(true);
+  });
+
   it("includes due cards and questions but not ones due later, and never unanswered questions", () => {
     const { entries, counts } = buildQueue(
       [

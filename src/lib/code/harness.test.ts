@@ -62,6 +62,27 @@ describe("workerSource", () => {
   });
 });
 
+describe("workerSource, Python packages", () => {
+  it("lifts the network block only around a run's package download, from code learner code can't reach", () => {
+    const source = workerSource();
+    // Loading happens between allow() and block(), and block() always follows.
+    const allow = source.indexOf("pythonNetwork.allow()");
+    const load = source.indexOf("loadPackagesFromImports");
+    const block = source.indexOf("pythonNetwork.block();\n  }\n  self.postMessage({ id, loaded: true });");
+    expect(allow).toBeGreaterThan(0);
+    expect(load).toBeGreaterThan(allow);
+    expect(block).toBeGreaterThan(load);
+    // The handle is private to a closure — not a name the code could call.
+    expect(source).toMatch(/const pythonNetwork = \(\(\) => \{/);
+    expect(source.indexOf("(() => {\n// What Python runs need")).toBeGreaterThan(0);
+    expect(source.indexOf("(() => {\n// What Python runs need")).toBeLessThan(source.indexOf("const pythonNetwork"));
+    expect(source.trimEnd().endsWith("})();")).toBe(true);
+    // A run's own code starts only after the packages are ready.
+    expect(source.indexOf("await preparePackages(")).toBeLessThan(source.indexOf("await pyodide.runPythonAsync(PYTHON_HARNESS"));
+    expect(() => new Function(source)).not.toThrow();
+  });
+});
+
 describe("broken tests", () => {
   it("are the ones the reference solution fails", () => {
     const run = {

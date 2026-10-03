@@ -81,6 +81,7 @@ export interface Course {
   // See the matching columns in db/schema.pg.ts. folder_chips is raw JSON —
   // read it through lib/folderChips.ts's parseFolderChipSettings.
   show_practice: boolean;
+  show_study_tools: boolean;
   lock_background_crop: boolean;
   folder_chips: string | null;
   created_at: string;
@@ -125,6 +126,9 @@ export interface DocumentRow {
   char_count: number | null;
   status: DocumentStatus;
   error_message: string | null;
+  // When the AI transcribed the text from page images, if it did (see
+  // lib/transcribe/).
+  transcribed_at: string | null;
   // See SourceTrust in lib/sources/types.ts.
   trust: SourceTrust;
   created_at: string;
@@ -223,6 +227,9 @@ interface SettingsRow {
   review_retention: number | null;
   new_cards_per_day: number | null;
   flashcard_audio_autoplay: string | null;
+  deck_reminder_icons: boolean;
+  today_card_shown: boolean;
+  today_card_frosted: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -271,6 +278,9 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       review_retention: app_settings.review_retention,
       new_cards_per_day: app_settings.new_cards_per_day,
       flashcard_audio_autoplay: app_settings.flashcard_audio_autoplay,
+      deck_reminder_icons: app_settings.deck_reminder_icons,
+      today_card_shown: app_settings.today_card_shown,
+      today_card_frosted: app_settings.today_card_frosted,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -453,6 +463,14 @@ export interface AppSettings {
   // when one is set — like icons on a home screen rather than a stack of
   // panels.
   dashboardTransparentWidgets: boolean;
+  // On (the default): the Today card shows on the dashboard and in each course.
+  // Off: it's hidden (a session that's already running still shows its tasks).
+  todayCardShown: boolean;
+  // On (the default): with transparentWidgets on, the Today card is a
+  // see-through frosted panel, readable on any wallpaper. Off: plain text
+  // straight on the picture, like the other widgets. Has no effect with
+  // transparentWidgets off (the card is solid then).
+  todayCardFrosted: boolean;
   // On (the default): document rows show their status badge — "extracted,
   // Np", "processing…", the failure error, or "image, not used for
   // generation" — same as before this setting existed. Off: no badge at all.
@@ -519,6 +537,9 @@ export interface AppSettings {
   // Which of a flashcard face's audio clips play on their own — see
   // lib/audioAutoplay.ts.
   flashcardAudioAutoplay: AudioAutoplayMode;
+  // A small bell next to each deck on course pages whose review reminders
+  // are on (see FlashcardsContent.reminders).
+  deckReminderIcons: boolean;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -545,6 +566,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardBannerStyle: row?.dashboard_banner_style === "backdrop" ? "backdrop" : "overlap",
     aiGradingEnabled: row?.ai_grading_enabled ?? false,
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
+    todayCardShown: row?.today_card_shown ?? true,
+    todayCardFrosted: row?.today_card_frosted ?? true,
     dashboardLockBackgroundCrop: row?.dashboard_lock_background_crop ?? false,
     dashboardBackdropFullPage: row?.dashboard_backdrop_full_page ?? false,
     dashboardBackdropBlur: clampBackdropBlur(row?.dashboard_backdrop_blur ?? 0),
@@ -568,6 +591,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     reviewRetention: clampRetention(row?.review_retention ?? DEFAULT_RETENTION),
     newCardsPerDay: clampNewCardsPerDay(row?.new_cards_per_day ?? DEFAULT_NEW_CARDS_PER_DAY),
     flashcardAudioAutoplay: parseAudioAutoplayMode(row?.flashcard_audio_autoplay),
+    deckReminderIcons: row?.deck_reminder_icons ?? true,
   };
 }
 
@@ -610,6 +634,13 @@ export async function setDocumentBadgesEnabled(enabled: boolean): Promise<void> 
   await db
     .update(app_settings)
     .set({ document_badges_enabled: enabled, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setDeckReminderIcons(enabled: boolean): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ deck_reminder_icons: enabled, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 
@@ -731,6 +762,8 @@ export async function setAppBranding(fields: {
   dashboardBackgroundImage?: string | null;
   dashboardBannerStyle?: "overlap" | "backdrop" | null;
   dashboardTransparentWidgets?: boolean;
+  todayCardShown?: boolean;
+  todayCardFrosted?: boolean;
   dashboardLockBackgroundCrop?: boolean;
   dashboardBackdropFullPage?: boolean;
   dashboardBackdropBlur?: number;
@@ -743,6 +776,8 @@ export async function setAppBranding(fields: {
   if ("dashboardBackgroundImage" in fields) values.dashboard_background_image = fields.dashboardBackgroundImage ?? null;
   if ("dashboardBannerStyle" in fields) values.dashboard_banner_style = fields.dashboardBannerStyle ?? null;
   if ("dashboardTransparentWidgets" in fields) values.dashboard_transparent_widgets = fields.dashboardTransparentWidgets ?? false;
+  if ("todayCardShown" in fields) values.today_card_shown = fields.todayCardShown ?? true;
+  if ("todayCardFrosted" in fields) values.today_card_frosted = fields.todayCardFrosted ?? true;
   if ("dashboardLockBackgroundCrop" in fields) values.dashboard_lock_background_crop = fields.dashboardLockBackgroundCrop ?? false;
   if ("dashboardBackdropFullPage" in fields) values.dashboard_backdrop_full_page = fields.dashboardBackdropFullPage ?? false;
   if ("dashboardBackdropBlur" in fields) values.dashboard_backdrop_blur = clampBackdropBlur(fields.dashboardBackdropBlur ?? 0);
@@ -1628,6 +1663,11 @@ export interface HomeWidgetConfig {
   // whatever feed(s) you've pointed it at. undefined/omitted falls back to
   // that widget's built-in default label (see WIDGET_DEFAULT_LABELS).
   label?: string;
+  // With transparent widgets on: true draws this widget on a see-through
+  // frosted panel (readable over a picture); false or omitted leaves it
+  // plain on the picture, as before this existed. No effect with transparent
+  // widgets off (every widget is on a solid card then).
+  frosted?: boolean;
 }
 
 // A sensible starting layout: streak/due as compact tiles side by side,
@@ -1682,6 +1722,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
             colSpan?: unknown;
             rowSpan?: unknown;
             label?: unknown;
+            frosted?: unknown;
           } => w && typeof w.id === "string" && HOME_WIDGET_IDS.includes(w.id as HomeWidgetId) && typeof w.enabled === "boolean"
         )
         .map((w) => {
@@ -1695,6 +1736,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
             : defaultFor(w.id);
           const zone: HomeWidgetZone = w.zone === "bottom" ? "bottom" : "top";
           const label = typeof w.label === "string" && w.label.trim() ? w.label.trim() : undefined;
+          const frosted = w.frosted === true ? true : undefined;
           return [
             w.id,
             {
@@ -1706,6 +1748,7 @@ function parseHomeWidgets(raw: string | null): HomeWidgetConfig[] {
               colSpan: layout.colSpan,
               rowSpan: layout.rowSpan,
               label,
+              ...(frosted && { frosted }),
             } satisfies HomeWidgetConfig,
           ];
         })
@@ -1786,6 +1829,7 @@ export async function listCourseSummaries(): Promise<CourseSummary[]> {
       show_cover_on_card: courses.show_cover_on_card,
       show_icon_frame: courses.show_icon_frame,
       show_practice: courses.show_practice,
+      show_study_tools: courses.show_study_tools,
       lock_background_crop: courses.lock_background_crop,
       folder_chips: courses.folder_chips,
       created_at: courses.created_at,
@@ -1822,6 +1866,7 @@ export async function updateCourseCustomization(
     show_cover_on_card?: boolean;
     show_icon_frame?: boolean;
     show_practice?: boolean;
+    show_study_tools?: boolean;
     lock_background_crop?: boolean;
     folder_chips?: string | null;
   }
@@ -2144,6 +2189,7 @@ const documentListColumns = {
   char_count: documents.char_count,
   status: documents.status,
   error_message: documents.error_message,
+  transcribed_at: documents.transcribed_at,
   trust: documents.trust,
   created_at: documents.created_at,
 };
@@ -2187,6 +2233,47 @@ export async function markDocumentExtracted(params: {
       char_count: params.charCount,
       status: "extracted",
       error_message: null,
+    })
+    .where(eq(documents.id, params.id));
+}
+
+// The text was read from page images by the AI (lib/transcribe/): it replaces
+// whatever the file's text layer gave, and a document that failed to extract
+// (a scan) becomes usable.
+export async function markDocumentTranscribed(params: {
+  id: number;
+  extractedText: string;
+  pageCount: number;
+}): Promise<void> {
+  await db
+    .update(documents)
+    .set({
+      extracted_text: params.extractedText,
+      page_count: params.pageCount,
+      char_count: params.extractedText.trim().length,
+      status: "extracted",
+      error_message: null,
+      transcribed_at: nowUtc(),
+    })
+    .where(eq(documents.id, params.id));
+}
+
+// Back to no transcription: the text layer is extracted again by the caller.
+export async function markDocumentExtractedFromFile(params: {
+  id: number;
+  extractedText: string;
+  pageCount: number;
+  charCount: number;
+}): Promise<void> {
+  await db
+    .update(documents)
+    .set({
+      extracted_text: params.extractedText,
+      page_count: params.pageCount,
+      char_count: params.charCount,
+      status: "extracted",
+      error_message: null,
+      transcribed_at: null,
     })
     .where(eq(documents.id, params.id));
 }
@@ -2443,7 +2530,11 @@ export async function getGeneratedItem(id: number): Promise<GeneratedItem | unde
   return rows[0] as GeneratedItem | undefined;
 }
 
-export type GeneratedItemSummary = Omit<GeneratedItem, "content_json">;
+export type GeneratedItemSummary = Omit<GeneratedItem, "content_json"> & {
+  // A flashcard deck with review reminders turned off (see
+  // FlashcardsContent.reminders); false for every other mode.
+  reminders_off: boolean;
+};
 
 // For the course page's item list — content_json (the full generated
 // quiz/notes/flashcard payload) isn't needed to render a title/mode/date
@@ -2453,7 +2544,7 @@ export type GeneratedItemSummary = Omit<GeneratedItem, "content_json">;
 export async function listGeneratedItemSummariesForCourse(
   courseId: number
 ): Promise<GeneratedItemSummary[]> {
-  return db
+  const rows = await db
     .select({
       id: generated_items.id,
       course_id: generated_items.course_id,
@@ -2472,9 +2563,17 @@ export async function listGeneratedItemSummariesForCourse(
     })
     .from(generated_items)
     .where(eq(generated_items.course_id, courseId))
-    .orderBy(asc(generated_items.position), desc(generated_items.created_at)) as Promise<
-    GeneratedItemSummary[]
-  >;
+    .orderBy(asc(generated_items.position), desc(generated_items.created_at));
+  // Decks' reminders flag needs their content — from itemContents' memory
+  // cache, which only downloads decks that changed. The flag must be read
+  // from the parsed top level: the text can also appear deeper inside a deck.
+  const contents = await itemContents(rows.filter((r) => r.mode === "flashcards"));
+  return rows.map((row) => {
+    const content = contents.get(row.id);
+    const reminders_off =
+      content !== undefined && (JSON.parse(content) as FlashcardsContent).reminders === false;
+    return { ...row, reminders_off } as GeneratedItemSummary;
+  });
 }
 
 export async function listGeneratedItemsForCourse(courseId: number): Promise<GeneratedItem[]> {

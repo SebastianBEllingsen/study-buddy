@@ -15,25 +15,31 @@ import { chapterIsComplete } from "../studyPlanDisplay";
 // review first. If the AI is off or fails, the schedule is still rebuilt —
 // missed sessions still get moved — just without extra review.
 
+class AiSkipped extends Error {}
+
 export interface ReplanResult {
   message: string;
   warnings: ScheduleWarning[];
   extraReview: { chapterId: number; minutes: number }[];
 }
 
-export async function replanStudyPlan(planId: number): Promise<ReplanResult> {
+export async function replanStudyPlan(planId: number, options: { useAi?: boolean } = {}): Promise<ReplanResult> {
   const plan = await getStudyPlan(planId);
   if (!plan) throw new StudyPlanNotFoundError();
   const today = localToday();
   const chapters = [...plan.chapters].sort((a, b) => a.stage - b.stage || a.position - b.position);
   const missed = missedSessions(plan.sessions, today);
 
-  let extraReview = new Map<number, number>();
+  // Stays undefined if the AI is unavailable, so extra review from an earlier
+  // replan is kept rather than dropped.
+  let extraReview: Map<number, number> | undefined;
   let message = missed.length
     ? `Moved ${missed.length} missed session${missed.length === 1 ? "" : "s"} forward from today.`
     : "Rebuilt the schedule from today.";
 
+  // useAi: false only moves the missed sessions — no AI call.
   try {
+    if (options.useAi === false) throw new AiSkipped();
     const { aiEfficiencyMode: efficient, preferredLanguage } = await getAppSettings();
     const replan = normalizeStudyPlanReplan(
       await generateStructured<unknown>({
@@ -60,13 +66,15 @@ export async function replanStudyPlan(planId: number): Promise<ReplanResult> {
     );
     if (replan.message) message = replan.message;
   } catch (err) {
-    console.warn("Study plan: AI replan unavailable, rescheduling without extra review:", err);
+    if (!(err instanceof AiSkipped)) {
+      console.warn("Study plan: AI replan unavailable, rescheduling without extra review:", err);
+    }
   }
 
   const { warnings } = await reschedulePlan(planId, extraReview);
   return {
     message,
     warnings,
-    extraReview: [...extraReview].map(([chapterId, minutes]) => ({ chapterId, minutes })),
+    extraReview: [...(extraReview ?? [])].map(([chapterId, minutes]) => ({ chapterId, minutes })),
   };
 }
