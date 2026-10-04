@@ -4,13 +4,13 @@ import { todayCardLook } from "./useTransparentWidgets";
 describe("todayCardLook", () => {
   it("is a solid card whenever widgets aren't transparent, frosted setting or not", () => {
     for (const frosted of [true, false]) {
-      expect(todayCardLook({ dashboardTransparentWidgets: false, todayCardShown: true, todayCardFrosted: frosted })).toEqual({ shown: true, look: "solid" });
+      expect(todayCardLook({ dashboardTransparentWidgets: false, todayCardShown: true, todayCardFrosted: frosted })).toMatchObject({ shown: true, look: "solid" });
     }
   });
 
   it("picks frosted or plain when widgets are transparent", () => {
-    expect(todayCardLook({ dashboardTransparentWidgets: true, todayCardShown: true, todayCardFrosted: true })).toEqual({ shown: true, look: "frosted" });
-    expect(todayCardLook({ dashboardTransparentWidgets: true, todayCardShown: true, todayCardFrosted: false })).toEqual({ shown: true, look: "plain" });
+    expect(todayCardLook({ dashboardTransparentWidgets: true, todayCardShown: true, todayCardFrosted: true })).toMatchObject({ shown: true, look: "frosted" });
+    expect(todayCardLook({ dashboardTransparentWidgets: true, todayCardShown: true, todayCardFrosted: false })).toMatchObject({ shown: true, look: "plain" });
   });
 
   it("hides the card when told to, whatever its look", () => {
@@ -19,6 +19,14 @@ describe("todayCardLook", () => {
   });
 
   it("shows a frosted-if-transparent card until the settings arrive, so nothing flashes", () => {
-    expect(todayCardLook(undefined)).toEqual({ shown: true, look: "solid" });
+    expect(todayCardLook(undefined)).toMatchObject({ shown: true, look: "solid" });
+  });
+
+  it("offers the courses list unless Settings turns it off, and by default until settings arrive", () => {
+    const base = { dashboardTransparentWidgets: false, todayCardShown: true, todayCardFrosted: true };
+    expect(todayCardLook(undefined).coursesShown).toBe(true);
+    expect(todayCardLook(base).coursesShown).toBe(true);
+    expect(todayCardLook({ ...base, todayCoursesShown: true }).coursesShown).toBe(true);
+    expect(todayCardLook({ ...base, todayCoursesShown: false }).coursesShown).toBe(false);
   });
 });

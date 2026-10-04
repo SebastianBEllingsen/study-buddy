@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { CalendarDays, FilePlus2, GraduationCap, LinkIcon, LoaderCircle, Pencil, Plus, Route } from "lucide-react";
-import type { AppSettings, Course, DocumentSummaryRow } from "@/lib/models";
+import type { AppSettings, Course, DocumentSummaryRow, Note } from "@/lib/models";
 import type { StudyPlan, StudyPlanChapter, StudyPlanOptions } from "@/lib/studyPlan/types";
 import { roadmapLabel } from "@/lib/studyPlan/roadmap";
 import { buildIsStuck, chapterNumbers, linksAreStale, planProgress } from "@/lib/studyPlanDisplay";
@@ -39,6 +39,7 @@ import {
 interface CourseDetail {
   course: Course;
   documents: DocumentSummaryRow[];
+  notes: Pick<Note, "id" | "title">[];
   studyPlan: StudyPlan | null;
 }
 
@@ -63,9 +64,13 @@ export default function StudyPlanPage() {
   const { data: settings } = useSWR<AppSettings>("/api/settings");
   // Course documents added since the plan was built — offered as "Update
   // plan" (see lib/studyPlan/supplement.ts).
-  const { data: newMaterial, mutate: refreshNewMaterial } = useSWR<{ documents: { id: number; filename: string }[] }>(
+  const { data: newMaterial, mutate: refreshNewMaterial } = useSWR<{ documents: { id: number; filename: string }[]; notes?: { id: number; title: string }[] }>(
     plan && plan.status === "ready" && aiEnabled ? `/api/study-plans/${plan.id}/supplement` : null
   );
+  const newMaterialNames = [
+    ...(newMaterial?.documents.map((d) => d.filename) ?? []),
+    ...(newMaterial?.notes?.map((n) => n.title) ?? []),
+  ];
   const [addingChapter, setAddingChapter] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -240,6 +245,7 @@ export default function StudyPlanPage() {
   const progress = planProgress(plan);
   const percent = Math.round(progress.fraction * 100);
   const documentNames = new Map(detail.documents.map((d) => [d.id, d.filename]));
+  const noteTitles = new Map(detail.notes.map((n) => [n.id, n.title]));
   const sortedChapters = [...plan.chapters].sort((a, b) => a.position - b.position);
   const stuck = buildIsStuck(plan);
   const showRetry = plan.status === "failed" || stuck;
@@ -342,21 +348,22 @@ export default function StudyPlanPage() {
         </Alert>
       )}
 
-      {newMaterial && newMaterial.documents.length > 0 && (
+      {newMaterialNames.length > 0 && newMaterial && (
         <Alert>
           <FilePlus2 />
           <AlertTitle>
-            {newMaterial.documents.length} new document{newMaterial.documents.length === 1 ? "" : "s"} since this plan was
-            built
+            {newMaterial.documents.length > 0 &&
+              `${newMaterial.documents.length} new document${newMaterial.documents.length === 1 ? "" : "s"}`}
+            {newMaterial.documents.length > 0 && (newMaterial.notes?.length ?? 0) > 0 && " and "}
+            {(newMaterial.notes?.length ?? 0) > 0 &&
+              `${newMaterial.notes?.length} new note${newMaterial.notes?.length === 1 ? "" : "s"}`}{" "}
+            since this plan was built
           </AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span className="min-w-0 truncate">
-              {newMaterial.documents
-                .slice(0, 3)
-                .map((d) => d.filename)
-                .join(", ")}
-              {newMaterial.documents.length > 3 && `, and ${newMaterial.documents.length - 3} more`} — add what they
-              cover without starting over.
+          <AlertDescription className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+            <span className="line-clamp-2 min-w-0 flex-1 basis-64 break-words">
+              {newMaterialNames.slice(0, 3).join(", ")}
+              {newMaterialNames.length > 3 && `, and ${newMaterialNames.length - 3} more`} — add what they cover
+              without starting over.
             </span>
             <Button size="sm" onClick={handleSupplement} disabled={supplementing}>
               {supplementing ? "Updating…" : "Update plan"}
@@ -421,6 +428,7 @@ export default function StudyPlanPage() {
             planId={plan.id}
             courseId={Number(courseId)}
             documentNames={documentNames}
+            noteTitles={noteTitles}
             aiEnabled={aiEnabled}
             practice={plan.options.practice}
             onChanged={() => void mutate()}

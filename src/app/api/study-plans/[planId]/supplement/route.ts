@@ -3,19 +3,22 @@ import { InvalidAiResponseError } from "@/lib/aiResponseValidation";
 import { parseId } from "@/lib/routeParams";
 import { getStudyPlan } from "@/lib/studyPlan/store";
 import { StudyPlanNotFoundError } from "@/lib/studyPlan/resources";
-import { findNewPlanDocuments, NoNewMaterialError, supplementStudyPlan } from "@/lib/studyPlan/supplement";
+import { findNewPlanMaterial, NoNewMaterialError, supplementStudyPlan } from "@/lib/studyPlan/supplement";
 
 type Params = { params: Promise<{ planId: string }> };
 
-// GET: course documents added since the plan was built (what "Update plan"
+// GET: course documents and notes added since the plan was built (what "Update plan"
 // would fold in). POST: fold them in — see lib/studyPlan/supplement.ts.
 export async function GET(_request: Request, { params }: Params) {
   const { planId } = await params;
   const id = parseId(planId);
   const plan = id === null ? undefined : await getStudyPlan(id);
   if (!plan) return Response.json({ error: "Study plan not found" }, { status: 404 });
-  const documents = await findNewPlanDocuments(plan);
-  return Response.json({ documents: documents.map((d) => ({ id: d.id, filename: d.filename })) });
+  const { documents, notes } = await findNewPlanMaterial(plan);
+  return Response.json({
+    documents: documents.map((d) => ({ id: d.id, filename: d.filename })),
+    notes: notes.map((n) => ({ id: n.id, title: n.title })),
+  });
 }
 
 export async function POST(_request: Request, { params }: Params) {

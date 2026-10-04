@@ -470,6 +470,13 @@
       "when": 1790851272752,
       "tag": "0066_course_show_study_tools",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1791119843114,
+      "tag": "0067_today_courses_shown",
+      "breakpoints": true
     }
   ]
 }

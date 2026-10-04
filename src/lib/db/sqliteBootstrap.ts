@@ -491,6 +491,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "today_card_frosted")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN today_card_frosted INTEGER NOT NULL DEFAULT 1");
   }
+  if (!hasColumn("app_settings", "today_courses_shown")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN today_courses_shown INTEGER NOT NULL DEFAULT 1");
+  }
   if (!hasColumn("app_settings", "dashboard_lock_background_crop")) {
     database.exec(
       "ALTER TABLE app_settings ADD COLUMN dashboard_lock_background_crop INTEGER NOT NULL DEFAULT 0"

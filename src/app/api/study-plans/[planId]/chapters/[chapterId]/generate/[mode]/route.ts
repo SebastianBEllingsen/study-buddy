@@ -2,6 +2,7 @@ import { generateForCourse, NoDocumentsError } from "@/lib/generate";
 import { describeAiError, AiDisabledError } from "@/lib/aiClient";
 import { createGenerationNotification, getAppSettings } from "@/lib/models";
 import type { GenerationMode } from "@/lib/models";
+import { chapterGenerationScope } from "@/lib/studyPlan/planMaterial";
 import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
 import { parseQuizSettings } from "@/lib/quizSettings";
@@ -31,7 +32,7 @@ export async function POST(request: Request, { params }: Params) {
   const body = await parseJsonObjectBody(request);
   try {
     const item = await generateForCourse(plan.course_id, mode as GenerationMode, {
-      documentIds: chapter.linked_document_ids.length ? chapter.linked_document_ids : null,
+      ...chapterGenerationScope(chapter),
       quizSettings: parseQuizSettings(body.quizSettings),
       // Filed on the course page rather than in whichever folder the
       // chapter's documents happen to live in.

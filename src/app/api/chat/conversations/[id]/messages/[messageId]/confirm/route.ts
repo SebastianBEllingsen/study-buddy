@@ -3,7 +3,7 @@ import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ id: string; messageId: string }> };
 
-// Confirms or cancels an AI-proposed folder/save action (see
+// Confirms or cancels an AI-proposed course action (create / save / read) (see
 // chat.ts/chatActions.ts) — the one place these actions actually execute.
 export async function POST(request: Request, { params }: Params) {
   const { id: idParam, messageId: messageIdParam } = await params;

@@ -45,6 +45,7 @@ function chapter(overrides: Partial<StudyPlanChapter> = {}): StudyPlanChapter {
     subtopics: [],
     prerequisite_ids: [],
     linked_document_ids: [],
+    linked_note_ids: [],
     current_level: null,
     estimated_minutes: null,
     completed_at: null,

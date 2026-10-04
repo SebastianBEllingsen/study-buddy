@@ -1610,6 +1610,7 @@ type BrandingFields = {
   dashboardTransparentWidgets?: boolean;
   todayCardShown?: boolean;
   todayCardFrosted?: boolean;
+  todayCoursesShown?: boolean;
   homeWidgets?: HomeWidgetConfig[];
   dashboardLockBackgroundCrop?: boolean;
   dashboardBackdropFullPage?: boolean;
@@ -1920,6 +1921,16 @@ function BackgroundsSection() {
         checked={settings.todayCardShown}
         onChange={(checked) => saveBranding({ todayCardShown: checked })}
       />
+      {settings.todayCardShown && (
+        <SettingGroup>
+          <SettingToggle
+            label="Your courses list"
+            help="Adds a list of your courses to the Today card, so you can jump straight into any course that has a study plan. Off hides it."
+            checked={settings.todayCoursesShown}
+            onChange={(checked) => saveBranding({ todayCoursesShown: checked })}
+          />
+        </SettingGroup>
+      )}
       {settings.todayCardShown && settings.dashboardTransparentWidgets && (
         <SettingGroup>
           <SettingToggle

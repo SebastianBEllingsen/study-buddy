@@ -195,8 +195,44 @@ describe("loadToday in exam mode", () => {
   });
 });
 
+describe("revision", () => {
+  it("keeps a fully learned course in Today with a Revise step, and lets its row start it", async () => {
+    const course = await createCourse("Done course");
+    const plan = await makePlan(course.id);
+    for (const c of plan.chapters) await store.updateChapter(c.id, { completed: true });
+
+    // Narrowed to the course: across all courses, new learning elsewhere ranks first.
+    const own = await loadToday({ courseId: course.id, minutes: 60 });
+    expect(own.steps.find((s) => s.kind === "chapter")?.title).toMatch(/^Revise: /);
+
+    const today = await loadToday({ courseId: null, minutes: 60 });
+    const row = today.courses.find((r) => r.courseId === course.id);
+    expect(row).toMatchObject({ state: "done" });
+    expect(row?.next).not.toBeNull();
+
+    // The row's button asks for exactly that chapter.
+    const picked = await loadToday({ courseId: course.id, minutes: 60, chapterIds: [row!.next!.chapterId] });
+    expect(picked.steps.some((s) => s.kind === "chapter" && s.title.startsWith("Revise: "))).toBe(true);
+  });
+});
+
+describe("courses overview", () => {
+  it("lists courses that have a plan for an all-courses Today, and none when narrowed to one course", async () => {
+    const withPlan = await createCourse("Has plan");
+    const without = await createCourse("No plan");
+    await makePlan(withPlan.id);
+
+    const all = await loadToday({ courseId: null });
+    const rows = new Map(all.courses.map((r) => [r.courseId, r]));
+    expect(rows.get(withPlan.id)).toMatchObject({ state: "ready", next: { chapterTitle: "Foundations" } });
+    expect(rows.has(without.id)).toBe(false);
+
+    expect((await loadToday({ courseId: withPlan.id })).courses).toEqual([]);
+  });
+});
+
 describe("chapterCandidates", () => {
-  it("puts today's scheduled sessions before unscheduled plans' next chapters, and skips finished plans", async () => {
+  it("puts today's scheduled sessions before unscheduled plans' next chapters, and revises finished plans last", async () => {
     const a = await makePlan((await createCourse("A")).id, { ...DEFAULT_STUDY_PLAN_OPTIONS, schedule: true });
     const b = await makePlan((await createCourse("B")).id);
     const today = "2026-03-02";
@@ -213,7 +249,10 @@ describe("chapterCandidates", () => {
     expect(candidates.map((c) => [c.planId, c.chapterTitle, c.next.type])).toEqual([
       [a.id, "Next steps", "practice"],
       [b.id, "Foundations", "resource"],
+      // The finished plan has nothing left to learn: its weakest chapter comes back.
+      [b.id, "Foundations", "practice"],
     ]);
+    expect(candidates.map((c) => !!c.revision)).toEqual([false, false, true]);
   });
 });
 
@@ -242,12 +281,14 @@ describe("picking chapters", () => {
     expect(openChapters([scheduled], names).map((c) => c.chapterId)).toEqual(plan.chapters.map((c) => c.id));
   });
 
-  it("skips a picked chapter that's finished and passed", async () => {
+  it("revises a picked chapter that's finished, and doesn't offer it in the open list", async () => {
     const plan = await makePlan((await createCourse("B")).id);
     const done = { ...plan, chapters: plan.chapters.map((c, i) => (i === 0 ? { ...c, completed_at: "2026-01-01 00:00:00" } : c)) };
     const names = new Map([[plan.course_id, "B"]]);
     const ids = new Set(plan.chapters.map((c) => c.id));
-    expect(chapterCandidates([done], names, "2026-03-02", ids).map((c) => c.chapterId)).not.toContain(plan.chapters[0].id);
+    const candidates = chapterCandidates([done], names, "2026-03-02", ids);
+    expect(candidates.find((c) => c.chapterId === plan.chapters[0].id)).toMatchObject({ revision: true });
+    expect(candidates.find((c) => c.chapterId === plan.chapters[1].id)?.revision).toBeUndefined();
     expect(openChapters([done], names).map((c) => c.chapterId)).not.toContain(plan.chapters[0].id);
   });
 

@@ -6,11 +6,12 @@ import {
   getChatConversation,
   getChatMessage,
   getAppSettings,
+  listCourses,
   listDocumentsForCourse,
   listFoldersForCourse,
   updateChatMessagePendingAction,
 } from "./models";
-import type { ChatAttachment, ChatMessage, PendingChatAction } from "./models";
+import type { ChatAttachment, ChatConversation, ChatMessage, Course, PendingChatAction } from "./models";
 import { buildFullCourseContextText } from "./context";
 import { parseDataUrlImage, isValidChatImageAttachment } from "./dataUrlImage";
 import { extensionOf } from "./documentFormats";
@@ -38,6 +39,8 @@ const MAX_CHAT_DOCUMENT_TEXT_LENGTH = 40_000;
 const SYSTEM_PROMPT = `You are the AI assistant built into Study Buddy, a study app for courses, notes, quizzes, and flashcards. Have a natural, helpful conversation with the user — you can help with studying, explain concepts, or just chat.
 
 You are being shown the conversation so far as a plain transcript, not a native chat API. Respond with ONLY your next message as the assistant — no "Assistant:" prefix, no restating earlier turns, no meta-commentary about the transcript format.
+
+You can't create or read anything in the user's courses on your own: creating a course, folder or note, or looking inside a course, only happens after the user confirms a proposal. Never claim you have created or read something unless it's shown to you below.
 
 Use inline LaTeX ($...$ or $$...$$) for any math, it renders.`;
 
@@ -168,35 +171,41 @@ export async function sendChatMessage(
       throw new Error(`Conversation ${conversationId} not found`);
     }
 
-    const { aiEfficiencyMode: efficient, cliTrustedModeEnabled } = await getAppSettings();
     const transcript = buildTranscriptPrompt(detail.messages);
 
-    // Only ever proposed within this conversation's own course and its own
-    // attachments/folders — see chatActions.ts for how everything here gets
-    // re-validated before anything is actually created/saved. This is a
-    // separate, cheap detection call; when it finds something to propose,
+    // Proposed against every course, but only ever executed after the user
+    // confirms — see chatActions.ts for how everything here gets
+    // re-validated before anything is actually created/saved/read. This is
+    // a separate, cheap detection call; when it finds something to propose,
     // its confirmationMessage stands in as this turn's whole reply (nothing
     // executes until the user confirms — see resolvePendingAction).
-    if (detail.conversation.courseId != null) {
-      const availableAttachments = buildAvailableAttachmentsList(detail.messages);
-      const folders = await listFoldersForCourse(detail.conversation.courseId);
-      const detected = await detectChatActions({ transcript, availableAttachments, folders });
+    const scopedCourseId = detail.conversation.courseId;
+    const courses = await listCourses();
+    const accessibleCourseIds = accessibleCourseIdsFor(detail.conversation, detail.messages, courses);
+    const folders = (await Promise.all(accessibleCourseIds.map((id) => listFoldersForCourse(id)))).flat();
+    const detected = await detectChatActions({
+      transcript,
+      availableAttachments: buildAvailableAttachmentsList(detail.messages),
+      courses,
+      scopedCourseId,
+      accessibleCourseIds,
+      folders,
+    });
 
-      if (detected.actions.length > 0 && detected.confirmationMessage) {
-        const pendingAction: PendingChatAction = {
-          id: crypto.randomUUID(),
-          actions: detected.actions,
-          status: "pending",
-          resultSummary: null,
-        };
-        return await addChatMessage(
-          conversationId,
-          "assistant",
-          stripOrphanMathDelimiters(detected.confirmationMessage),
-          undefined,
-          pendingAction
-        );
-      }
+    if (detected.actions.length > 0 && detected.confirmationMessage) {
+      const pendingAction: PendingChatAction = {
+        id: crypto.randomUUID(),
+        actions: detected.actions,
+        status: "pending",
+        resultSummary: null,
+      };
+      return await addChatMessage(
+        conversationId,
+        "assistant",
+        stripOrphanMathDelimiters(detected.confirmationMessage),
+        undefined,
+        pendingAction
+      );
     }
 
     const images = (attachments ?? [])
@@ -204,41 +213,99 @@ export async function sendChatMessage(
       .map((a) => parseDataUrlImage(a.dataUrl))
       .filter((img): img is { base64: string; mimeType: string } => img !== null);
 
-    let system = SYSTEM_PROMPT;
-    let documentIds: number[] | undefined;
-
-    if (detail.conversation.courseId != null) {
-      const backendId = await resolveBackendId(images.length > 0);
-      const useCliWorkspace =
-        (backendId === "claude_code" || backendId === "codex_cli") && cliTrustedModeEnabled;
-
-      if (useCliWorkspace) {
-        // The materializer (see aiBackends/cliWorkspace.ts) writes every
-        // document's real bytes regardless of status, so passing every id
-        // here (not just extracted ones) satisfies "include all documents".
-        const courseDocs = await listDocumentsForCourse(detail.conversation.courseId);
-        documentIds = courseDocs.map((d) => d.id);
-      } else {
-        const { text } = await buildFullCourseContextText(detail.conversation.courseId);
-        system = `${SYSTEM_PROMPT}\n\nThe user has scoped this conversation to a course. Course material follows — use it to answer questions about the course, but you can still discuss anything else too.\n\n${text}`;
-      }
-    }
-
-    const reply = await generateText({
-      system,
-      user: transcript,
-      maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
-      effort: efficient ? "low" : "medium",
-      efficient,
-      images: images.length > 0 ? images : undefined,
-      workspaceScope: documentIds?.length ? { documentIds } : undefined,
-    });
-
-    return await addChatMessage(conversationId, "assistant", stripOrphanMathDelimiters(reply.trim()));
+    const reply = await generateConversationReply(detail.conversation, detail.messages, courses, { images });
+    return await addChatMessage(conversationId, "assistant", reply);
   } catch (err) {
     await deleteChatMessage(userMessage.id).catch(() => {});
     throw err;
   }
+}
+
+// Courses the user has allowed the assistant to read in this conversation:
+// every readCourse action on a message whose confirmation went through.
+// Derived from the message history rather than stored separately, so
+// granting needs no schema change and a cancelled/failed proposal grants
+// nothing.
+export function grantedCourseIds(messages: ChatMessage[]): number[] {
+  const ids = new Set<number>();
+  for (const m of messages) {
+    if (m.pendingAction?.status !== "executed") continue;
+    for (const action of m.pendingAction.actions) {
+      if (action.action === "readCourse") ids.add(action.courseId);
+    }
+  }
+  return [...ids];
+}
+
+// The course this conversation is scoped to plus every granted one — the
+// only courses whose content (and folders) the assistant ever sees. Ids of
+// courses that no longer exist are dropped.
+function accessibleCourseIdsFor(
+  conversation: ChatConversation,
+  messages: ChatMessage[],
+  courses: Pick<Course, "id">[]
+): number[] {
+  const existing = new Set(courses.map((c) => c.id));
+  const ids = new Set<number>();
+  if (conversation.courseId != null) ids.add(conversation.courseId);
+  for (const id of grantedCourseIds(messages)) ids.add(id);
+  return [...ids].filter((id) => existing.has(id));
+}
+
+// One free-text assistant reply for the conversation as it stands — shared
+// by sendChatMessage and the follow-up after a granted readCourse. Course
+// content is limited to accessibleCourseIdsFor; every other course appears
+// by name only.
+async function generateConversationReply(
+  conversation: ChatConversation,
+  messages: ChatMessage[],
+  courses: Course[],
+  options: { images?: { base64: string; mimeType: string }[]; extraSystem?: string } = {}
+): Promise<string> {
+  const { aiEfficiencyMode: efficient, cliTrustedModeEnabled } = await getAppSettings();
+  const images = options.images ?? [];
+  const accessibleIds = accessibleCourseIdsFor(conversation, messages, courses);
+  const accessible = new Set(accessibleIds);
+
+  let system = SYSTEM_PROMPT;
+  let documentIds: number[] | undefined;
+
+  const otherCourses = courses.filter((c) => !accessible.has(c.id));
+  if (otherCourses.length > 0) {
+    system += `\n\nThe user's other courses (names only — you can't see inside them unless the user grants access, which you'd ask for by telling them which course you'd need to read):\n${otherCourses.map((c) => `- ${c.name}`).join("\n")}`;
+  }
+
+  if (accessibleIds.length > 0) {
+    const backendId = await resolveBackendId(images.length > 0);
+    const useCliWorkspace = (backendId === "claude_code" || backendId === "codex_cli") && cliTrustedModeEnabled;
+
+    if (useCliWorkspace) {
+      // The materializer (see aiBackends/cliWorkspace.ts) writes every
+      // document's real bytes regardless of status, so passing every id
+      // here (not just extracted ones) satisfies "include all documents".
+      documentIds = (await Promise.all(accessibleIds.map((id) => listDocumentsForCourse(id)))).flat().map((d) => d.id);
+    } else {
+      const sections = await Promise.all(
+        accessibleIds.map(async (id) => {
+          const { courseName, text } = await buildFullCourseContextText(id);
+          return `=== Course: ${courseName} ===\n${text}`;
+        })
+      );
+      system += `\n\nThe user has made the following course material available in this conversation (the course it's scoped to and/or courses they allowed you to read) — use it to answer questions about those courses, but you can still discuss anything else too.\n\n${sections.join("\n\n")}`;
+    }
+  }
+  if (options.extraSystem) system += `\n\n${options.extraSystem}`;
+
+  const reply = await generateText({
+    system,
+    user: buildTranscriptPrompt(messages),
+    maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
+    effort: efficient ? "low" : "medium",
+    efficient,
+    images: images.length > 0 ? images : undefined,
+    workspaceScope: documentIds?.length ? { documentIds } : undefined,
+  });
+  return stripOrphanMathDelimiters(reply.trim());
 }
 
 export class PendingActionNotFoundError extends Error {
@@ -248,16 +315,24 @@ export class PendingActionNotFoundError extends Error {
   }
 }
 
-// Confirms or cancels a proposed folder/save action (see sendChatMessage) —
-// the one place these actions actually execute. Re-validates everything
-// against the current course/conversation state at execution time (see
-// chatActions.ts's executeChatActions), since folders/attachments could
-// have changed since the action was proposed.
+export type ResolvedPendingAction = ChatMessage & {
+  // When a confirmed action granted read access to a course, the assistant's
+  // answer to the request that prompted it, now that it can see the course.
+  // null for everything else (and if that follow-up reply itself failed —
+  // the user can simply ask again).
+  followUp: ChatMessage | null;
+};
+
+// Confirms or cancels a proposed course action (see sendChatMessage) — the
+// one place these actions actually execute. Re-validates everything
+// against the current database state at execution time (see
+// chatActions.ts's executeChatActions), since courses/folders/attachments
+// could have changed since the action was proposed.
 export async function resolvePendingAction(
   conversationId: number,
   messageId: number,
   confirm: boolean
-): Promise<ChatMessage> {
+): Promise<ResolvedPendingAction> {
   const message = await getChatMessage(messageId);
   if (!message || message.conversationId !== conversationId || !message.pendingAction) {
     throw new PendingActionNotFoundError();
@@ -265,32 +340,66 @@ export async function resolvePendingAction(
   // Already resolved (double-click, stale UI reload) — return as-is rather
   // than erroring or executing a second time.
   if (message.pendingAction.status !== "pending") {
-    return message;
+    return { ...message, followUp: null };
   }
 
   if (!confirm) {
     const cancelled: PendingChatAction = { ...message.pendingAction, status: "cancelled" };
     await updateChatMessagePendingAction(messageId, cancelled);
-    return { ...message, pendingAction: cancelled };
+    return { ...message, pendingAction: cancelled, followUp: null };
   }
 
   await updateChatMessagePendingAction(messageId, { ...message.pendingAction, status: "confirmed_executing" });
 
   const detail = await getChatConversation(conversationId);
-  const courseId = detail?.conversation.courseId;
-  if (!detail || courseId == null) {
+  if (!detail) {
     const failed: PendingChatAction = {
       ...message.pendingAction,
       status: "failed",
-      resultSummary: "This conversation is no longer scoped to a course.",
+      resultSummary: "This conversation no longer exists.",
     };
     await updateChatMessagePendingAction(messageId, failed);
-    return { ...message, pendingAction: failed };
+    return { ...message, pendingAction: failed, followUp: null };
   }
 
   const availableAttachments = buildAvailableAttachmentsList(detail.messages);
-  const resultSummary = await executeChatActions(courseId, message.pendingAction.actions, availableAttachments);
+  const resultSummary = await executeChatActions(
+    detail.conversation.courseId,
+    message.pendingAction.actions,
+    availableAttachments
+  );
   const resolved: PendingChatAction = { ...message.pendingAction, status: "executed", resultSummary };
   await updateChatMessagePendingAction(messageId, resolved);
-  return { ...message, pendingAction: resolved };
+
+  const resolvedMessage: ChatMessage = { ...message, pendingAction: resolved };
+  const followUp = message.pendingAction.actions.some((a) => a.action === "readCourse")
+    ? await answerAfterGrant(conversationId, resolvedMessage)
+    : null;
+  return { ...resolvedMessage, followUp };
+}
+
+// The user said yes to reading a course in response to some request — now
+// answer that request with the course visible, instead of making them ask
+// again. Best-effort: a backend failure here just means no follow-up.
+async function answerAfterGrant(conversationId: number, resolvedMessage: ChatMessage): Promise<ChatMessage | null> {
+  try {
+    const detail = await getChatConversation(conversationId);
+    if (!detail) return null;
+    const courses = await listCourses();
+    const reply = await generateConversationReply(
+      detail.conversation,
+      // The history as it stands, with the resolved proposal in place of the
+      // pending one the database copy may still show.
+      detail.messages.map((m) => (m.id === resolvedMessage.id ? resolvedMessage : m)),
+      courses,
+      {
+        extraSystem:
+          "The user just allowed you to read the course(s) above. Now answer the request that led you to ask — don't mention the permission step again.",
+      }
+    );
+    return await addChatMessage(conversationId, "assistant", reply);
+  } catch (err) {
+    console.error("Follow-up reply after a course read grant failed:", err);
+    return null;
+  }
 }

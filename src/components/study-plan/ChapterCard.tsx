@@ -18,6 +18,7 @@ import {
   Pencil,
   PlayCircle,
   RefreshCw,
+  StickyNote,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "cn";
@@ -169,6 +170,7 @@ export function ChapterCard({
   planId,
   courseId,
   documentNames,
+  noteTitles,
   aiEnabled,
   practice,
   onChanged,
@@ -180,6 +182,7 @@ export function ChapterCard({
   planId: number;
   courseId: number;
   documentNames: Map<number, string>;
+  noteTitles: Map<number, string>;
   aiEnabled: boolean;
   // Show "Test yourself" (StudyPlanOptions.practice).
   practice: boolean;
@@ -200,6 +203,9 @@ export function ChapterCard({
   const linkedDocs = chapter.linked_document_ids
     .map((id) => ({ id, name: documentNames.get(id) }))
     .filter((d): d is { id: number; name: string } => !!d.name);
+  const linkedNotes = chapter.linked_note_ids
+    .map((id) => ({ id, name: noteTitles.get(id) }))
+    .filter((n): n is { id: number; name: string } => !!n.name);
 
   async function saveSubtopics(subtopics: Subtopic[]) {
     onOptimistic((c) => ({ ...c, subtopics }));
@@ -359,13 +365,19 @@ export function ChapterCard({
 
         {practice && <ChapterPractice chapter={chapter} planId={planId} aiEnabled={aiEnabled} onChanged={onChanged} />}
 
-        {linkedDocs.length > 0 && (
+        {(linkedDocs.length > 0 || linkedNotes.length > 0) && (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs text-muted-foreground">From your course:</span>
             {linkedDocs.map((doc) => (
               <Badge key={doc.id} variant="secondary" render={<Link href={`/courses/${courseId}?document=${doc.id}`} />}>
                 <FileText className="size-3" />
                 {doc.name}
+              </Badge>
+            ))}
+            {linkedNotes.map((note) => (
+              <Badge key={`note-${note.id}`} variant="secondary" render={<Link href={`/vault/${note.id}`} />}>
+                <StickyNote className="size-3" />
+                {note.name}
               </Badge>
             ))}
           </div>

@@ -149,6 +149,8 @@ export const app_settings = pgTable("app_settings", {
   // See AppSettings.todayCardShown / todayCardFrosted in models.ts.
   today_card_shown: boolean("today_card_shown").notNull().default(true),
   today_card_frosted: boolean("today_card_frosted").notNull().default(true),
+  // See AppSettings.todayCoursesShown in models.ts.
+  today_courses_shown: boolean("today_courses_shown").notNull().default(true),
   // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
   dashboard_lock_background_crop: boolean("dashboard_lock_background_crop").notNull().default(false),
   // See AppSettings.dashboardBackdropFullPage's doc comment in models.ts.

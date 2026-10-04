@@ -18,10 +18,12 @@ vi.mock("../context", () => ({ buildCourseContext: (...a: unknown[]) => buildCou
 
 const getDocument = vi.fn();
 const listDocumentsForCourse = vi.fn();
+const listNotesForCourse = vi.fn();
 vi.mock("../models", () => ({
   getAppSettings: async () => ({ aiEfficiencyMode: false, preferredLanguage: "de" }),
   getDocument: (...a: unknown[]) => getDocument(...a),
   listDocumentsForCourse: (...a: unknown[]) => listDocumentsForCourse(...a),
+  listNotesForCourse: (...a: unknown[]) => listNotesForCourse(...a),
   getCourse: async () => ({ id: 1, name: "Sample Course" }),
 }));
 
@@ -45,6 +47,7 @@ function toPlan(plan: NewStudyPlan): StudyPlan {
     syllabus_document_id: plan.syllabusDocumentId,
     syllabus_text: plan.syllabusText,
     source_document_ids: plan.sourceDocumentIds,
+    source_notes: plan.sourceNotes ?? {},
     source_folder_id: plan.sourceFolderId,
     source_handpicked: plan.sourceHandpicked,
     language: plan.language,
@@ -65,6 +68,7 @@ function toPlan(plan: NewStudyPlan): StudyPlan {
       subtopics: c.subtopics.map((text) => ({ text, done: false })),
       prerequisite_ids: c.prerequisites.map((p) => 100 + p),
       linked_document_ids: c.linked_document_ids,
+      linked_note_ids: c.linked_note_ids ?? [],
       current_level: null,
       estimated_minutes: c.estimated_minutes,
       completed_at: null,
@@ -169,6 +173,7 @@ beforeEach(() => {
     handpicked: false,
   });
   listDocumentsForCourse.mockResolvedValue(DOCS);
+  listNotesForCourse.mockResolvedValue([]);
   getDocument.mockImplementation(async (id: number) => DOCS.find((d) => d.id === id));
   generateStructured.mockResolvedValue(OUTLINE);
   backendSupportsWebSearch.mockResolvedValue(true);
@@ -278,8 +283,79 @@ describe("createStudyPlanForCourse", () => {
     expect(generateStructured).not.toHaveBeenCalled();
   });
 
+  it("builds a plan from notes alone when the course has no documents", async () => {
+    buildCourseContext.mockResolvedValueOnce({
+      courseName: "Sample Course",
+      documentIds: [],
+      noteIds: [5],
+      folderId: null,
+      handpicked: false,
+    });
+    listDocumentsForCourse.mockResolvedValueOnce([]);
+    listNotesForCourse.mockResolvedValueOnce([
+      { id: 5, title: "Key ideas", markdown: "# Key ideas\nbody" },
+      { id: 6, title: "Not in scope", markdown: "nope" },
+    ]);
+
+    generateStructured.mockResolvedValueOnce({
+      ...OUTLINE,
+      chapters: OUTLINE.chapters.map((c, i) => (i === 0 ? { ...c, matchedDocuments: ["key IDEAS"] } : c)),
+    });
+
+    await createStudyPlanForCourse(1, { syllabus: null, options: DEFAULT_STUDY_PLAN_OPTIONS });
+
+    const call = generateStructured.mock.calls[0][0] as { system: string; user: string };
+    expect(saved?.chapters[0].linked_note_ids).toEqual([5]);
+    expect(Object.keys(saved?.sourceNotes ?? {})).toEqual(["5"]);
+    expect(saved?.sourceNotes?.[5]).toMatch(/^[0-9a-f]{12}$/);
+    expect(call.user).toContain("--- Note: Key ideas ---");
+    expect(call.user).not.toContain("Not in scope");
+    expect(call.system).toContain("no syllabus");
+  });
+
+  it("keeps past tests and quizzes in their own section, apart from the teaching material", async () => {
+    const quiz = { ...DOCS[0], id: 20, filename: "Test 1.pdf", extracted_text: "1. Sets" };
+    const withQuiz = [...DOCS, quiz];
+    buildCourseContext.mockResolvedValueOnce({
+      courseName: "Sample Course",
+      documentIds: withQuiz.map((d) => d.id),
+      noteIds: [],
+      folderId: null,
+      handpicked: false,
+    });
+    listDocumentsForCourse.mockResolvedValueOnce(withQuiz);
+
+    await createStudyPlanForCourse(1, { syllabus: null, options: DEFAULT_STUDY_PLAN_OPTIONS });
+
+    const call = generateStructured.mock.calls[0][0] as { system: string; user: string };
+    const [material, tests] = call.user.split("Past tests and quizzes:");
+    expect(material).toContain("--- Document: Lecture1.pdf ---");
+    expect(material).not.toContain("Test 1.pdf");
+    expect(tests).toContain("--- Document: Test 1.pdf ---");
+    expect(call.system).toContain("Past tests and quizzes");
+  });
+
+  it("still uses quizzes as the source when they are all there is", async () => {
+    const quiz = { ...DOCS[0], id: 20, filename: "Test 1.pdf", extracted_text: "1. Sets" };
+    buildCourseContext.mockResolvedValueOnce({
+      courseName: "Sample Course",
+      documentIds: [20],
+      noteIds: [],
+      folderId: null,
+      handpicked: false,
+    });
+    listDocumentsForCourse.mockResolvedValueOnce([quiz]);
+
+    await createStudyPlanForCourse(1, { syllabus: null, options: DEFAULT_STUDY_PLAN_OPTIONS });
+
+    const call = generateStructured.mock.calls[0][0] as { system: string; user: string };
+    expect(call.user).toContain("Course material outline:");
+    expect(call.user).toContain("Test 1.pdf");
+    expect(call.user).not.toContain("Past tests and quizzes:");
+  });
+
   it("needs a syllabus or some material", async () => {
-    buildCourseContext.mockResolvedValueOnce({ courseName: "Sample Course", documentIds: [], folderId: null, handpicked: false });
+    buildCourseContext.mockResolvedValueOnce({ courseName: "Sample Course", documentIds: [], noteIds: [], folderId: null, handpicked: false });
     await expect(
       createStudyPlanForCourse(1, { syllabus: null, options: DEFAULT_STUDY_PLAN_OPTIONS })
     ).rejects.toBeInstanceOf(NoCurriculumError);

@@ -85,6 +85,7 @@ export function StudyPlanSetupDialog({
   onOpenChange,
   courseId,
   documents,
+  hasNoteMaterial,
   scope,
   hasExistingPlan,
   onCreated,
@@ -93,12 +94,16 @@ export function StudyPlanSetupDialog({
   onOpenChange: (open: boolean) => void;
   courseId: number;
   documents: DocumentSummaryRow[];
+  // True when at least one note is marked for generation — notes feed the
+  // plan like extracted documents do, so they also allow "None" (no syllabus).
+  hasNoteMaterial: boolean;
   scope: { folderId: number | null; documentIds: number[] | null; label: string };
   hasExistingPlan: boolean;
   onCreated: (plan: StudyPlan) => void;
 }) {
   const { data: settings } = useSWR<AppSettings>("/api/settings");
   const extracted = documents.filter((d) => d.status === "extracted");
+  const hasMaterial = extracted.length > 0 || hasNoteMaterial;
   const [mode, setMode] = useState<SyllabusMode>(extracted.length ? "document" : "paste");
   const [syllabusDocId, setSyllabusDocId] = useState<string>("");
   const [pasted, setPasted] = useState("");
@@ -111,7 +116,7 @@ export function StudyPlanSetupDialog({
   const minutes = Number(minutesDraft);
   const minutesValid = Number.isInteger(minutes) && minutes >= MIN_MINUTES_PER_DAY && minutes <= MAX_MINUTES_PER_DAY;
   const scheduleValid = !options.schedule || (options.studyDays.length > 0 && minutesValid);
-  const canBuild = !building && scheduleValid && (mode === "none" ? extracted.length > 0 : hasSyllabus);
+  const canBuild = !building && scheduleValid && (mode === "none" ? hasMaterial : hasSyllabus);
 
   function update(patch: Partial<StudyPlanOptions>) {
     setOptions((prev) => ({ ...prev, ...patch }));
@@ -189,7 +194,7 @@ export function StudyPlanSetupDialog({
                 Course document
               </ToggleGroupItem>
               <ToggleGroupItem value="paste">Paste text</ToggleGroupItem>
-              <ToggleGroupItem value="none" disabled={extracted.length === 0}>
+              <ToggleGroupItem value="none" disabled={!hasMaterial}>
                 None
               </ToggleGroupItem>
             </ToggleGroup>

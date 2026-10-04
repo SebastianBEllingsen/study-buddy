@@ -764,6 +764,7 @@ async function runMigration(pgDb: PostgresDb): Promise<Response> {
               "dashboard_transparent_widgets",
               "today_card_shown",
               "today_card_frosted",
+              "today_courses_shown",
               "document_badges_enabled",
               "document_badge_detail",
               "folder_chips",

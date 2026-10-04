@@ -1,7 +1,7 @@
 import { listCourseNames } from "../models";
 import { localToday, missedSessions } from "../studyPlan/schedule";
 import { reschedulePlan } from "../studyPlan/scheduleService";
-import { getStudyPlan, listReadyStudyPlans } from "../studyPlan/store";
+import { getStudyPlan, listReadyStudyPlans, listPlanStatuses } from "../studyPlan/store";
 import { chapterIsComplete, chapterIsPassed, nextChapter } from "../studyPlanDisplay";
 import type { StudyPlan } from "../studyPlan/types";
 import { summarizeKnowledge } from "../review/knowledgeSummary";
@@ -11,6 +11,8 @@ import { ensureFsrsMigrated } from "../review/legacyMigration";
 import { getExamProfile } from "../exams/store";
 import { SKILL_CHECK_MINUTES } from "../exams/topicProfile";
 import { loadCoursesExamInfo } from "../readiness/load";
+import { buildCourseRows, lastStudiedAt, type CourseStudyRow } from "./courseOverview";
+import { revisionChapter } from "./revision";
 import {
   nextChapterStep,
   planDay,
@@ -106,10 +108,18 @@ export function chapterCandidates(
     const courseName = courseNames.get(plan.course_id) ?? plan.title;
     const deadline = plan.options.deadline;
     const daysLeft = deadline ? Math.round((Date.parse(deadline) - Date.parse(today)) / 86_400_000) : null;
-    const base = { planId: plan.id, courseId: plan.course_id, courseName, deadline, daysLeft };
+    const base = {
+      planId: plan.id,
+      courseId: plan.course_id,
+      courseName,
+      deadline,
+      daysLeft,
+      lastStudiedAt: lastStudiedAt(plan),
+    };
     const candidate = (
       chapter: StudyPlan["chapters"][number],
-      session: { id: number; minutes: number; kind: string } | null
+      session: { id: number; minutes: number; kind: string } | null,
+      revision = false
     ): ChapterCandidate => ({
       ...base,
       chapterId: chapter.id,
@@ -117,20 +127,23 @@ export function chapterCandidates(
       mastery: chapter.mastery,
       awaitingCheck: chapterIsComplete(chapter) && !chapterIsPassed(chapter),
       session: session ? { id: session.id, minutes: session.minutes } : null,
+      ...(revision ? { revision: true } : {}),
       next: nextChapterStep(chapter, (!!session && session.kind !== "study") || chapterIsComplete(chapter), {
         pretest: plan.options.diagnostic,
+        revision,
       }),
     });
     const todaysSessions = plan.options.schedule
       ? plan.sessions.filter((s) => s.date === today && !s.done_at)
       : [];
     if (only) {
+      // A picked chapter that's already finished is revised rather than skipped.
       const picked = [...plan.chapters]
         .sort((a, b) => a.stage - b.stage || a.position - b.position)
-        .filter((c) => only.has(c.id) && chapterIsOpen(c));
+        .filter((c) => only.has(c.id));
       for (const chapter of picked) {
         const session = todaysSessions.find((s) => s.chapter_id === chapter.id) ?? null;
-        (session ? scheduled : open).push(candidate(chapter, session));
+        (session ? scheduled : open).push(candidate(chapter, session, !chapterIsOpen(chapter)));
       }
     } else if (plan.options.schedule) {
       for (const session of todaysSessions) {
@@ -140,6 +153,12 @@ export function chapterCandidates(
     } else {
       const chapter = nextChapter(plan, plan.options.practice);
       if (chapter) open.push(candidate(chapter, null));
+    }
+    // Nothing left to learn: bring the weakest finished chapter back, on
+    // scheduled plans too (their sessions run out once every chapter is done).
+    if (!only && !nextChapter(plan, plan.options.practice) && !todaysSessions.length) {
+      const chapter = revisionChapter(plan);
+      if (chapter) open.push(candidate(chapter, null, true));
     }
   }
   return [...scheduled, ...open];
@@ -151,6 +170,9 @@ export interface TodayPlan {
   date: string;
   // Every open chapter in scope, for picking what to study today.
   chapters: OpenChapter[];
+  // Where each course stands, for picking any subject up: every course when
+  // Today covers them all, empty when narrowed to one.
+  courses: CourseStudyRow[];
 }
 
 export async function loadToday(options: {
@@ -168,12 +190,13 @@ export async function loadToday(options: {
   // Sources carry FSRS state, so the one-time migration has to finish first.
   await ensureFsrsMigrated();
   const sourcesLoad = loadQueueSources(courseId);
-  const [queue, mistakes, allPlans, courses, sources] = await Promise.all([
+  const [queue, mistakes, allPlans, courses, sources, planStatuses] = await Promise.all([
     sourcesLoad.then((loaded) => loadReviewQueue({ courseId, dayStart: options.dayStart, now, limit: 1, sources: loaded })),
     listMistakes({ courseId, status: "open" }),
     listReadyStudyPlans(),
     listCourseNames(courseId),
     sourcesLoad,
+    courseId === null ? listPlanStatuses() : Promise.resolve([]),
   ]);
   const courseNames = new Map(courses.map((c) => [c.id, c.name]));
   const plans = await Promise.all(
@@ -193,7 +216,7 @@ export async function loadToday(options: {
   // A picked chapter is studied even in an exam's final days: it was asked for.
   const picked = options.chapterIds?.length ? new Set(options.chapterIds) : undefined;
   const chapters = chapterCandidates(plans, courseNames, today, picked).filter(
-    (c) => picked || !examInfo.get(c.courseId)?.mode.noNewMaterial
+    (c) => picked || c.revision || !examInfo.get(c.courseId)?.mode.noNewMaterial
   );
   const mockExams: MockExamDue[] = [...examInfo]
     .filter(([, i]) => i.mode.mockExamDue)
@@ -238,5 +261,11 @@ export async function loadToday(options: {
     examMode: inExamMode,
     maxChapterSteps: picked ? Math.min(picked.size, MAX_PICKED_CHAPTERS) : undefined,
   });
-  return { minutes, steps, date: today, chapters: openChapters(plans, courseNames) };
+  return {
+    minutes,
+    steps,
+    date: today,
+    chapters: openChapters(plans, courseNames),
+    courses: courseId === null ? buildCourseRows({ courses, readyPlans: plans, planStatuses, now }) : [],
+  };
 }
