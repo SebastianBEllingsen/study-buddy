@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
-import { db, explain_sessions } from "../db";
+import { db, explain_sessions, generated_items } from "../db";
 import { nowUtc } from "../time";
 import type { ExplainKind, ExplainMessage, ExplainResult, ExplainSession } from "./types";
 
@@ -71,13 +71,34 @@ export async function listExplainSessions(courseId: number, limit = 20): Promise
   return rows.map(toSession);
 }
 
-// The course's gap-card deck, if an earlier session made one.
-export async function latestGapDeckId(courseId: number): Promise<number | null> {
+export async function deleteExplainSession(id: number): Promise<void> {
+  await db.delete(explain_sessions).where(eq(explain_sessions.id, id));
+}
+
+// The course's gap-card deck, if an earlier session made one. Falls back to
+// a deck still titled `deckTitle` when no session points at one any more
+// (the sessions that made it were deleted), so new gaps don't start a second
+// deck beside it.
+export async function latestGapDeckId(courseId: number, deckTitle?: string): Promise<number | null> {
   const [row] = await db
     .select({ id: explain_sessions.practice_item_id })
     .from(explain_sessions)
     .where(and(eq(explain_sessions.course_id, courseId), isNotNull(explain_sessions.practice_item_id)))
     .orderBy(desc(explain_sessions.updated_at), desc(explain_sessions.id))
     .limit(1);
-  return row?.id ?? null;
+  if (row?.id) return row.id;
+  if (!deckTitle) return null;
+  const [deck] = await db
+    .select({ id: generated_items.id })
+    .from(generated_items)
+    .where(
+      and(
+        eq(generated_items.course_id, courseId),
+        eq(generated_items.mode, "flashcards"),
+        eq(generated_items.title, deckTitle)
+      )
+    )
+    .orderBy(desc(generated_items.id))
+    .limit(1);
+  return deck?.id ?? null;
 }

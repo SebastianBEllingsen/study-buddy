@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_POMODORO_SETTINGS, initialPomodoroState, startTimer } from "../pomodoro";
 import type { TodayStep } from "./planDay";
 import {
   currentStep,
   finishedPlanSessions,
+  markDoneForToday,
   mergeFresh,
+  newChapterQuizSteps,
   parseSession,
+  sessionFocusMs,
   sessionProgress,
   setStepStatus,
   snoozeStep,
@@ -78,7 +82,7 @@ describe("step actions", () => {
     s = setStepStatus(s, "mistakes", "skipped");
     s = setStepStatus(s, "chapter:5:resource:9", "done");
     expect(currentStep(s)?.id).toBe("concept:2:graphs");
-    expect(sessionProgress(s)).toEqual({ done: 1, total: 3, minutesDone: 25 });
+    expect(sessionProgress(s)).toEqual({ done: 1, total: 3 });
     expect(finishedPlanSessions(s)).toMatchObject([{ planId: 1, sessionId: 40 }]);
     expect(snoozeStep(s, "mistakes")).toBe(s);
   });
@@ -141,5 +145,92 @@ describe("measuring how long plan sessions took", () => {
     expect(finishedPlanSessions(setStepStatus(started(), "c", "done", t0 + 10_000))).toEqual([
       { planId: 1, sessionId: 41 },
     ]);
+  });
+});
+
+describe("focus time of a session", () => {
+  const MIN = 60_000;
+  const t0 = 1_700_000_000_000;
+  const s = startSession({ date: "2026-01-05", courseId: null, minutes: 60, now: t0, steps: base });
+
+  it("starts at zero, and defaults to zero for an older saved session", () => {
+    expect(s.focusMs).toBe(0);
+    const old: Record<string, unknown> = JSON.parse(JSON.stringify(s));
+    delete old.focusMs;
+    expect(parseSession(old)?.focusMs).toBe(0);
+    expect(parseSession({ ...old, focusMs: 5 * MIN })?.focusMs).toBe(5 * MIN);
+    expect(parseSession({ ...old, focusMs: -4 })?.focusMs).toBe(0);
+  });
+
+  it("adds the running stretch to what's banked, but only from the session's start", () => {
+    const idle = initialPomodoroState(DEFAULT_POMODORO_SETTINGS);
+    expect(sessionFocusMs({ ...s, focusMs: 10 * MIN }, idle, t0)).toBe(10 * MIN);
+    const running = startTimer(idle, t0 - 5 * MIN);
+    expect(sessionFocusMs({ ...s, focusMs: 10 * MIN }, running, t0 + 3 * MIN)).toBe(13 * MIN);
+  });
+});
+
+describe("done for today", () => {
+  it("counts the step as done without a plan completion, and finishing it for good clears the flag", () => {
+    const s = markDoneForToday(start(), "chapter:5:resource:9", 1234);
+    const step = s.steps.find((x) => x.id === "chapter:5:resource:9");
+    expect(step).toMatchObject({ status: "done", doneAt: 1234, partial: true });
+    expect(sessionProgress(s).done).toBe(1);
+    expect(setStepStatus(s, "chapter:5:resource:9", "done").steps[2].partial).toBeUndefined();
+  });
+
+  it("isn't undone or re-added by a fresh plan that still lists the resource", () => {
+    const s = markDoneForToday(start(), "chapter:5:resource:9");
+    const merged = mergeFresh(s, [step("chapter:5:resource:9", "chapter", { minutes: 25 })]);
+    expect(merged.steps.filter((x) => x.id === "chapter:5:resource:9")).toEqual([
+      expect.objectContaining({ status: "done", partial: true }),
+    ]);
+    expect(currentStep(merged)?.id).not.toBe("chapter:5:resource:9");
+  });
+});
+
+describe("plan session time from focus time", () => {
+  const MIN = 60_000;
+  const t0 = 1_700_000_000_000;
+  const done = () => {
+    const s = startSession({
+      date: "2026-01-05",
+      courseId: null,
+      minutes: 60,
+      now: t0,
+      steps: [step("a", "chapter", { sessionId: { planId: 1, sessionId: 40 } }), step("b", "reviews")],
+    });
+    return setStepStatus(setStepStatus(s, "b", "done", t0 + 20 * MIN), "a", "done", t0 + 60 * MIN);
+  };
+
+  it("scales the wall-clock time down to the focus share", () => {
+    // 60 minutes on the clock, 45 of them focus: the plan session (40 of the
+    // 60) gets 30.
+    expect(finishedPlanSessions(done(), 45 * MIN)).toEqual([{ planId: 1, sessionId: 40, minutes: 30 }]);
+  });
+
+  it("never scales time up, and records nothing when no focus time ran", () => {
+    expect(finishedPlanSessions(done(), 90 * MIN)).toEqual([{ planId: 1, sessionId: 40, minutes: 40 }]);
+    expect(finishedPlanSessions(done(), 0)).toEqual([{ planId: 1, sessionId: 40 }]);
+  });
+});
+
+describe("a chapter's quiz turning up", () => {
+  it("is reported once its study steps are done and the plan brings up the quiz step", () => {
+    const s = start();
+    const known = new Set(s.steps.map((x) => x.id));
+    expect(newChapterQuizSteps(s, known)).toEqual([]);
+    const done = setStepStatus(s, "chapter:5:resource:9", "done");
+    const merged = mergeFresh(done, [step("chapter:5:practice", "chapter", { title: "Test yourself: Induction" })]);
+    expect(newChapterQuizSteps(merged, known).map((x) => x.id)).toEqual(["chapter:5:practice"]);
+    expect(newChapterQuizSteps(merged, new Set(merged.steps.map((x) => x.id)))).toEqual([]);
+  });
+
+  it("ignores other new steps, and a quiz step that isn't waiting any more", () => {
+    const known = new Set<string>();
+    const other = mergeFresh(setStepStatus(start(), "chapter:5:resource:9", "done"), [step("chapter:5:subtopic:0", "chapter")]);
+    expect(newChapterQuizSteps(other, known).map((x) => x.id)).toEqual([]);
+    const quiz = mergeFresh(setStepStatus(start(), "chapter:5:resource:9", "done"), [step("chapter:5:practice", "chapter")]);
+    expect(newChapterQuizSteps(setStepStatus(quiz, "chapter:5:practice", "skipped"), known)).toEqual([]);
   });
 });

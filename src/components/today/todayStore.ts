@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import { localToday } from "@/lib/studyPlan/schedule";
 import { localDayStart } from "@/lib/review/session";
@@ -80,9 +80,12 @@ export function todayUrl(courseId: number | null, minutes?: number, chapterIds: 
 
 // Keeps a running session in step with the server: work that's done gets
 // ticked off, and a chapter's next step shows up. Fetched without a time
-// limit (see mergeFresh).
-export function useTodaySync(session: TodaySession | null) {
-  const { data } = useSWR<{ steps: TodayStep[] }>(session ? todayUrl(session.courseId, 480, session.chapterIds) : null, {
+// limit (see mergeFresh). With `refreshOnProgress`, every step that gets
+// ticked off or skipped fetches the plan again right away, so what follows
+// it (a chapter's quiz, say) appears without waiting for the tab to be
+// refocused. Only one mounted instance should ask for that.
+export function useTodaySync(session: TodaySession | null, options: { refreshOnProgress?: boolean } = {}) {
+  const { data, mutate } = useSWR<{ steps: TodayStep[] }>(session ? todayUrl(session.courseId, 480, session.chapterIds) : null, {
     revalidateOnFocus: true,
   });
   useEffect(() => {
@@ -90,4 +93,13 @@ export function useTodaySync(session: TodaySession | null) {
     const merged = mergeFresh(session, data.steps);
     if (merged !== session) saveTodaySession(merged);
   }, [session, data]);
+
+  const refresh = options.refreshOnProgress ?? false;
+  const settled = session ? session.steps.filter((s) => s.status !== "pending").length : 0;
+  const lastSettled = useRef(settled);
+  useEffect(() => {
+    const changed = lastSettled.current !== settled;
+    lastSettled.current = settled;
+    if (refresh && changed && settled > 0) void mutate();
+  }, [refresh, settled, mutate]);
 }

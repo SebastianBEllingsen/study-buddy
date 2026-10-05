@@ -6,6 +6,7 @@ import {
   PHASE_LABELS,
   advancePhase,
   applySettings,
+  endedFocusMs,
   formatRemaining,
   getRemainingMs,
   pauseTimer,
@@ -19,6 +20,7 @@ import {
   type PomodoroSettings,
   type PomodoroState,
 } from "@/lib/pomodoro";
+import { updateTodaySession } from "@/components/today/todayStore";
 import PomodoroFocusMode from "./PomodoroFocusMode";
 
 // Lives in the root layout (not on any one page) so the timer keeps running
@@ -105,6 +107,17 @@ function finishedMessage(finished: PomodoroPhase, next: PomodoroState): string {
 
 const noopSubscribe = () => () => {};
 
+// A focus stretch just ended: add its time to the running Today session (if
+// any). Only the tab that made the change calls this — other tabs adopt the
+// new state from storage — so nothing is counted twice.
+function bankFocus(prev: PomodoroState, next: PomodoroState, now: number) {
+  if (endedFocusMs(prev, next, now) <= 0) return;
+  updateTodaySession((session) => {
+    const ms = endedFocusMs(prev, next, now, session.startedAt);
+    return ms > 0 ? { ...session, focusMs: session.focusMs + ms } : session;
+  });
+}
+
 export default function PomodoroProvider({ children }: { children: React.ReactNode }) {
   // Persisted values are read lazily (the server just gets the defaults);
   // `hydrated` keeps the header from rendering the restored timer until
@@ -175,6 +188,7 @@ export default function PomodoroProvider({ children }: { children: React.ReactNo
         return;
       }
     }
+    bankFocus(current, next, n);
     stateRef.current = next;
     setState(next);
     handleFinished(finished, next);
@@ -205,9 +219,11 @@ export default function PomodoroProvider({ children }: { children: React.ReactNo
   }, []);
 
   const commit = useCallback((next: PomodoroState) => {
+    const n = Date.now();
+    bankFocus(stateRef.current, next, n);
     stateRef.current = next;
     setState(next);
-    setNow(Date.now());
+    setNow(n);
   }, []);
 
   const start = useCallback(() => {

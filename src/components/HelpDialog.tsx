@@ -88,8 +88,11 @@ export default function HelpDialog() {
             sharing the time), then your weakest concept. &quot;Choose chapters&quot; swaps the
             autopilot&apos;s pick for yours. Each step says why it&apos;s there. Start
             runs the focus timer and opens each step in turn; the timer in the header shows the
-            current step with Done, Later and Skip. Finishing records how long each plan session
-            took. Missed plan days are rescheduled for you. In Settings → Appearance you can hide
+            current step with Done, Later and Skip. A plan resource, say a long playlist, has two kinds
+            of done: &quot;done for today&quot; keeps it open in your plan for tomorrow, and &quot;finished it all&quot;
+            ticks it off for good. The session counts the focus time the timer has really run
+            (breaks and pauses don&apos;t count), including while you watch or read. Finishing records how
+            long each plan session took. Missed plan days are rescheduled for you. In Settings → Appearance you can hide
             the Today card. With transparent widgets on, every widget can sit on a frosted panel (see-through
             but easy to read over a picture): switch them all at once there, one by one with the snowflake
             on each tile in Customize, or the Today card on its own.

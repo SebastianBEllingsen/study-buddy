@@ -1,5 +1,5 @@
 import { AiDisabledError, describeAiError } from "@/lib/aiClient";
-import { ExplainSessionError, explainTurn } from "@/lib/explain/flow";
+import { ExplainSessionError, deleteSession, explainTurn } from "@/lib/explain/flow";
 import { getExplainSession } from "@/lib/explain/store";
 import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
@@ -29,5 +29,21 @@ export async function POST(request: Request, { params }: Params) {
     }
     console.error("Explain session turn failed:", err);
     return Response.json({ error: await describeAiError(err) }, { status: 502 });
+  }
+}
+
+// ?deleteCards=1 also removes the gap cards this session added to the
+// course's gap deck.
+export async function DELETE(request: Request, { params }: Params) {
+  const id = parseId((await params).sessionId);
+  if (id === null) return Response.json({ error: "Session not found" }, { status: 404 });
+  const deleteCards = new URL(request.url).searchParams.get("deleteCards") === "1";
+  try {
+    const result = await deleteSession(id, deleteCards);
+    if (!result) return Response.json({ error: "Session not found" }, { status: 404 });
+    return Response.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("Deleting an explain session failed:", err);
+    return Response.json({ error: "Couldn't delete this session" }, { status: 500 });
   }
 }

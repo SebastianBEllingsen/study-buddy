@@ -131,6 +131,28 @@ export function getRemainingMs(state: PomodoroState, now: number): number {
   return state.remainingMs;
 }
 
+// Focus time so far in the stretch that's running right now. While running,
+// `remainingMs` still holds what was left when the stretch began (only pause
+// and reset rewrite it), so the stretch began at `endsAt - remainingMs`.
+// Counts nothing for breaks, and never past `endsAt` (a tab that slept
+// through the end of the phase didn't keep focusing). `since` leaves out
+// anything before then, e.g. when a Today session began mid-stretch.
+export function runningFocusMs(state: PomodoroState, now: number, since = 0): number {
+  if (state.status !== "running" || state.phase !== "focus" || state.endsAt === null) return 0;
+  const start = Math.max(state.endsAt - state.remainingMs, since);
+  const end = Math.min(now, state.endsAt);
+  return Math.max(0, end - start);
+}
+
+// Focus time to bank when `prev` turns into `next` (paused, reset, skipped,
+// or the phase ran out). Zero while the same stretch carries on, e.g. a
+// settings change to a running timer, so nothing is counted twice.
+export function endedFocusMs(prev: PomodoroState, next: PomodoroState, now: number, since = 0): number {
+  const continues =
+    next.status === "running" && next.phase === "focus" && next.endsAt === prev.endsAt;
+  return continues ? 0 : runningFocusMs(prev, now, since);
+}
+
 // 0 → just started, 1 → done. For the progress ring.
 export function getProgress(state: PomodoroState, settings: PomodoroSettings, now: number): number {
   const total = phaseDurationMs(state.phase, settings);

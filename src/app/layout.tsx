@@ -38,6 +38,7 @@ import AdaptiveHeader from "@/components/AdaptiveHeader";
 import ExternalLinkHandler from "@/components/ExternalLinkHandler";
 import PomodoroProvider from "@/components/pomodoro/PomodoroProvider";
 import PomodoroButton from "@/components/pomodoro/PomodoroButton";
+import { TodayWatcher } from "@/components/today/TodayWatcher";
 import { SyncIndicator } from "@/components/SyncIndicator";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -268,6 +269,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 <SWRCacheGate>{children}</SWRCacheGate>
               </main>
               <Toaster />
+              <TodayWatcher />
               <AppWallpaper />
               <AdaptiveHeader />
               <ExternalLinkHandler />

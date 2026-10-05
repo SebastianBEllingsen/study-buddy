@@ -3,12 +3,13 @@
 import { Explain } from "@/components/Explain";
 import { useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, LoaderCircle, TriangleAlert, XCircle } from "lucide-react";
 import { cn } from "cn";
 import { MAX_NOVICE_QUESTIONS, type ExplainSession } from "@/lib/explain/types";
+import { DeleteExplainSession } from "@/components/explain/DeleteExplainSession";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -83,6 +84,7 @@ function Result({ session, courseId }: { session: ExplainSession; courseId: stri
 
 export default function ExplainSessionPage() {
   const { courseId, sessionId } = useParams<{ courseId: string; sessionId: string }>();
+  const router = useRouter();
   const key = `/api/explain-sessions/${sessionId}`;
   const { data, error, mutate } = useSWR<{ session: ExplainSession }>(key, { revalidateOnFocus: false });
   const [text, setText] = useState("");
@@ -116,9 +118,12 @@ export default function ExplainSessionPage() {
         <Link href={`/courses/${courseId}/explain`} className="text-sm text-muted-foreground hover:underline">
           ← Explain from memory
         </Link>
-        <h1 className="font-heading text-2xl font-semibold">
-          {session.kind === "blurt" ? "Blurt" : "Explain it"}: {session.topic}
-        </h1>
+        <div className="flex items-start justify-between gap-2">
+          <h1 className="font-heading text-2xl font-semibold">
+            {session.kind === "blurt" ? "Blurt" : "Explain it"}: {session.topic}
+          </h1>
+          <DeleteExplainSession session={session} onDeleted={() => router.push(`/courses/${courseId}/explain`)} />
+        </div>
         {session.status === "open" && (
           <p className="text-sm text-muted-foreground">
             {session.kind === "blurt"

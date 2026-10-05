@@ -7,7 +7,7 @@ const DB_NAME = "study-buddy-swr";
 const STORE = "cache";
 const RECORD = "snapshot";
 // Bump when a response shape changes in a way old cached data would break.
-const VERSION = 1;
+const VERSION = 2;
 // Anything older is more misleading than useful.
 const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 

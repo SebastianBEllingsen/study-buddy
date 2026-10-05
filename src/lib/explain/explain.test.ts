@@ -17,7 +17,8 @@ vi.mock("../aiClient", () => ({
 const { createCourse, getGeneratedItem } = await import("../models");
 const planStore = await import("../studyPlan/store");
 const { DEFAULT_STUDY_PLAN_OPTIONS } = await import("../studyPlan/options");
-const { startExplainSession, explainTurn, ExplainSessionError, GAP_DECK_TITLE } = await import("./flow");
+const { startExplainSession, explainTurn, ExplainSessionError, GAP_DECK_TITLE, deleteSession, gapCardIndices } = await import("./flow");
+const { getExplainSession } = await import("./store");
 const { normalizeExplainResult } = await import("./validate");
 const { MAX_NOVICE_QUESTIONS } = await import("./types");
 
@@ -147,5 +148,61 @@ describe("normalizeExplainResult", () => {
     expect(result.cards).toHaveLength(10);
     expect(result.cards[0].concept).toBe("A");
     expect(() => normalizeExplainResult({ coverage: [] })).toThrow();
+  });
+});
+
+describe("deleting a session", () => {
+  const cardFor = (n: number) => ({ front: `Q${n}`, back: `A${n}`, concept: `C${n}` });
+
+  async function finished(courseId: number, topic: string, cards: ReturnType<typeof cardFor>[]) {
+    const session = await startExplainSession({ courseId, kind: "blurt", topic });
+    generateStructured.mockResolvedValue({ ...evaluation, cards });
+    return explainTurn(session.id, { text: "everything I remember" });
+  }
+
+  it("finds a session's cards in the shared deck by text, latest copy first, skipping edited ones", () => {
+    const deck = [cardFor(1), cardFor(2), cardFor(1), { front: "Q3 edited", back: "A3" }];
+    expect(gapCardIndices(deck, [cardFor(1)])).toEqual([2]);
+    expect(gapCardIndices(deck, [cardFor(1), cardFor(1), cardFor(3)])).toEqual([0, 2]);
+    expect(gapCardIndices(deck, [])).toEqual([]);
+  });
+
+  it("deletes just the session by default and keeps the deck as it was", async () => {
+    const course = await createCourse("Sample Course");
+    const done = await finished(course.id, "Induction", [cardFor(1), cardFor(2)]);
+    expect(await deleteSession(done.id, false)).toEqual({ removedCards: 0, totalCards: 2 });
+    expect(await getExplainSession(done.id)).toBeNull();
+    expect(JSON.parse((await getGeneratedItem(done.practice_item_id!))!.content_json).cards).toHaveLength(2);
+    expect(await deleteSession(done.id, false)).toBeNull();
+  });
+
+  it("can take the session's cards out of the deck, leaving the other sessions' cards", async () => {
+    const course = await createCourse("Sample Course");
+    const first = await finished(course.id, "Induction", [cardFor(1), cardFor(2)]);
+    const second = await finished(course.id, "Recursion", [cardFor(3)]);
+    expect(second.practice_item_id).toBe(first.practice_item_id);
+    expect(await deleteSession(first.id, true)).toEqual({ removedCards: 2, totalCards: 2 });
+    const deck = await getGeneratedItem(first.practice_item_id!);
+    expect(JSON.parse(deck!.content_json).cards).toEqual([cardFor(3)]);
+    expect(await getExplainSession(second.id)).not.toBeNull();
+  });
+
+  it("drops the deck when its last cards go, and the next session starts a fresh one", async () => {
+    const course = await createCourse("Sample Course");
+    const only = await finished(course.id, "Induction", [cardFor(1)]);
+    await deleteSession(only.id, true);
+    expect(await getGeneratedItem(only.practice_item_id!)).toBeUndefined();
+    const next = await finished(course.id, "Recursion", [cardFor(2)]);
+    expect(next.practice_item_id).not.toBeNull();
+    expect(JSON.parse((await getGeneratedItem(next.practice_item_id!))!.content_json).cards).toEqual([cardFor(2)]);
+  });
+
+  it("keeps adding to the same deck after the sessions that made it are deleted", async () => {
+    const course = await createCourse("Sample Course");
+    const first = await finished(course.id, "Induction", [cardFor(1)]);
+    await deleteSession(first.id, false);
+    const next = await finished(course.id, "Recursion", [cardFor(2)]);
+    expect(next.practice_item_id).toBe(first.practice_item_id);
+    expect(JSON.parse((await getGeneratedItem(first.practice_item_id!))!.content_json).cards).toHaveLength(2);
   });
 });

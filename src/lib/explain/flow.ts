@@ -1,10 +1,27 @@
 import { generateStructured, generateText } from "../aiClient";
-import { createGeneratedItem, getAppSettings, getCourse, getGeneratedItem, updateGeneratedItemContent } from "../models";
+import {
+  createGeneratedItem,
+  deleteGeneratedItem,
+  getAppSettings,
+  getCourse,
+  getGeneratedItem,
+  reconcileFlashcardReviewsAfterRemoval,
+  updateGeneratedItemContent,
+} from "../models";
+import { ensureFsrsMigrated } from "../review/legacyMigration";
+import { reconcileReviewItemsAfterRemoval } from "../review/store";
 import { languageName } from "../languages";
 import { conversationText, explainEvaluationSystemPrompt, noviceSystemPrompt, type ExplainReference } from "../prompts/explain";
 import { getChapter, getStudyPlan } from "../studyPlan/store";
 import type { FlashcardsContent } from "../types";
-import { createExplainSession, finishExplainSession, getExplainSession, latestGapDeckId, saveMessages } from "./store";
+import {
+  createExplainSession,
+  deleteExplainSession,
+  finishExplainSession,
+  getExplainSession,
+  latestGapDeckId,
+  saveMessages,
+} from "./store";
 import { MAX_NOVICE_QUESTIONS, type ExplainKind, type ExplainSession, type GapCard } from "./types";
 import { normalizeExplainResult } from "./validate";
 
@@ -50,7 +67,7 @@ export async function startExplainSession(input: {
 // Adds the gap cards to the course's gap deck (creating it the first time).
 export async function addGapCards(courseId: number, cards: GapCard[], chapterId: number | null): Promise<number | null> {
   if (cards.length === 0) return null;
-  const existingId = await latestGapDeckId(courseId);
+  const existingId = await latestGapDeckId(courseId, GAP_DECK_TITLE);
   const existing = existingId !== null ? await getGeneratedItem(existingId) : undefined;
   const newCards = cards.map((c) => ({ front: c.front, back: c.back, concept: c.concept }));
   if (existing && existing.mode === "flashcards") {
@@ -74,6 +91,62 @@ export async function addGapCards(courseId: number, cards: GapCard[], chapterId:
     studyPlanChapterId: chapterId,
   });
   return item.id;
+}
+
+// Where a session's gap cards sit in the deck, matched by their text (the
+// deck is shared by every session of the course and its cards carry no
+// owner). A card edited since no longer matches and is left alone; of
+// identical copies the latest goes, which has the least review history.
+export function gapCardIndices(deck: { front: string; back: string }[], cards: GapCard[]): number[] {
+  const taken = new Set<number>();
+  for (const card of cards) {
+    for (let i = deck.length - 1; i >= 0; i--) {
+      if (!taken.has(i) && deck[i].front === card.front && deck[i].back === card.back) {
+        taken.add(i);
+        break;
+      }
+    }
+  }
+  return [...taken].sort((a, b) => a - b);
+}
+
+// Deletes a session; with `deleteCards`, also takes its gap cards out of the
+// course's gap deck (reviews of the cards after them move down with them, as
+// when editing a deck) and drops the deck itself if that empties it.
+// null when there's no such session.
+export async function deleteSession(
+  id: number,
+  deleteCards: boolean
+): Promise<{ removedCards: number; totalCards: number } | null> {
+  const session = await getExplainSession(id);
+  if (!session) return null;
+  const cards = session.result?.cards ?? [];
+  let removedCards = 0;
+  if (deleteCards && cards.length > 0 && session.practice_item_id !== null) {
+    const deck = await getGeneratedItem(session.practice_item_id);
+    if (deck && deck.mode === "flashcards") {
+      const content = JSON.parse(deck.content_json) as FlashcardsContent;
+      const removed = gapCardIndices(content.cards, cards);
+      if (removed.length > 0) {
+        removedCards = removed.length;
+        const kept = content.cards.filter((_, i) => !removed.includes(i));
+        if (kept.length === 0) {
+          await deleteGeneratedItem(deck.id);
+        } else {
+          await updateGeneratedItemContent({
+            id: deck.id,
+            contentJson: { ...content, cards: kept },
+            sourceDocumentIds: JSON.parse(deck.source_document_ids),
+          });
+          await ensureFsrsMigrated();
+          await reconcileReviewItemsAfterRemoval(deck.id, "card", removed);
+          await reconcileFlashcardReviewsAfterRemoval(deck.id, removed);
+        }
+      }
+    }
+  }
+  await deleteExplainSession(id);
+  return { removedCards, totalCards: cards.length };
 }
 
 async function evaluate(session: ExplainSession, messages: ExplainSession["messages"]): Promise<ExplainSession> {

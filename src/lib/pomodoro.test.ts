@@ -3,6 +3,7 @@ import {
   DEFAULT_POMODORO_SETTINGS,
   advancePhase,
   applySettings,
+  endedFocusMs,
   formatRemaining,
   getProgress,
   getRemainingMs,
@@ -10,6 +11,7 @@ import {
   nextPhase,
   pauseTimer,
   resetTimer,
+  runningFocusMs,
   sanitizeSettings,
   sanitizeState,
   startTimer,
@@ -212,5 +214,54 @@ describe("withTimerTitle", () => {
 
   it("strips the prefix when cleared", () => {
     expect(withTimerTitle("1:30:00 · Long break — Notes", null, "longBreak")).toBe("Notes");
+  });
+});
+
+describe("focus time", () => {
+  const idle = initialPomodoroState(S);
+  const t0 = 1_000_000_000;
+
+  it("counts the running stretch so far, and nothing when idle, paused or on a break", () => {
+    const running = startTimer(idle, t0);
+    expect(runningFocusMs(running, t0 + 7 * MIN)).toBe(7 * MIN);
+    expect(runningFocusMs(idle, t0)).toBe(0);
+    expect(runningFocusMs(pauseTimer(running, t0 + 7 * MIN), t0 + 9 * MIN)).toBe(0);
+    const onBreak = advancePhase(running, S, t0 + 25 * MIN, true);
+    expect(runningFocusMs(onBreak, t0 + 27 * MIN)).toBe(0);
+  });
+
+  it("never counts past the end of the phase, even if the tab slept", () => {
+    expect(runningFocusMs(startTimer(idle, t0), t0 + 3 * 60 * MIN)).toBe(25 * MIN);
+  });
+
+  it("counts a resumed stretch from the resume, not from the original start", () => {
+    const paused = pauseTimer(startTimer(idle, t0), t0 + 10 * MIN);
+    const resumed = startTimer(paused, t0 + 30 * MIN);
+    expect(runningFocusMs(resumed, t0 + 35 * MIN)).toBe(5 * MIN);
+  });
+
+  it("leaves out anything before `since`", () => {
+    const running = startTimer(idle, t0);
+    expect(runningFocusMs(running, t0 + 10 * MIN, t0 + 4 * MIN)).toBe(6 * MIN);
+    expect(runningFocusMs(running, t0 + 10 * MIN, t0 + 20 * MIN)).toBe(0);
+  });
+
+  it("banks a stretch once when it ends — paused, reset, skipped or run out", () => {
+    const running = startTimer(idle, t0);
+    const at = t0 + 10 * MIN;
+    expect(endedFocusMs(running, pauseTimer(running, at), at)).toBe(10 * MIN);
+    expect(endedFocusMs(running, resetTimer(running, S), at)).toBe(10 * MIN);
+    expect(endedFocusMs(running, advancePhase(running, S, at, false), at)).toBe(10 * MIN);
+    const finished = tickTimer(running, S, t0 + 26 * MIN);
+    expect(endedFocusMs(running, finished.state, t0 + 26 * MIN)).toBe(25 * MIN);
+  });
+
+  it("banks nothing while the same stretch carries on, or when a break ends", () => {
+    const running = startTimer(idle, t0);
+    const at = t0 + 10 * MIN;
+    expect(endedFocusMs(running, running, at)).toBe(0);
+    expect(endedFocusMs(running, applySettings(running, { ...S, sessionsBeforeLongBreak: 2 }), at)).toBe(0);
+    const onBreak = advancePhase(running, S, t0 + 25 * MIN, true);
+    expect(endedFocusMs(onBreak, advancePhase(onBreak, S, t0 + 30 * MIN, true), t0 + 30 * MIN)).toBe(0);
   });
 });

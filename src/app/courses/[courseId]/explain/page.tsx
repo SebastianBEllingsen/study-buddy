@@ -10,6 +10,7 @@ import { LoaderCircle, MessageCircleQuestion, NotebookPen } from "lucide-react";
 import type { StudyPlan } from "@/lib/studyPlan/types";
 import type { ExplainKind, ExplainSession } from "@/lib/explain/types";
 import { useAiEnabled } from "@/lib/useAiEnabled";
+import { DeleteExplainSession } from "@/components/explain/DeleteExplainSession";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -135,8 +136,8 @@ function ExplainStart() {
             {history.sessions.map((s) => {
               const missing = s.result?.coverage.filter((c) => c.status !== "covered").length ?? null;
               return (
-                <li key={s.id}>
-                  <Link href={`/courses/${courseId}/explain/${s.id}`} className="flex items-center justify-between gap-3 py-2 text-sm hover:underline">
+                <li key={s.id} className="flex items-center gap-1">
+                  <Link href={`/courses/${courseId}/explain/${s.id}`} className="flex min-w-0 flex-1 items-center justify-between gap-3 py-2 text-sm hover:underline">
                     <span className="truncate">
                       {KIND_TEXT[s.kind].title} · {s.topic}
                     </span>
@@ -144,6 +145,7 @@ function ExplainStart() {
                       {s.status === "open" ? "Not finished" : `${missing} gap${missing === 1 ? "" : "s"}`} · {s.created_at.slice(0, 10)}
                     </span>
                   </Link>
+                  <DeleteExplainSession session={s} />
                 </li>
               );
             })}

@@ -3,12 +3,14 @@
 import { Explain } from "@/components/Explain";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlarmClock, ArrowRight, Check, ExternalLink, SkipForward } from "lucide-react";
+import { AlarmClock, ArrowRight, Check, CheckCheck, ExternalLink, SkipForward } from "lucide-react";
 import { cn } from "cn";
 import type { TodayStep } from "@/lib/today/planDay";
 import {
   currentStep,
   finishedPlanSessions,
+  markDoneForToday,
+  sessionFocusMs,
   sessionProgress,
   setStepStatus,
   snoozeStep,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/today/session";
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Button } from "@/components/ui/button";
+import { usePomodoro } from "@/components/pomodoro/PomodoroProvider";
 import { saveTodaySession, updateTodaySession } from "./todayStore";
 
 async function post(url: string, body: unknown): Promise<boolean> {
@@ -82,9 +85,26 @@ export async function completeTodayStep(step: SessionStep): Promise<boolean> {
   return true;
 }
 
+// "Done for today": today's share of a plan resource (say, a few videos of a
+// long playlist) is done, but the resource stays open in the plan and comes
+// back tomorrow.
+export function doneForToday(step: SessionStep) {
+  updateTodaySession((s) => markDoneForToday(s, step.id));
+}
+
+// Focus time of the running session, live while the timer runs.
+export function useSessionFocusMs(session: TodaySession): number {
+  const { state, now } = usePomodoro();
+  return sessionFocusMs(session, state, now);
+}
+
+export function formatFocus(ms: number): string {
+  return `${Math.floor(ms / 60_000)} min`;
+}
+
 // Finishing the day marks the plan sessions whose work got done.
-export async function finishTodaySession(session: TodaySession) {
-  for (const s of finishedPlanSessions(session)) {
+export async function finishTodaySession(session: TodaySession, focusMs: number) {
+  for (const s of finishedPlanSessions(session, focusMs)) {
     await post("/api/today/complete", { type: "session", ...s });
   }
   saveTodaySession(null);
@@ -93,6 +113,9 @@ export async function finishTodaySession(session: TodaySession) {
 export function StepActions({ step, compact }: { step: SessionStep; compact?: boolean }) {
   const open = useOpenStep();
   const size = compact ? "icon-xs" : "icon-sm";
+  // A plan resource can be bigger than today's slot (a 16-video playlist), so
+  // it gets two kinds of done; everything else has just one.
+  const isResource = step.completion?.type === "resource";
   return (
     <div className="flex shrink-0 items-center gap-0.5">
       <Explain id="today.go">
@@ -101,9 +124,21 @@ export function StepActions({ step, compact }: { step: SessionStep; compact?: bo
           Go
         </Button>
       </Explain>
-      <Explain id="today.done">
-        <Button size={size} variant="ghost" aria-label="Done" onClick={() => void completeTodayStep(step)}>
-          <Check />
+      {isResource && (
+        <Explain id="today.partial">
+          <Button size={size} variant="ghost" aria-label="Done for today" onClick={() => doneForToday(step)}>
+            <Check />
+          </Button>
+        </Explain>
+      )}
+      <Explain id={isResource ? "today.finished" : "today.done"}>
+        <Button
+          size={size}
+          variant="ghost"
+          aria-label={isResource ? "Finished it all" : "Done"}
+          onClick={() => void completeTodayStep(step)}
+        >
+          {isResource ? <CheckCheck /> : <Check />}
         </Button>
       </Explain>
       <Explain id="today.later">
@@ -125,7 +160,13 @@ export function StepActions({ step, compact }: { step: SessionStep; compact?: bo
   );
 }
 
-export function StepLine({ step, current }: { step: TodayStep & { status?: SessionStep["status"] }; current?: boolean }) {
+export function StepLine({
+  step,
+  current,
+}: {
+  step: TodayStep & { status?: SessionStep["status"]; partial?: boolean };
+  current?: boolean;
+}) {
   const status = step.status ?? "pending";
   return (
     <div className={cn("min-w-0 flex-1", status !== "pending" && "text-muted-foreground")}>
@@ -137,6 +178,7 @@ export function StepLine({ step, current }: { step: TodayStep & { status?: Sessi
         {step.minutes} min
         {step.courseName && ` · ${step.courseName}`}
         {step.detail && ` · ${step.detail}`}
+        {step.partial && " · done for today, still open in your plan"}
       </p>
       {step.why && <p className="truncate text-xs text-muted-foreground/80 italic">Why now: {step.why}</p>}
     </div>
@@ -147,10 +189,11 @@ export function StepLine({ step, current }: { step: TodayStep & { status?: Sessi
 export function SessionStepList({ session }: { session: TodaySession }) {
   const current = currentStep(session);
   const progress = sessionProgress(session);
+  const focusMs = useSessionFocusMs(session);
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        {progress.done} of {progress.total} steps done · {progress.minutesDone} of {session.minutes} min
+        {progress.done} of {progress.total} steps done · {formatFocus(focusMs)} focused of {session.minutes} min
       </p>
       <ul className="divide-y divide-border/60">
         {session.steps.map((step) => (
@@ -162,7 +205,7 @@ export function SessionStepList({ session }: { session: TodaySession }) {
       </ul>
       <div className="flex justify-end">
         <Explain id="today.finish">
-          <Button size="sm" variant={current ? "ghost" : "default"} onClick={() => void finishTodaySession(session)}>
+          <Button size="sm" variant={current ? "ghost" : "default"} onClick={() => void finishTodaySession(session, focusMs)}>
             {current ? "End session" : "Finish"}
           </Button>
         </Explain>

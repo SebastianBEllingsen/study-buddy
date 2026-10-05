@@ -1,3 +1,4 @@
+import { runningFocusMs, type PomodoroState } from "../pomodoro";
 import type { TodayStep } from "./planDay";
 
 // A running Today session, kept in the browser (per device, like the
@@ -8,13 +9,19 @@ import type { TodayStep } from "./planDay";
 
 export type StepStatus = "pending" | "done" | "skipped";
 // doneAt: when it was ticked off (ms), for measuring how long the work took.
-export type SessionStep = TodayStep & { status: StepStatus; doneAt?: number };
+// partial: "done for today" — today's share of a plan resource is done but
+// the resource itself (a whole playlist, a book) is still open in the plan.
+export type SessionStep = TodayStep & { status: StepStatus; doneAt?: number; partial?: boolean };
 
 export interface TodaySession {
   date: string;
   courseId: number | null;
   minutes: number;
   startedAt: number;
+  // Focus time (ms) the Pomodoro timer has run since the session started,
+  // for stretches that have ended. A stretch still running is added on top
+  // by sessionFocusMs.
+  focusMs: number;
   steps: SessionStep[];
   // Chapters the learner picked; empty when the autopilot chose.
   chapterIds: number[];
@@ -34,6 +41,7 @@ export function startSession(input: {
     chapterIds: input.chapterIds ?? [],
     minutes: input.minutes,
     startedAt: input.now,
+    focusMs: 0,
     steps: input.steps.map((s) => ({ ...s, status: "pending" })),
   };
 }
@@ -86,9 +94,25 @@ export function setStepStatus(session: TodaySession, id: string, status: StepSta
       const next: SessionStep = { ...s, status };
       if (status === "done") next.doneAt = now;
       else delete next.doneAt;
+      delete next.partial;
       return next;
     }),
   };
+}
+
+// "Done for today": counts as today's work but leaves the plan resource
+// open, so it comes back tomorrow. Only the session knows — nothing is
+// recorded in the study plan.
+export function markDoneForToday(session: TodaySession, id: string, now = Date.now()): TodaySession {
+  return {
+    ...session,
+    steps: session.steps.map((s) => (s.id === id ? { ...s, status: "done", doneAt: now, partial: true } : s)),
+  };
+}
+
+// Focus time of the session: finished stretches plus the one running now.
+export function sessionFocusMs(session: TodaySession, pomodoro: PomodoroState, now: number): number {
+  return session.focusMs + runningFocusMs(pomodoro, now, session.startedAt);
 }
 
 // Later today: the step moves behind everything else still pending.
@@ -96,6 +120,16 @@ export function snoozeStep(session: TodaySession, id: string): TodaySession {
   const step = session.steps.find((s) => s.id === id);
   if (!step || step.status !== "pending") return session;
   return { ...session, steps: [...session.steps.filter((s) => s.id !== id), step] };
+}
+
+// Chapter quiz ("Test yourself") steps that are new since `knownIds` and
+// still waiting: the chapter's study steps are finished and its check is
+// next. A session starts with the plan's steps, so only ones brought up
+// later — by finishing the chapter's last resource or subtopic — are new.
+export function newChapterQuizSteps(session: TodaySession, knownIds: ReadonlySet<string>): SessionStep[] {
+  return session.steps.filter(
+    (s) => s.status === "pending" && s.kind === "chapter" && s.id.endsWith(":practice") && !knownIds.has(s.id)
+  );
 }
 
 export function currentStep(session: TodaySession): SessionStep | null {
@@ -107,33 +141,39 @@ export function sessionProgress(session: TodaySession) {
   return {
     done: done.length,
     total: session.steps.filter((s) => s.status !== "skipped").length,
-    minutesDone: done.reduce((n, s) => n + s.minutes, 0),
   };
 }
 
 // Plan sessions whose chapter work got done today — marked done on Finish.
 // `minutes` is how long the work really took: the time from the previous
 // step being ticked off (or the session's start) to each of its steps being
-// done, when every one of its steps has a timestamp.
-export function finishedPlanSessions(session: TodaySession): { planId: number; sessionId: number; minutes?: number }[] {
+// done, when every one of its steps has a timestamp. Given the session's
+// focus time, those durations are scaled down to the share that was really
+// focus (breaks, pauses and idle time excluded) — never scaled up.
+export function finishedPlanSessions(session: TodaySession, focusMs?: number): { planId: number; sessionId: number; minutes?: number }[] {
   const seen = new Map<number, { planId: number; sessionId: number; minutes?: number }>();
   const timed = new Map<number, number | null>();
   let boundary = session.startedAt;
+  let wallMs = 0;
   const done = session.steps
     .filter((s) => s.status === "done")
     .sort((a, b) => (a.doneAt ?? Infinity) - (b.doneAt ?? Infinity));
   for (const step of done) {
     const elapsed = step.doneAt === undefined ? null : Math.max(0, step.doneAt - boundary);
     if (step.doneAt !== undefined) boundary = step.doneAt;
+    if (elapsed !== null) wallMs += elapsed;
     if (!step.sessionId) continue;
     const id = step.sessionId.sessionId;
     seen.set(id, { planId: step.sessionId.planId, sessionId: id });
     const so_far = timed.get(id);
     timed.set(id, elapsed === null || so_far === null ? null : (so_far ?? 0) + elapsed);
   }
+  const scale = focusMs !== undefined && wallMs > 0 ? Math.min(1, Math.max(0, focusMs) / wallMs) : 1;
   for (const [id, entry] of seen) {
     const ms = timed.get(id);
-    if (ms !== null && ms !== undefined && ms >= 60_000) entry.minutes = Math.round(ms / 60_000);
+    if (ms === null || ms === undefined) continue;
+    const focused = ms * scale;
+    if (focused >= 60_000) entry.minutes = Math.round(focused / 60_000);
   }
   return [...seen.values()];
 }
@@ -155,6 +195,7 @@ export function parseSession(raw: unknown): TodaySession | null {
     courseId: typeof s.courseId === "number" ? s.courseId : null,
     minutes: s.minutes,
     startedAt: s.startedAt,
+    focusMs: typeof s.focusMs === "number" && Number.isFinite(s.focusMs) && s.focusMs > 0 ? s.focusMs : 0,
     steps: s.steps,
     chapterIds: Array.isArray(s.chapterIds) ? s.chapterIds.filter((n) => Number.isInteger(n)) : [],
   };

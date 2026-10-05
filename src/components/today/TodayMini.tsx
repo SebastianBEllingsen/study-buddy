@@ -1,8 +1,8 @@
 "use client";
 
-import { currentStep, sessionProgress } from "@/lib/today/session";
+import { currentStep, sessionProgress, type TodaySession } from "@/lib/today/session";
 import { useTodaySession, useTodaySync } from "./todayStore";
-import { StepActions, StepLine, finishTodaySession } from "./TodaySteps";
+import { StepActions, StepLine, finishTodaySession, formatFocus, useSessionFocusMs } from "./TodaySteps";
 import { Button } from "@/components/ui/button";
 
 // The running Today session's current step, under the Pomodoro timer —
@@ -11,12 +11,17 @@ export function TodayMini() {
   const session = useTodaySession();
   useTodaySync(session);
   if (!session) return null;
+  return <TodayMiniBody session={session} />;
+}
+
+function TodayMiniBody({ session }: { session: TodaySession }) {
+  const focusMs = useSessionFocusMs(session);
   const step = currentStep(session);
   const progress = sessionProgress(session);
   return (
     <div className="w-full space-y-2 border-t pt-3">
       <p className="text-xs text-muted-foreground">
-        Today · step {Math.min(progress.done + 1, progress.total)} of {progress.total}
+        Today · step {Math.min(progress.done + 1, progress.total)} of {progress.total} · {formatFocus(focusMs)} focused
       </p>
       {step ? (
         <div className="space-y-2">
@@ -26,7 +31,7 @@ export function TodayMini() {
       ) : (
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm">All steps done.</p>
-          <Button size="xs" onClick={() => void finishTodaySession(session)}>
+          <Button size="xs" onClick={() => void finishTodaySession(session, focusMs)}>
             Finish
           </Button>
         </div>
