@@ -189,9 +189,9 @@ export function ChapterPractice({
       )}
       {aiEnabled && chapter.items.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          {chapter.linked_document_ids.length > 0
-            ? "Made from this chapter's course documents."
-            : "No course documents are linked to this chapter, so it's made from the chapter's topics."}
+          {chapter.linked_document_ids.length + chapter.linked_note_ids.length > 0
+            ? "Made from this chapter's course documents and notes."
+            : "No course documents or notes are linked to this chapter, so it's made from the chapter's topics."}
         </p>
       )}
       {aiEnabled && (

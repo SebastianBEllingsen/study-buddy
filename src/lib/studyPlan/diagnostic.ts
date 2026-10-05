@@ -1,4 +1,5 @@
 import { generateForCourse } from "../generate";
+import { chapterGenerationScope } from "./planMaterial";
 import { mapWithConcurrency } from "../concurrency";
 import { getStudyPlan } from "./store";
 
@@ -18,7 +19,7 @@ export async function makeDiagnosticQuizzes(planId: number): Promise<void> {
   await mapWithConcurrency(chapters, DIAGNOSTIC_CONCURRENCY, async (chapter) => {
     try {
       await generateForCourse(plan.course_id, "quiz", {
-        documentIds: chapter.linked_document_ids.length ? chapter.linked_document_ids : null,
+        ...chapterGenerationScope(chapter),
         destinationFolderId: null,
         studyPlanChapter: {
           id: chapter.id,

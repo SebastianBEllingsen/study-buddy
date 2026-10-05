@@ -246,8 +246,12 @@ export default function ChatContent({
         body: JSON.stringify({ confirm }),
       });
       if (!res.ok) throw new Error("Couldn't resolve that action");
-      const updated: ChatMessage = await res.json();
-      setMessages((prev) => prev.map((m) => (m.id === messageId ? updated : m)));
+      const { followUp, ...updated }: ChatMessage & { followUp: ChatMessage | null } = await res.json();
+      setMessages((prev) => {
+        const next = prev.map((m) => (m.id === messageId ? updated : m));
+        // The answer to the request that prompted a granted course read.
+        return followUp ? [...next, followUp] : next;
+      });
     } catch {
       toast.error("Couldn't update that action");
       setMessages((prev) =>

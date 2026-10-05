@@ -165,6 +165,24 @@ describe("planDay across courses", () => {
     expect(ranked.map((c) => c.chapterId)).toEqual([3, 5, 4, 2, 1]);
   });
 
+  it("gives the course studied least recently (or never) its turn before the weakest one", () => {
+    const ranked = rankChapters([
+      chapter(1, { lastStudiedAt: "2026-03-01 10:00:00", mastery: 0.1 }),
+      chapter(2, { lastStudiedAt: "2026-02-20 10:00:00", mastery: 0.9 }),
+      chapter(3, { lastStudiedAt: null, mastery: 0.9 }),
+    ]);
+    expect(ranked.map((c) => c.chapterId)).toEqual([3, 2, 1]);
+  });
+
+  it("still puts a deadline and a scheduled session ahead of recency", () => {
+    const ranked = rankChapters([
+      chapter(1, { lastStudiedAt: null }),
+      chapter(2, { lastStudiedAt: "2026-03-01 10:00:00", session: { id: 1, minutes: 30 } }),
+      chapter(3, { lastStudiedAt: "2026-03-01 10:00:00", deadline: "2026-04-01" }),
+    ]);
+    expect(ranked.map((c) => c.chapterId)).toEqual([3, 2, 1]);
+  });
+
   it("shares the time between chapters instead of the first taking it all", () => {
     const steps = planDay({
       ...none,

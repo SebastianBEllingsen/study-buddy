@@ -31,6 +31,7 @@ beforeEach(() => {
     summary: "S",
     subtopics: [{ text: "A", done: false }],
     linked_document_ids: [8],
+    linked_note_ids: [],
   });
   generateForCourse.mockResolvedValue({ id: 99 });
 });
@@ -41,6 +42,7 @@ describe("POST /api/study-plans/[planId]/chapters/[chapterId]/generate/[mode]", 
     expect(res.status).toBe(201);
     expect(generateForCourse).toHaveBeenCalledWith(3, "quiz", {
       documentIds: [8],
+      noteIds: null,
       quizSettings: { singleChoice: true, multipleChoice: false, shortAnswer: false },
       destinationFolderId: null,
       studyPlanChapter: { id: 5, title: "Foundations", summary: "S", subtopics: ["A"] },
@@ -48,14 +50,29 @@ describe("POST /api/study-plans/[planId]/chapters/[chapterId]/generate/[mode]", 
   });
 
   it("passes no documents for a chapter without any", async () => {
-    getChapter.mockResolvedValue({ id: 5, plan_id: 1, title: "T", summary: "", subtopics: [], linked_document_ids: [] });
+    getChapter.mockResolvedValue({ id: 5, plan_id: 1, title: "T", summary: "", subtopics: [], linked_document_ids: [], linked_note_ids: [] });
     await POST(post(), params("notes"));
     expect(generateForCourse.mock.calls[0][2].documentIds).toBeNull();
+    expect(generateForCourse.mock.calls[0][2].noteIds).toBeNull();
+  });
+
+  it("generates from a chapter's linked notes alone", async () => {
+    getChapter.mockResolvedValue({
+      id: 5,
+      plan_id: 1,
+      title: "T",
+      summary: "",
+      subtopics: [],
+      linked_document_ids: [],
+      linked_note_ids: [12],
+    });
+    await POST(post(), params("notes"));
+    expect(generateForCourse.mock.calls[0][2]).toMatchObject({ documentIds: null, noteIds: [12] });
   });
 
   it("rejects an unknown mode and a chapter from another plan", async () => {
     expect((await POST(post(), params("essay"))).status).toBe(400);
-    getChapter.mockResolvedValue({ id: 5, plan_id: 2, subtopics: [], linked_document_ids: [] });
+    getChapter.mockResolvedValue({ id: 5, plan_id: 2, subtopics: [], linked_document_ids: [], linked_note_ids: [] });
     expect((await POST(post(), params())).status).toBe(404);
     expect(generateForCourse).not.toHaveBeenCalled();
   });

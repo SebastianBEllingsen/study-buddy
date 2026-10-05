@@ -1,24 +1,32 @@
 import { generateStructured } from "../aiClient";
-import { getAppSettings, getCourse, listDocumentsForCourse, listFoldersForCourse, type DocumentRow } from "../models";
+import {
+  getAppSettings,
+  getCourse,
+  listDocumentsForCourse,
+  listFoldersForCourse,
+  listNotesForCourse,
+  type DocumentRow,
+  type Note,
+} from "../models";
 import { normalizeStudyPlanSupplement } from "../aiResponseValidation";
 import { studyPlanSupplementSystemPrompt, studyPlanSupplementUserPrompt } from "../prompts/studyPlan";
 import { subtreeFolderIds } from "../folderTree";
 import { languageName } from "../languages";
 import { mapWithConcurrency } from "../concurrency";
-import { buildMaterialDigest } from "./materialDigest";
-import { matchDocumentIds } from "./generatePlan";
+import { buildPlanMaterialDigests, noteFingerprint } from "./planMaterial";
+import { matchDocumentIds, matchNoteIds } from "./generatePlan";
 import { findChapterResources, StudyPlanNotFoundError } from "./resources";
 import {
   createChapter,
   extendChapter,
   getStudyPlan,
   replaceAiResources,
-  setPlanSourceDocumentIds,
+  setPlanSourceMaterial,
 } from "./store";
 import { rescheduleQuietly } from "./scheduleService";
 import type { StudyPlan } from "./types";
 
-// Keeping a plan current as a course goes on: documents added after the
+// Keeping a plan current as a course goes on: documents and notes added after the
 // plan was built (new lectures, extra notes) are folded in without
 // rebuilding — existing chapters gain subtopics and linked documents, and
 // genuinely new topics become new chapters at the end of the roadmap, with
@@ -32,21 +40,45 @@ export class NoNewMaterialError extends Error {
   }
 }
 
-// Extracted documents in the plan's material scope that it hasn't seen
-// yet. A folder-scoped plan watches that folder and its subfolders; any
-// other plan (all material, or a hand-picked set) watches the whole course,
-// since that's where a new lecture would land.
-export async function findNewPlanDocuments(plan: StudyPlan): Promise<DocumentRow[]> {
-  const seen = new Set(plan.source_document_ids);
-  if (plan.syllabus_document_id !== null) seen.add(plan.syllabus_document_id);
-  let inScope: (doc: DocumentRow) => boolean = () => true;
+// Unseen, or edited since the plan saw it. A "" fingerprint is a note the
+// plan saw before fingerprints were kept: seen, not comparable.
+function isNewOrEdited(note: Note, seen: Record<number, string>): boolean {
+  const seenFingerprint = seen[note.id];
+  if (seenFingerprint === undefined) return true;
+  return seenFingerprint !== "" && seenFingerprint !== noteFingerprint(note);
+}
+
+export interface NewPlanMaterial {
+  documents: DocumentRow[];
+  notes: Note[];
+}
+
+// Extracted documents, and notes marked for generation, in the plan's
+// material scope that it hasn't seen yet. A folder-scoped plan watches that
+// folder and its subfolders; any other plan (all material, or a
+// hand-picked set) watches the whole course, since that's where a new
+// lecture would land. Plans built before notes were tracked have seen none,
+// so their existing notes show up here once; a note edited after the plan
+// saw it shows up again.
+export async function findNewPlanMaterial(plan: StudyPlan): Promise<NewPlanMaterial> {
+  const seenDocs = new Set(plan.source_document_ids);
+  if (plan.syllabus_document_id !== null) seenDocs.add(plan.syllabus_document_id);
+  const seenNotes = plan.source_notes;
+  let inScope: (item: { folder_id: number | null }) => boolean = () => true;
   if (plan.source_folder_id !== null) {
     const folderIds = new Set(subtreeFolderIds(await listFoldersForCourse(plan.course_id), plan.source_folder_id));
-    inScope = (doc) => doc.folder_id !== null && folderIds.has(doc.folder_id);
+    inScope = (item) => item.folder_id !== null && folderIds.has(item.folder_id);
   }
-  return (await listDocumentsForCourse(plan.course_id)).filter(
-    (d) => d.status === "extracted" && !!d.extracted_text && !seen.has(d.id) && inScope(d)
-  );
+  const [documents, notes] = await Promise.all([
+    listDocumentsForCourse(plan.course_id),
+    listNotesForCourse(plan.course_id),
+  ]);
+  return {
+    documents: documents.filter(
+      (d) => d.status === "extracted" && !!d.extracted_text && !seenDocs.has(d.id) && inScope(d)
+    ),
+    notes: notes.filter((n) => !!n.generation_source && n.markdown.trim() !== "" && isNewOrEdited(n, seenNotes) && inScope(n)),
+  };
 }
 
 export interface SupplementResult {
@@ -58,8 +90,8 @@ export interface SupplementResult {
 export async function supplementStudyPlan(planId: number): Promise<SupplementResult> {
   const plan = await getStudyPlan(planId);
   if (!plan) throw new StudyPlanNotFoundError();
-  const newDocs = await findNewPlanDocuments(plan);
-  if (newDocs.length === 0) throw new NoNewMaterialError();
+  const { documents: newDocs, notes: newNotes } = await findNewPlanMaterial(plan);
+  if (newDocs.length === 0 && newNotes.length === 0) throw new NoNewMaterialError();
 
   const { aiEfficiencyMode: efficient, preferredLanguage } = await getAppSettings();
   const language = languageName(preferredLanguage);
@@ -67,12 +99,15 @@ export async function supplementStudyPlan(planId: number): Promise<SupplementRes
   const courseName = course?.name ?? plan.title;
   const chapters = [...plan.chapters].sort((a, b) => a.position - b.position);
 
+  const digests = buildPlanMaterialDigests(newDocs, newNotes);
+
   const supplement = normalizeStudyPlanSupplement(
     await generateStructured<unknown>({
-      system: studyPlanSupplementSystemPrompt(courseName, language),
+      system: studyPlanSupplementSystemPrompt(courseName, language, digests.assessments !== ""),
       user: studyPlanSupplementUserPrompt(
         chapters.map((c) => ({ title: c.title, subtopics: c.subtopics.map((s) => s.text) })),
-        buildMaterialDigest(newDocs)
+        digests.material,
+        digests.assessments
       ),
       maxTokens: efficient ? 4000 : 8000,
       effort: efficient ? "low" : "medium",
@@ -85,8 +120,9 @@ export async function supplementStudyPlan(planId: number): Promise<SupplementRes
     const chapter = chapters[update.chapter - 1];
     if (!chapter) continue;
     const documentIds = matchDocumentIds(update.matchedDocuments, newDocs);
-    if (update.newSubtopics.length === 0 && documentIds.length === 0) continue;
-    await extendChapter(chapter.id, { subtopics: update.newSubtopics, documentIds });
+    const noteIds = matchNoteIds(update.matchedDocuments, newNotes);
+    if (update.newSubtopics.length === 0 && documentIds.length === 0 && noteIds.length === 0) continue;
+    await extendChapter(chapter.id, { subtopics: update.newSubtopics, documentIds, noteIds });
     updatedChapters++;
   }
 
@@ -108,6 +144,7 @@ export async function supplementStudyPlan(planId: number): Promise<SupplementRes
         stage,
         prerequisiteIds: prerequisites.map((c) => c.id),
         linkedDocumentIds: matchDocumentIds(chapter.matchedDocuments, newDocs),
+        linkedNoteIds: matchNoteIds(chapter.matchedDocuments, newNotes),
         estimatedMinutes: chapter.estimatedMinutes,
       })
     );
@@ -128,9 +165,12 @@ export async function supplementStudyPlan(planId: number): Promise<SupplementRes
     });
   }
 
-  // Every new document counts as seen now, matched to a chapter or not, so
-  // the "new material" prompt goes away.
-  await setPlanSourceDocumentIds(planId, [...plan.source_document_ids, ...newDocs.map((d) => d.id)]);
+  // Every new document and note counts as seen now, matched to a chapter or
+  // not, so the "new material" prompt goes away.
+  await setPlanSourceMaterial(planId, {
+    documentIds: [...plan.source_document_ids, ...newDocs.map((d) => d.id)],
+    notes: { ...plan.source_notes, ...Object.fromEntries(newNotes.map((n) => [n.id, noteFingerprint(n)])) },
+  });
   if (plan.options.schedule && (created.length || updatedChapters)) await rescheduleQuietly(planId);
   return { plan: (await getStudyPlan(planId)) as StudyPlan, updatedChapters, addedChapters: created.length };
 }

@@ -56,7 +56,56 @@ const isInteger = (v: unknown): v is number => Number.isInteger(v);
 const isSubtopic = (v: unknown): v is Subtopic =>
   !!v && typeof v === "object" && typeof (v as Subtopic).text === "string" && typeof (v as Subtopic).done === "boolean";
 
+// Notes share the integer-id JSON columns documents use, without a schema
+// change. For a chapter's links, notes are the NEGATED ids in the same array
+// (document ids are always positive). For a plan's "already seen" record
+// (see decodeSourceMaterial) notes carry a content fingerprint so an edited
+// note can be told apart from an unchanged one. The encodings live only in
+// this file: everywhere else sees separate document and note fields.
+export function encodeMaterialIds(documentIds: number[], noteIds: number[]): string {
+  return JSON.stringify([...documentIds, ...noteIds.map((id) => -id)]);
+}
+
+export function decodeMaterialIds(raw: string): { documentIds: number[]; noteIds: number[] } {
+  const ids = parseJsonArray(raw, isInteger);
+  return {
+    documentIds: ids.filter((id) => id > 0),
+    noteIds: ids.filter((id) => id < 0).map((id) => -id),
+  };
+}
+
+// noteFingerprints: note id → fingerprint of the content the plan saw. The
+// older array encoding (notes as negated ids, no fingerprint) reads back
+// with an empty fingerprint, meaning "seen, content unknown".
+export function encodeSourceMaterial(documentIds: number[], noteFingerprints: Record<number, string>): string {
+  return JSON.stringify({ documents: documentIds, notes: noteFingerprints });
+}
+
+export function decodeSourceMaterial(raw: string): { documentIds: number[]; noteFingerprints: Record<number, string> } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { documentIds: [], noteFingerprints: {} };
+  }
+  if (Array.isArray(parsed)) {
+    const { documentIds, noteIds } = decodeMaterialIds(raw);
+    return { documentIds, noteFingerprints: Object.fromEntries(noteIds.map((id) => [id, ""])) };
+  }
+  if (!parsed || typeof parsed !== "object") return { documentIds: [], noteFingerprints: {} };
+  const obj = parsed as { documents?: unknown; notes?: unknown };
+  const documentIds = Array.isArray(obj.documents) ? obj.documents.filter(isInteger) : [];
+  const noteFingerprints: Record<number, string> = {};
+  if (obj.notes && typeof obj.notes === "object") {
+    for (const [id, fingerprint] of Object.entries(obj.notes)) {
+      if (Number.isInteger(Number(id)) && typeof fingerprint === "string") noteFingerprints[Number(id)] = fingerprint;
+    }
+  }
+  return { documentIds, noteFingerprints };
+}
+
 function toSummary(row: PlanRow): StudyPlanSummary {
+  const sources = decodeSourceMaterial(row.source_document_ids);
   return {
     id: row.id,
     course_id: row.course_id,
@@ -66,7 +115,8 @@ function toSummary(row: PlanRow): StudyPlanSummary {
     options: parseStudyPlanOptions(row.options_json),
     syllabus_document_id: row.syllabus_document_id,
     syllabus_text: row.syllabus_text,
-    source_document_ids: parseJsonArray(row.source_document_ids, isInteger),
+    source_document_ids: sources.documentIds,
+    source_notes: sources.noteFingerprints,
     source_folder_id: row.source_folder_id,
     source_handpicked: row.source_handpicked,
     language: row.language,
@@ -98,7 +148,10 @@ function toChapter(
     summary: row.summary,
     subtopics: parseJsonArray(row.subtopics_json, isSubtopic),
     prerequisite_ids: parseJsonArray(row.prerequisite_ids_json, isInteger),
-    linked_document_ids: parseJsonArray(row.linked_document_ids_json, isInteger),
+    ...(() => {
+      const linked = decodeMaterialIds(row.linked_document_ids_json);
+      return { linked_document_ids: linked.documentIds, linked_note_ids: linked.noteIds };
+    })(),
     current_level: row.current_level,
     estimated_minutes: row.estimated_minutes,
     completed_at: row.completed_at,
@@ -233,6 +286,21 @@ export async function listReadyStudyPlans(): Promise<StudyPlan[]> {
   return Promise.all(rows.map((row) => loadPlan(row)));
 }
 
+// Every plan's status, without loading chapters — for telling a course with
+// an unfinished plan from one with none.
+export async function listPlanStatuses(): Promise<
+  { id: number; course_id: number; status: StudyPlanStatus; updated_at: string }[]
+> {
+  return db
+    .select({
+      id: study_plans.id,
+      course_id: study_plans.course_id,
+      status: study_plans.status,
+      updated_at: study_plans.updated_at,
+    })
+    .from(study_plans);
+}
+
 export async function getStudyPlanForCourse(courseId: number): Promise<StudyPlan | undefined> {
   const [row] = await db.select().from(study_plans).where(eq(study_plans.course_id, courseId)).limit(1);
   return row ? loadPlan(row) : undefined;
@@ -261,6 +329,7 @@ export interface NewChapter {
   prerequisites: number[];
   stage: number;
   linked_document_ids: number[];
+  linked_note_ids?: number[];
   estimated_minutes: number | null;
   resources: NewResource[];
 }
@@ -273,6 +342,8 @@ export interface NewStudyPlan {
   syllabusDocumentId: number | null;
   syllabusText: string | null;
   sourceDocumentIds: number[];
+  // Notes the plan was built from, by id → content fingerprint; omitted means none.
+  sourceNotes?: Record<number, string>;
   sourceFolderId: number | null;
   sourceHandpicked: boolean;
   language: string;
@@ -331,7 +402,7 @@ export async function replaceStudyPlan(plan: NewStudyPlan): Promise<StudyPlan> {
         options_json: JSON.stringify(plan.options),
         syllabus_document_id: plan.syllabusDocumentId,
         syllabus_text: plan.syllabusText,
-        source_document_ids: JSON.stringify(plan.sourceDocumentIds),
+        source_document_ids: encodeSourceMaterial(plan.sourceDocumentIds, plan.sourceNotes ?? {}),
         source_folder_id: plan.sourceFolderId,
         source_handpicked: plan.sourceHandpicked,
         language: plan.language,
@@ -361,7 +432,7 @@ export async function replaceStudyPlan(plan: NewStudyPlan): Promise<StudyPlan> {
           prerequisite_ids_json: JSON.stringify(
             chapter.prerequisites.filter((p) => p >= 0 && p < index).map((p) => chapterIds[p])
           ),
-          linked_document_ids_json: JSON.stringify(chapter.linked_document_ids),
+          linked_document_ids_json: encodeMaterialIds(chapter.linked_document_ids, chapter.linked_note_ids ?? []),
           estimated_minutes: chapter.estimated_minutes,
           created_at: now,
           updated_at: now,
@@ -483,6 +554,7 @@ export async function createChapter(
     stage?: number;
     prerequisiteIds?: number[];
     linkedDocumentIds?: number[];
+    linkedNoteIds?: number[];
     estimatedMinutes?: number | null;
   }
 ): Promise<StudyPlanChapter> {
@@ -505,7 +577,7 @@ export async function createChapter(
         summary: fields.summary ?? "",
         subtopics_json: JSON.stringify((fields.subtopics ?? []).map((text) => ({ text, done: false }))),
         prerequisite_ids_json: JSON.stringify(fields.prerequisiteIds ?? []),
-        linked_document_ids_json: JSON.stringify(fields.linkedDocumentIds ?? []),
+        linked_document_ids_json: encodeMaterialIds(fields.linkedDocumentIds ?? [], fields.linkedNoteIds ?? []),
         estimated_minutes: fields.estimatedMinutes ?? null,
         created_at: now,
         updated_at: now,
@@ -522,6 +594,7 @@ export interface ChapterPatch {
   subtopics?: Subtopic[];
   stage?: number;
   linked_document_ids?: number[];
+  linked_note_ids?: number[];
   completed?: boolean;
 }
 
@@ -531,7 +604,16 @@ export async function updateChapter(id: number, patch: ChapterPatch): Promise<vo
   if (patch.summary !== undefined) set.summary = patch.summary;
   if (patch.subtopics !== undefined) set.subtopics_json = JSON.stringify(patch.subtopics);
   if (patch.stage !== undefined) set.stage = patch.stage;
-  if (patch.linked_document_ids !== undefined) set.linked_document_ids_json = JSON.stringify(patch.linked_document_ids);
+  if (patch.linked_document_ids !== undefined || patch.linked_note_ids !== undefined) {
+    // Documents and notes share one column, so changing one list must keep
+    // the other as it is.
+    const row = await getChapterRow(id);
+    const current = row ? decodeMaterialIds(row.linked_document_ids_json) : { documentIds: [], noteIds: [] };
+    set.linked_document_ids_json = encodeMaterialIds(
+      patch.linked_document_ids ?? current.documentIds,
+      patch.linked_note_ids ?? current.noteIds
+    );
+  }
   if (patch.completed !== undefined) set.completed_at = patch.completed ? nowUtc() : null;
   await db.update(study_plan_chapters).set(set).where(eq(study_plan_chapters.id, id));
 }
@@ -541,7 +623,7 @@ export async function updateChapter(id: number, patch: ChapterPatch): Promise<vo
 // already present (same text, same document) is skipped.
 export async function extendChapter(
   id: number,
-  additions: { subtopics: string[]; documentIds: number[] }
+  additions: { subtopics: string[]; documentIds: number[]; noteIds?: number[] }
 ): Promise<void> {
   const row = await getChapterRow(id);
   if (!row) return;
@@ -554,13 +636,17 @@ export async function extendChapter(
     subtopics.push({ text, done: false });
   }
   const documentIds = [...new Set([...chapter.linked_document_ids, ...additions.documentIds])];
-  await updateChapter(id, { subtopics, linked_document_ids: documentIds });
+  const noteIds = [...new Set([...chapter.linked_note_ids, ...(additions.noteIds ?? [])])];
+  await updateChapter(id, { subtopics, linked_document_ids: documentIds, linked_note_ids: noteIds });
 }
 
-export async function setPlanSourceDocumentIds(id: number, documentIds: number[]): Promise<void> {
+export async function setPlanSourceMaterial(
+  id: number,
+  material: { documentIds: number[]; notes: Record<number, string> }
+): Promise<void> {
   await db
     .update(study_plans)
-    .set({ source_document_ids: JSON.stringify(documentIds), updated_at: nowUtc() })
+    .set({ source_document_ids: encodeSourceMaterial(material.documentIds, material.notes), updated_at: nowUtc() })
     .where(eq(study_plans.id, id));
 }
 

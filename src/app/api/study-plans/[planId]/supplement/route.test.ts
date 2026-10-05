@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getStudyPlan = vi.fn();
 vi.mock("@/lib/studyPlan/store", () => ({ getStudyPlan: (...a: unknown[]) => getStudyPlan(...a) }));
-const findNewPlanDocuments = vi.fn();
+const findNewPlanMaterial = vi.fn();
 const supplementStudyPlan = vi.fn();
 class NoNewMaterialError extends Error {}
 vi.mock("@/lib/studyPlan/supplement", () => ({
-  findNewPlanDocuments: (...a: unknown[]) => findNewPlanDocuments(...a),
+  findNewPlanMaterial: (...a: unknown[]) => findNewPlanMaterial(...a),
   supplementStudyPlan: (...a: unknown[]) => supplementStudyPlan(...a),
   NoNewMaterialError,
 }));
@@ -23,10 +23,14 @@ beforeEach(() => {
 });
 
 describe("/api/study-plans/[planId]/supplement", () => {
-  it("lists new documents by id and filename only", async () => {
-    findNewPlanDocuments.mockResolvedValue([{ id: 3, filename: "Lecture7.pdf", extracted_text: "secret" }]);
+  it("lists new documents and notes by id and name only", async () => {
+    findNewPlanMaterial.mockResolvedValue({
+      documents: [{ id: 3, filename: "Lecture7.pdf", extracted_text: "secret" }],
+      notes: [{ id: 8, title: "Key ideas", markdown: "secret" }],
+    });
     expect(await (await GET(new Request("http://localhost/x"), params)).json()).toEqual({
       documents: [{ id: 3, filename: "Lecture7.pdf" }],
+      notes: [{ id: 8, title: "Key ideas" }],
     });
   });
 

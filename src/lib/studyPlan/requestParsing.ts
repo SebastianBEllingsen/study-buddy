@@ -77,6 +77,10 @@ export function parseChapterPatch(body: Record<string, unknown>): Parsed<Chapter
     if (!isIntArray(body.linkedDocumentIds)) return { ok: false, error: "Invalid linked documents" };
     patch.linked_document_ids = [...new Set(body.linkedDocumentIds)];
   }
+  if ("linkedNoteIds" in body) {
+    if (!isIntArray(body.linkedNoteIds)) return { ok: false, error: "Invalid linked notes" };
+    patch.linked_note_ids = [...new Set(body.linkedNoteIds)];
+  }
   if ("completed" in body) {
     if (typeof body.completed !== "boolean") return { ok: false, error: "Invalid completed flag" };
     patch.completed = body.completed;

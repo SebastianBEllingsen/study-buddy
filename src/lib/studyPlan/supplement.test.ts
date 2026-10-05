@@ -10,11 +10,13 @@ vi.mock("../aiClient", () => ({
 
 const listDocumentsForCourse = vi.fn();
 const listFoldersForCourse = vi.fn();
+const listNotesForCourse = vi.fn();
 vi.mock("../models", () => ({
   getAppSettings: async () => ({ aiEfficiencyMode: false, preferredLanguage: "en" }),
   getCourse: async () => ({ id: 1, name: "Sample Course" }),
   listDocumentsForCourse: (...a: unknown[]) => listDocumentsForCourse(...a),
   listFoldersForCourse: (...a: unknown[]) => listFoldersForCourse(...a),
+  listNotesForCourse: (...a: unknown[]) => listNotesForCourse(...a),
 }));
 
 const findChapterResources = vi.fn();
@@ -29,17 +31,18 @@ let plan: StudyPlan;
 const extendChapter = vi.fn();
 const createChapter = vi.fn();
 const replaceAiResources = vi.fn();
-const setPlanSourceDocumentIds = vi.fn();
+const setPlanSourceMaterial = vi.fn();
 vi.mock("./store", () => ({
   getStudyPlan: async () => plan,
   extendChapter: (...a: unknown[]) => extendChapter(...a),
   createChapter: (...a: unknown[]) => createChapter(...a),
   replaceAiResources: (...a: unknown[]) => replaceAiResources(...a),
-  setPlanSourceDocumentIds: (...a: unknown[]) => setPlanSourceDocumentIds(...a),
+  setPlanSourceMaterial: (...a: unknown[]) => setPlanSourceMaterial(...a),
 }));
 
-const { findNewPlanDocuments, supplementStudyPlan, NoNewMaterialError } = await import("./supplement");
+const { findNewPlanMaterial, supplementStudyPlan, NoNewMaterialError } = await import("./supplement");
 const { PRESET_DEFAULTS } = await import("./options");
+const { noteFingerprint } = await import("./planMaterial");
 
 function makePlan(overrides: Partial<StudyPlan> = {}): StudyPlan {
   const chapter = (id: number, position: number, stage: number, title: string) => ({
@@ -52,6 +55,7 @@ function makePlan(overrides: Partial<StudyPlan> = {}): StudyPlan {
     subtopics: [{ text: "Existing idea", done: true }],
     prerequisite_ids: [],
     linked_document_ids: [],
+    linked_note_ids: [],
     current_level: null,
     estimated_minutes: null,
     completed_at: null,
@@ -71,6 +75,7 @@ function makePlan(overrides: Partial<StudyPlan> = {}): StudyPlan {
     syllabus_document_id: 9,
     syllabus_text: null,
     source_document_ids: [10],
+    source_notes: {},
     source_folder_id: null,
     source_handpicked: false,
     language: "en",
@@ -96,9 +101,19 @@ const doc = (id: number, filename: string, folder_id: number | null = null, stat
   extracted_text: `${filename} text`,
 });
 
+const note = (id: number, title: string, folder_id: number | null = null, generation_source: string | null = "personal") => ({
+  id,
+  course_id: 1,
+  folder_id,
+  title,
+  markdown: `# ${title}`,
+  generation_source,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   plan = makePlan();
+  listNotesForCourse.mockResolvedValue([]);
   listDocumentsForCourse.mockResolvedValue([
     doc(9, "Syllabus.pdf"),
     doc(10, "Lecture1.pdf"),
@@ -135,14 +150,43 @@ beforeEach(() => {
   });
 });
 
-describe("findNewPlanDocuments", () => {
+describe("findNewPlanMaterial", () => {
   it("finds extracted documents the plan hasn't seen, not the syllabus", async () => {
-    expect((await findNewPlanDocuments(plan)).map((d) => d.id)).toEqual([11, 12]);
+    expect((await findNewPlanMaterial(plan)).documents.map((d) => d.id)).toEqual([11, 12]);
+  });
+
+  it("finds notes marked for generation that the plan hasn't seen", async () => {
+    listNotesForCourse.mockResolvedValue([
+      note(1, "Seen"),
+      note(2, "New"),
+      note(3, "Not marked", null, null),
+      { ...note(4, "Empty"), markdown: "  " },
+    ]);
+    plan = makePlan({ source_notes: { 1: noteFingerprint({ title: "Seen", markdown: "# Seen" }) } });
+    expect((await findNewPlanMaterial(plan)).notes.map((n) => n.id)).toEqual([2]);
+  });
+
+  it("treats a note edited since the plan saw it as new again, but not an unchanged or unknown-content one", async () => {
+    listNotesForCourse.mockResolvedValue([note(1, "Edited"), note(2, "Same"), note(3, "Legacy")]);
+    plan = makePlan({
+      source_notes: {
+        1: noteFingerprint({ title: "Edited", markdown: "# An older version" }),
+        2: noteFingerprint({ title: "Same", markdown: "# Same" }),
+        3: "",
+      },
+    });
+    expect((await findNewPlanMaterial(plan)).notes.map((n) => n.id)).toEqual([1]);
   });
 
   it("watches only the plan's folder (and subfolders) when it was built from one", async () => {
     plan = makePlan({ source_folder_id: 3 });
-    expect((await findNewPlanDocuments(plan)).map((d) => d.id)).toEqual([11]);
+    expect((await findNewPlanMaterial(plan)).documents.map((d) => d.id)).toEqual([11]);
+  });
+
+  it("watches only the plan's folder for notes too", async () => {
+    listNotesForCourse.mockResolvedValue([note(1, "In folder", 3), note(2, "Elsewhere", 4), note(3, "Loose")]);
+    plan = makePlan({ source_folder_id: 3 });
+    expect((await findNewPlanMaterial(plan)).notes.map((n) => n.id)).toEqual([1]);
   });
 });
 
@@ -151,7 +195,7 @@ describe("supplementStudyPlan", () => {
     const result = await supplementStudyPlan(1);
     expect(extendChapter).toHaveBeenCalledTimes(1);
     // Only new documents are linked — Lecture1 was already part of the plan.
-    expect(extendChapter).toHaveBeenCalledWith(101, { subtopics: ["New idea"], documentIds: [11] });
+    expect(extendChapter).toHaveBeenCalledWith(101, { subtopics: ["New idea"], documentIds: [11], noteIds: [] });
     expect(createChapter).toHaveBeenCalledWith(1, {
       title: "Applications",
       summary: "Using it.",
@@ -159,10 +203,11 @@ describe("supplementStudyPlan", () => {
       stage: 3,
       prerequisiteIds: [101],
       linkedDocumentIds: [12],
+      linkedNoteIds: [],
       estimatedMinutes: 120,
     });
     expect(replaceAiResources).toHaveBeenCalledWith(200, [{ url: "https://example.org/r" }]);
-    expect(setPlanSourceDocumentIds).toHaveBeenCalledWith(1, [10, 11, 12]);
+    expect(setPlanSourceMaterial).toHaveBeenCalledWith(1, { documentIds: [10, 11, 12], notes: {} });
     expect(result).toMatchObject({ updatedChapters: 1, addedChapters: 1 });
     expect(rescheduleQuietly).not.toHaveBeenCalled();
   });
@@ -186,6 +231,55 @@ describe("supplementStudyPlan", () => {
     expect(createChapter.mock.calls[0][1]).toMatchObject({ stage: 3, prerequisiteIds: [] });
     expect(findChapterResources).not.toHaveBeenCalled();
     expect(rescheduleQuietly).toHaveBeenCalledWith(1);
+  });
+
+  it("folds in new notes alone, and records them as seen alongside the documents", async () => {
+    plan = makePlan({
+      source_document_ids: [10, 11, 12],
+      source_notes: { 1: noteFingerprint({ title: "Seen", markdown: "# Seen" }) },
+    });
+    listNotesForCourse.mockResolvedValue([note(1, "Seen"), note(2, "Fresh ideas")]);
+    generateStructured.mockResolvedValue({ updates: [], newChapters: [] });
+
+    await supplementStudyPlan(1);
+
+    const { user } = generateStructured.mock.calls[0][0];
+    expect(user).toContain("--- Note: Fresh ideas ---");
+    expect(user).not.toContain("Seen");
+    expect(setPlanSourceMaterial).toHaveBeenCalledWith(1, {
+      documentIds: [10, 11, 12],
+      notes: {
+        1: noteFingerprint({ title: "Seen", markdown: "# Seen" }),
+        2: noteFingerprint({ title: "Fresh ideas", markdown: "# Fresh ideas" }),
+      },
+    });
+  });
+
+  it("links a new note to the chapter it extends, and to a new chapter", async () => {
+    plan = makePlan({ source_document_ids: [10, 11, 12] });
+    listNotesForCourse.mockResolvedValue([note(2, "Fresh ideas"), note(3, "More ideas")]);
+    generateStructured.mockResolvedValue({
+      updates: [{ chapter: 2, newSubtopics: [], matchedDocuments: ["Fresh ideas"] }],
+      newChapters: [
+        { title: "Extra", subtopics: [], prerequisites: [], matchedDocuments: ["more ideas", "Unknown"] },
+      ],
+    });
+
+    await supplementStudyPlan(1);
+
+    expect(extendChapter).toHaveBeenCalledWith(101, { subtopics: [], documentIds: [], noteIds: [2] });
+    expect(createChapter.mock.calls[0][1]).toMatchObject({ linkedNoteIds: [3], linkedDocumentIds: [] });
+  });
+
+  it("keeps new tests and quizzes in their own section", async () => {
+    listDocumentsForCourse.mockResolvedValue([doc(11, "Lecture5.pdf"), doc(14, "Quiz 3.pdf")]);
+    await supplementStudyPlan(1);
+    const { system, user } = generateStructured.mock.calls[0][0];
+    const [material, tests] = user.split("Past tests and quizzes:");
+    expect(material).toContain("Lecture5.pdf");
+    expect(material).not.toContain("Quiz 3.pdf");
+    expect(tests).toContain("Quiz 3.pdf");
+    expect(system).toContain("Past tests and quizzes");
   });
 
   it("refuses when there's nothing new", async () => {

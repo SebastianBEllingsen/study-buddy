@@ -12,6 +12,7 @@ const deleteChatMessage = vi.fn();
 const getChatConversation = vi.fn();
 const getChatMessage = vi.fn();
 const getAppSettings = vi.fn();
+const listCourses = vi.fn();
 const listDocumentsForCourse = vi.fn();
 const listFoldersForCourse = vi.fn();
 const updateChatMessagePendingAction = vi.fn();
@@ -21,6 +22,7 @@ vi.mock("./models", () => ({
   getChatConversation: (...args: unknown[]) => getChatConversation(...args),
   getChatMessage: (...args: unknown[]) => getChatMessage(...args),
   getAppSettings: (...args: unknown[]) => getAppSettings(...args),
+  listCourses: (...args: unknown[]) => listCourses(...args),
   listDocumentsForCourse: (...args: unknown[]) => listDocumentsForCourse(...args),
   listFoldersForCourse: (...args: unknown[]) => listFoldersForCourse(...args),
   updateChatMessagePendingAction: (...args: unknown[]) => updateChatMessagePendingAction(...args),
@@ -62,6 +64,7 @@ beforeEach(() => {
   getChatConversation.mockReset();
   getChatMessage.mockReset();
   getAppSettings.mockReset().mockResolvedValue({ aiEfficiencyMode: false, cliTrustedModeEnabled: false });
+  listCourses.mockReset().mockResolvedValue([]);
   listDocumentsForCourse.mockReset();
   listFoldersForCourse.mockReset().mockResolvedValue([]);
   updateChatMessagePendingAction.mockReset();
@@ -169,6 +172,13 @@ describe("sendChatMessage", () => {
   });
 
   describe("course-scoped conversations", () => {
+    beforeEach(() => {
+      listCourses.mockResolvedValue([
+        { id: 7, name: "Bio" },
+        { id: 8, name: "Chem" },
+      ]);
+    });
+
     it("folds course text into the system prompt when not using a trusted CLI backend", async () => {
       addChatMessage
         .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
@@ -209,7 +219,105 @@ describe("sendChatMessage", () => {
       expect(buildFullCourseContextText).not.toHaveBeenCalled();
       const call = generateText.mock.calls[0][0];
       expect(call.workspaceScope).toEqual({ documentIds: [1, 2, 3] });
-      expect(call.system).not.toContain("Course material follows");
+      expect(call.system).not.toContain("--- Document");
+    });
+
+    it("lists courses the conversation can't see by name only, and never loads their content", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
+        .mockResolvedValueOnce({ id: 2, role: "assistant", content: "hello" });
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: 7 },
+        messages: [{ role: "user", content: "hi" }],
+      });
+      resolveBackendId.mockResolvedValue("api");
+      buildFullCourseContextText.mockResolvedValue({ courseName: "Bio", text: "bio text" });
+      generateText.mockResolvedValue("hello");
+
+      await sendChatMessage(1, "hi");
+
+      expect(buildFullCourseContextText).toHaveBeenCalledTimes(1);
+      expect(buildFullCourseContextText).not.toHaveBeenCalledWith(8);
+      const system: string = generateText.mock.calls[0][0].system;
+      expect(system).toContain("- Chem");
+      expect(system).not.toContain("- Bio");
+    });
+
+    it("includes a course's content once the user confirmed reading it", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 3, role: "user", content: "what's in chem?" })
+        .mockResolvedValueOnce({ id: 4, role: "assistant", content: "ok" });
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: null },
+        messages: [
+          {
+            id: 2,
+            role: "assistant",
+            content: "May I read Chem?",
+            pendingAction: {
+              id: "a",
+              actions: [{ action: "readCourse", courseId: 8 }],
+              status: "executed",
+              resultSummary: "Allowed",
+            },
+          },
+          { id: 3, role: "user", content: "what's in chem?" },
+        ],
+      });
+      resolveBackendId.mockResolvedValue("api");
+      buildFullCourseContextText.mockResolvedValue({ courseName: "Chem", text: "--- Note: Atoms ---\nbody" });
+      generateText.mockResolvedValue("ok");
+
+      await sendChatMessage(1, "what's in chem?");
+
+      expect(buildFullCourseContextText).toHaveBeenCalledWith(8);
+      expect(generateText.mock.calls[0][0].system).toContain("--- Note: Atoms ---");
+      // The detector sees the granted course as accessible (and its folders).
+      expect(detectChatActions.mock.calls[0][0]).toMatchObject({ accessibleCourseIds: [8], scopedCourseId: null });
+      expect(listFoldersForCourse).toHaveBeenCalledWith(8);
+    });
+
+    it("does not treat a pending or cancelled readCourse as a grant", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 3, role: "user", content: "hi" })
+        .mockResolvedValueOnce({ id: 4, role: "assistant", content: "ok" });
+      const readCourse = [{ action: "readCourse", courseId: 8 }];
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: null },
+        messages: [
+          { id: 1, role: "assistant", content: "?", pendingAction: { id: "a", actions: readCourse, status: "pending", resultSummary: null } },
+          { id: 2, role: "assistant", content: "?", pendingAction: { id: "b", actions: readCourse, status: "cancelled", resultSummary: null } },
+          { id: 3, role: "user", content: "hi" },
+        ],
+      });
+      generateText.mockResolvedValue("ok");
+
+      await sendChatMessage(1, "hi");
+
+      expect(buildFullCourseContextText).not.toHaveBeenCalled();
+      expect(detectChatActions.mock.calls[0][0].accessibleCourseIds).toEqual([]);
+    });
+
+    it("runs action detection for an unscoped conversation too", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 1, role: "user", content: "make me a course" })
+        .mockResolvedValueOnce({ id: 2, role: "assistant", content: "Create it?", pendingAction: {} });
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: null },
+        messages: [{ id: 1, role: "user", content: "make me a course" }],
+      });
+      detectChatActions.mockResolvedValue({
+        actions: [{ action: "createCourse", courseName: "Sample" }],
+        confirmationMessage: "Create it?",
+      });
+
+      await sendChatMessage(1, "make me a course");
+
+      expect(generateText).not.toHaveBeenCalled();
+      expect(addChatMessage.mock.calls[1][4]).toMatchObject({
+        status: "pending",
+        actions: [{ action: "createCourse", courseName: "Sample" }],
+      });
     });
 
     it("proposes a pending action instead of replying normally, when one is detected", async () => {
@@ -284,6 +392,75 @@ describe("resolvePendingAction", () => {
 
     expect(executeChatActions).toHaveBeenCalledWith(7, pendingAction.actions, []);
     expect(result.pendingAction).toMatchObject({ status: "executed", resultSummary: 'Created folder "X".' });
+  });
+
+  it("runs a confirmed action in a conversation with no course, and makes no follow-up for a non-read action", async () => {
+    const pendingAction = {
+      id: "abc",
+      actions: [{ action: "createCourse", courseName: "Sample" }],
+      status: "pending" as const,
+      resultSummary: null,
+    };
+    getChatMessage.mockResolvedValue({ id: 5, conversationId: 1, pendingAction });
+    getChatConversation.mockResolvedValue({ conversation: { courseId: null }, messages: [] });
+    executeChatActions.mockResolvedValue('Created course "Sample".');
+
+    const result = await resolvePendingAction(1, 5, true);
+
+    expect(executeChatActions).toHaveBeenCalledWith(null, pendingAction.actions, []);
+    expect(result.followUp).toBeNull();
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("answers the original request with the course visible after a confirmed readCourse", async () => {
+    const pendingAction = {
+      id: "abc",
+      actions: [{ action: "readCourse", courseId: 8 }],
+      status: "pending" as const,
+      resultSummary: null,
+    };
+    const proposal = { id: 5, conversationId: 1, role: "assistant", content: "May I read Chem?", pendingAction };
+    getChatMessage.mockResolvedValue(proposal);
+    // The DB copy still shows the proposal pending; the follow-up must use
+    // the resolved one or the course would not count as granted.
+    getChatConversation.mockResolvedValue({
+      conversation: { courseId: null },
+      messages: [{ id: 4, role: "user", content: "summarise chem" }, proposal],
+    });
+    listCourses.mockResolvedValue([{ id: 8, name: "Chem" }]);
+    executeChatActions.mockResolvedValue('Allowed to read "Chem" in this conversation.');
+    resolveBackendId.mockResolvedValue("api");
+    buildFullCourseContextText.mockResolvedValue({ courseName: "Chem", text: "chem text" });
+    generateText.mockResolvedValue("Here is a summary");
+    addChatMessage.mockResolvedValue({ id: 6, role: "assistant", content: "Here is a summary" });
+
+    const result = await resolvePendingAction(1, 5, true);
+
+    expect(buildFullCourseContextText).toHaveBeenCalledWith(8);
+    expect(generateText.mock.calls[0][0].system).toContain("chem text");
+    expect(result.followUp).toEqual({ id: 6, role: "assistant", content: "Here is a summary" });
+  });
+
+  it("still resolves the action if the follow-up reply fails", async () => {
+    const pendingAction = {
+      id: "abc",
+      actions: [{ action: "readCourse", courseId: 8 }],
+      status: "pending" as const,
+      resultSummary: null,
+    };
+    getChatMessage.mockResolvedValue({ id: 5, conversationId: 1, pendingAction });
+    getChatConversation.mockResolvedValue({ conversation: { courseId: null }, messages: [] });
+    listCourses.mockResolvedValue([{ id: 8, name: "Chem" }]);
+    executeChatActions.mockResolvedValue("ok");
+    resolveBackendId.mockResolvedValue("api");
+    buildFullCourseContextText.mockResolvedValue({ courseName: "Chem", text: "t" });
+    generateText.mockRejectedValue(new Error("rate limited"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await resolvePendingAction(1, 5, true);
+
+    expect(result.pendingAction?.status).toBe("executed");
+    expect(result.followUp).toBeNull();
   });
 
   it("throws when the message has no pending action", async () => {

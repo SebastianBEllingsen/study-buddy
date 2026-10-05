@@ -8,8 +8,10 @@ import { omitEmbeddedImages } from "../embeddedImages";
 // notes/quizzes, which chunk through everything.
 
 export interface DigestDocument {
+  // A document's filename, or a note's title when kind is "note".
   filename: string;
   extracted_text: string | null;
+  kind?: "document" | "note";
 }
 
 const MAX_HEADINGS_PER_DOCUMENT = 40;
@@ -33,12 +35,16 @@ function headingLines(text: string): string[] {
   return headings;
 }
 
+function digestHeader(doc: DigestDocument): string {
+  return `--- ${doc.kind === "note" ? "Note" : "Document"}: ${doc.filename} ---`;
+}
+
 function documentDigest(doc: DigestDocument, openingChars: number): string {
   const text = omitEmbeddedImages(doc.extracted_text ?? "");
   const headings = headingLines(text);
   const opening = text.replace(/\s+/g, " ").trim().slice(0, openingChars);
   return [
-    `--- Document: ${doc.filename} ---`,
+    digestHeader(doc),
     headings.length ? `Headings:\n${headings.map((h) => `- ${h}`).join("\n")}` : null,
     opening ? `Opening: ${opening}${text.length > openingChars ? "…" : ""}` : null,
   ]
@@ -59,7 +65,7 @@ export function buildMaterialDigest(documents: DigestDocument[], budgetTokens = 
   for (const doc of documents) {
     const part = documentDigest(doc, 0);
     const cost = estimateTokens(part);
-    parts.push(used + cost <= budgetTokens ? part : `--- Document: ${doc.filename} ---`);
+    parts.push(used + cost <= budgetTokens ? part : digestHeader(doc));
     used += Math.min(cost, estimateTokens(parts[parts.length - 1]));
   }
   return parts.join("\n\n");

@@ -90,6 +90,7 @@ export interface StudyPlanChapter {
   subtopics: Subtopic[];
   prerequisite_ids: number[];
   linked_document_ids: number[];
+  linked_note_ids: number[];
   current_level: ChapterLevel | null;
   estimated_minutes: number | null;
   completed_at: string | null;
@@ -121,6 +122,9 @@ export interface StudyPlanSummary {
   syllabus_document_id: number | null;
   syllabus_text: string | null;
   source_document_ids: number[];
+  // Notes the plan has already seen: id → fingerprint of the content it saw
+  // ("" when unknown), so an edited note counts as new again.
+  source_notes: Record<number, string>;
   source_folder_id: number | null;
   source_handpicked: boolean;
   language: string;

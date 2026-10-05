@@ -1,6 +1,6 @@
 import { buildCourseContext } from "../context";
 import { generateStructured, getModelInfo } from "../aiClient";
-import { getAppSettings, getCourse, getDocument, listDocumentsForCourse } from "../models";
+import { getAppSettings, getCourse, getDocument, listDocumentsForCourse, listNotesForCourse } from "../models";
 import { normalizeStudyPlanOutline } from "../aiResponseValidation";
 import { languageName } from "../languages";
 import { mapWithConcurrency } from "../concurrency";
@@ -10,7 +10,7 @@ import {
   studyPlanOutlineSystemPrompt,
   studyPlanOutlineUserPrompt,
 } from "../prompts/studyPlan";
-import { buildMaterialDigest } from "./materialDigest";
+import { buildPlanMaterialDigests, noteFingerprint } from "./planMaterial";
 import { resolveStages } from "./roadmap";
 import { findChapterResources, StudyPlanNotFoundError } from "./resources";
 import { rescheduleQuietly } from "./scheduleService";
@@ -40,7 +40,9 @@ export type SyllabusSource = { documentId: number } | { text: string } | null;
 
 export class NoCurriculumError extends Error {
   constructor() {
-    super("Add a syllabus, or upload course documents that extract successfully, before building a study plan.");
+    super(
+      "Add a syllabus, or upload course documents that extract successfully (or write notes marked for generation), before building a study plan."
+    );
     this.name = "NoCurriculumError";
   }
 }
@@ -55,6 +57,7 @@ export class SyllabusNotFoundError extends Error {
 const OUTLINE_MAX_TOKENS = 12_000;
 const EFFICIENT_OUTLINE_MAX_TOKENS = 6000;
 const RESOURCE_CONCURRENCY = 3;
+
 
 async function resolveSyllabus(
   courseId: number,
@@ -82,6 +85,14 @@ export function matchDocumentIds(filenames: string[], documents: { id: number; f
   return [...new Set(ids)];
 }
 
+// The same name-matching for notes, by title (note titles are unique across
+// the app, so a title identifies one note).
+export function matchNoteIds(titles: string[], notes: { id: number; title: string }[]): number[] {
+  const byTitle = new Map(notes.map((n) => [n.title.trim().toLowerCase(), n.id]));
+  const ids = titles.map((t) => byTitle.get(t.trim().toLowerCase())).filter((id): id is number => id !== undefined);
+  return [...new Set(ids)];
+}
+
 export async function createStudyPlanForCourse(
   courseId: number,
   input: {
@@ -102,15 +113,22 @@ export async function createStudyPlanForCourse(
   const documents = (await listDocumentsForCourse(courseId)).filter(
     (d) => inScope.has(d.id) && d.id !== syllabus.documentId
   );
-  if (!syllabus.text && documents.length === 0) throw new NoCurriculumError();
+  // Notes marked for generation count as material too; buildCourseContext
+  // already applied the same scope (folder / all material) to them.
+  const inScopeNotes = new Set(context.noteIds);
+  const notes = (await listNotesForCourse(courseId)).filter((n) => inScopeNotes.has(n.id));
+  if (!syllabus.text && documents.length === 0 && notes.length === 0) throw new NoCurriculumError();
+
+  const digests = buildPlanMaterialDigests(documents, notes);
 
   const outline: PlanOutline = normalizeStudyPlanOutline(
     await generateStructured<unknown>({
       system: studyPlanOutlineSystemPrompt(context.courseName, language, {
         hasSyllabus: !!syllabus.text,
-        hasMaterial: documents.length > 0,
+        hasMaterial: documents.length + notes.length > 0,
+        hasAssessments: digests.assessments !== "",
       }),
-      user: studyPlanOutlineUserPrompt(syllabus.text, buildMaterialDigest(documents)),
+      user: studyPlanOutlineUserPrompt(syllabus.text, digests.material, digests.assessments),
       maxTokens: efficient ? EFFICIENT_OUTLINE_MAX_TOKENS : OUTLINE_MAX_TOKENS,
       effort: efficient ? "low" : "medium",
       efficient,
@@ -127,6 +145,7 @@ export async function createStudyPlanForCourse(
     prerequisites: prerequisites[i],
     stage: stages[i],
     linked_document_ids: matchDocumentIds(chapter.matchedDocuments, documents),
+    linked_note_ids: matchNoteIds(chapter.matchedDocuments, notes),
     estimated_minutes: chapter.estimatedMinutes,
     resources: [],
   }));
@@ -140,6 +159,7 @@ export async function createStudyPlanForCourse(
     syllabusDocumentId: syllabus.documentId,
     syllabusText: input.syllabus && "text" in input.syllabus ? syllabus.text : null,
     sourceDocumentIds: documents.map((d) => d.id),
+    sourceNotes: Object.fromEntries(notes.map((n) => [n.id, noteFingerprint(n)])),
     sourceFolderId: context.folderId,
     sourceHandpicked: context.handpicked,
     language: preferredLanguage,

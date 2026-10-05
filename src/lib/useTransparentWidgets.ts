@@ -20,18 +20,24 @@ export const FROSTED_CARD = "bg-card/70 backdrop-blur-md";
 
 export type TodayCardLook = "solid" | "frosted" | "plain";
 
-// How the settings turn out for the Today card: hidden or not, and its look.
+// How the settings turn out for the Today card: hidden or not, whether it offers
+// the courses list, and its look.
 // Transparent widgets off is a solid card whatever else is set; on, the
 // frosted-card setting picks between the frosted panel and plain text on the
 // picture. Defaults (shown, frosted) apply until settings arrive, so the card
 // doesn't flash away or change shape on load.
-export function todayCardLook(settings: Pick<AppSettings, "dashboardTransparentWidgets" | "todayCardShown" | "todayCardFrosted"> | undefined): {
+export function todayCardLook(settings: Pick<AppSettings, "dashboardTransparentWidgets" | "todayCardShown" | "todayCardFrosted"> & Partial<Pick<AppSettings, "todayCoursesShown">> | undefined): {
   shown: boolean;
+  coursesShown: boolean;
   look: TodayCardLook;
 } {
   const transparent = settings?.dashboardTransparentWidgets ?? false;
   const frosted = settings?.todayCardFrosted ?? true;
-  return { shown: settings?.todayCardShown ?? true, look: !transparent ? "solid" : frosted ? "frosted" : "plain" };
+  return {
+    shown: settings?.todayCardShown ?? true,
+    coursesShown: settings?.todayCoursesShown ?? true,
+    look: !transparent ? "solid" : frosted ? "frosted" : "plain",
+  };
 }
 
 export function useTodayCardLook() {

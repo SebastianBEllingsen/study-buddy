@@ -232,7 +232,7 @@ export async function generateForCourse(
     // Generating for one study-plan chapter (see lib/studyPlan/): the item
     // is titled after the chapter and linked to it, so its results count
     // toward the chapter's mastery. The chapter's linked documents come in
-    // as documentIds; a chapter with none is generated from its topic
+    // as documentIds and noteIds; a chapter with none is generated from its topic
     // outline instead of failing with NoDocumentsError.
     studyPlanChapter?: { id: number; title: string; summary: string; subtopics: string[] };
     // A topic typed by the learner, for a scope with no material (e.g. a
@@ -246,7 +246,7 @@ export async function generateForCourse(
 
   const chapter = options?.studyPlanChapter;
   let context =
-    chapter && !options?.documentIds?.length
+    chapter && !options?.documentIds?.length && !options?.noteIds?.length
       ? await chapterTopicContext(courseId, chapter)
       : await buildCourseContext(courseId, options);
   // A chapter whose linked documents have since been deleted (or stopped

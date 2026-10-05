@@ -412,11 +412,38 @@ describe("study plan store", () => {
     const course = await createCourse("Sample Course");
     const plan = await store.replaceStudyPlan(newPlan(course.id, [chapter("A")]));
     await store.setPlanOptions(plan.id, { ...plan.options, practice: true, preset: "guided" });
-    await store.setPlanSourceDocumentIds(plan.id, [4, 5]);
+    await store.setPlanSourceMaterial(plan.id, { documentIds: [4, 5], notes: { 7: "abc" } });
     expect(await store.getStudyPlan(plan.id)).toMatchObject({
       preset: "guided",
       options: expect.objectContaining({ practice: true }),
       source_document_ids: [4, 5],
+      source_notes: { 7: "abc" },
     });
+  });
+
+  it("round-trips a plan's seen material, and reads the older array encoding", () => {
+    const raw = store.encodeSourceMaterial([3, 4], { 9: "f00d" });
+    expect(store.decodeSourceMaterial(raw)).toEqual({ documentIds: [3, 4], noteFingerprints: { 9: "f00d" } });
+    expect(store.decodeSourceMaterial("[]")).toEqual({ documentIds: [], noteFingerprints: {} });
+    // Notes as negated ids, no fingerprint: seen, content unknown.
+    expect(store.decodeSourceMaterial("[3,-9]")).toEqual({ documentIds: [3], noteFingerprints: { 9: "" } });
+    expect(store.decodeSourceMaterial("not json")).toEqual({ documentIds: [], noteFingerprints: {} });
+  });
+
+  it("keeps a chapter's linked notes when only its documents are patched, and the reverse", async () => {
+    const course = await createCourse("Sample Course");
+    const plan = await store.replaceStudyPlan({
+      ...newPlan(course.id, [{ ...chapter("A"), linked_document_ids: [4], linked_note_ids: [7] }]),
+    });
+    const id = plan.chapters[0].id;
+    expect(plan.chapters[0]).toMatchObject({ linked_document_ids: [4], linked_note_ids: [7] });
+
+    await store.updateChapter(id, { linked_document_ids: [5] });
+    expect((await store.getChapter(id))?.linked_note_ids).toEqual([7]);
+    await store.updateChapter(id, { linked_note_ids: [8, 9] });
+    expect(await store.getChapter(id)).toMatchObject({ linked_document_ids: [5], linked_note_ids: [8, 9] });
+
+    await store.extendChapter(id, { subtopics: [], documentIds: [6], noteIds: [9, 10] });
+    expect(await store.getChapter(id)).toMatchObject({ linked_document_ids: [5, 6], linked_note_ids: [8, 9, 10] });
   });
 });

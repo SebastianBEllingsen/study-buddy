@@ -382,7 +382,7 @@ export async function POST(request: Request) {
     }
     branding.dashboardTransparentWidgets = body.dashboardTransparentWidgets;
   }
-  for (const field of ["todayCardShown", "todayCardFrosted"] as const) {
+  for (const field of ["todayCardShown", "todayCardFrosted", "todayCoursesShown"] as const) {
     if (field in body) {
       if (typeof body[field] !== "boolean") {
         return Response.json({ error: `${field} must be a boolean` }, { status: 400 });

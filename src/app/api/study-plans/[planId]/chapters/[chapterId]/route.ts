@@ -1,4 +1,4 @@
-import { listDocumentSummariesForCourse } from "@/lib/models";
+import { listDocumentSummariesForCourse, listNotesForCourse } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
 import { deleteChapter, getStudyPlan, updateChapter } from "@/lib/studyPlan/store";
@@ -34,6 +34,11 @@ export async function PATCH(request: Request, { params }: Params) {
     const plan = await getStudyPlan(found.planId);
     const courseDocIds = new Set((await listDocumentSummariesForCourse(plan?.course_id ?? -1)).map((d) => d.id));
     patch.linked_document_ids = patch.linked_document_ids.filter((d) => courseDocIds.has(d));
+  }
+  if (patch.linked_note_ids) {
+    const plan = await getStudyPlan(found.planId);
+    const courseNoteIds = new Set((await listNotesForCourse(plan?.course_id ?? -1)).map((n) => n.id));
+    patch.linked_note_ids = patch.linked_note_ids.filter((n) => courseNoteIds.has(n));
   }
   await updateChapter(found.chapter.id, patch);
   // Finishing (or reopening) a chapter, or moving it to another stage,

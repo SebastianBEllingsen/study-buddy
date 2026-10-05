@@ -8,9 +8,13 @@
 //  3. a mock exam, when exam mode says one is due (lib/readiness/examMode.ts)
 //  4. the next step of up to a few plan chapters, most urgent first (nearest
 //     deadline, then weakest) and mixed across courses; they share the time
-//     left between them (none in an exam's final days)
+//     left between them (none in an exam's final days). A course with nothing
+//     left to learn brings its weakest finished chapter back for revision
+//     (lib/today/revision.ts), after new learning, and exam days keep it
 //  5. one weak concept, if time is left — two in exam mode, for more
 //     mixed practice
+
+import { REVISION_FRESH_QUIZ_SCORE } from "./revision";
 
 export type TodayStepKind = "reviews" | "mistakes" | "exam" | "chapter" | "concept";
 
@@ -59,9 +63,15 @@ export interface ChapterCandidate {
   mastery?: number | null;
   // Days until that deadline, when there is one.
   daysLeft?: number | null;
+  // When the learner last did anything in this course's plan (null: never),
+  // so courses get their turn instead of the same few winning every day.
+  lastStudiedAt?: string | null;
   // Studied but not yet tested: this step is the check that unlocks the
   // next chapter.
   awaitingCheck?: boolean;
+  // A finished chapter coming back for revision (see revision.ts): a test, not
+  // new material, so it still counts in an exam's final days.
+  revision?: boolean;
 }
 
 export interface WeakConcept {
@@ -130,6 +140,10 @@ function withCourse(href: string, courseId: number | null, extra: Record<string,
 // Why a chapter made today's list: what makes it the one to work on.
 export function chapterWhy(c: ChapterCandidate): string {
   const parts: string[] = [];
+  if (c.revision) {
+    const mastery = c.mastery !== null && c.mastery !== undefined ? ` (${Math.round(c.mastery * 100)}%)` : "";
+    parts.push(`revision — your weakest finished chapter${mastery}`);
+  }
   if (c.awaitingCheck) parts.push("passing it unlocks the next chapter");
   if (c.daysLeft !== null && c.daysLeft !== undefined && c.daysLeft >= 0 && c.daysLeft <= 60) {
     parts.push(c.daysLeft === 0 ? "finish date is today" : `${plural(c.daysLeft, "day")} to your finish date`);
@@ -174,7 +188,7 @@ function chapterStep(c: ChapterCandidate, minutes: number): TodayStep {
   return {
     ...base,
     id: `chapter:${c.chapterId}:practice`,
-    title: `${c.next.pretest ? "Pre-test" : "Test yourself"}: ${c.chapterTitle}`,
+    title: `${c.revision ? "Revise" : c.next.pretest ? "Pre-test" : "Test yourself"}: ${c.chapterTitle}`,
     detail: c.next.itemTitle ?? "A quiz for this chapter gets made when you open it",
     ...(c.next.itemId === null ? { generateQuiz: { planId: c.planId, chapterId: c.chapterId } } : {}),
     href: c.next.itemId !== null ? `/items/${c.next.itemId}` : planHref,
@@ -184,7 +198,9 @@ function chapterStep(c: ChapterCandidate, minutes: number): TodayStep {
 }
 
 // Most urgent first: the nearest deadline (none last), then today's
-// scheduled sessions before unscheduled chapters, then the weakest chapter.
+// scheduled sessions before unscheduled chapters, then new learning before
+// revision of finished chapters, then the course studied
+// least recently (never studied first), then the weakest chapter.
 export function rankChapters(chapters: ChapterCandidate[]): ChapterCandidate[] {
   return chapters
     .map((c, i) => ({ c, i }))
@@ -192,6 +208,8 @@ export function rankChapters(chapters: ChapterCandidate[]): ChapterCandidate[] {
       (a, b) =>
         (a.c.deadline ?? "9999-12-31").localeCompare(b.c.deadline ?? "9999-12-31") ||
         Number(!!b.c.session) - Number(!!a.c.session) ||
+        Number(!!a.c.revision) - Number(!!b.c.revision) ||
+        (a.c.lastStudiedAt ?? "").localeCompare(b.c.lastStudiedAt ?? "") ||
         (a.c.mastery ?? 0.5) - (b.c.mastery ?? 0.5) ||
         a.i - b.i
     )
@@ -324,7 +342,7 @@ interface ChapterLike {
 export function nextChapterStep(
   chapter: ChapterLike,
   reviewSession = false,
-  options: { pretest?: boolean } = {}
+  options: { pretest?: boolean; revision?: boolean } = {}
 ): ChapterNextStep {
   // A chapter not started yet, with a pre-test made and not taken: that first.
   const untouched = !chapter.subtopics.some((s) => s.done) && !chapter.resources.some((r) => r.done_at);
@@ -353,6 +371,11 @@ export function nextChapterStep(
   const quizzes = chapter.items
     .filter((i) => i.mode === "quiz")
     .sort((a, b) => (a.best_score ?? -1) - (b.best_score ?? -1));
+  // Revision of a chapter whose quizzes are all aced asks for a fresh one:
+  // repeating the same questions tests memory of the answers.
+  if (options.revision && quizzes.length > 0 && (quizzes[0].best_score ?? -1) >= REVISION_FRESH_QUIZ_SCORE) {
+    return { type: "practice", itemId: null, itemTitle: null };
+  }
   const item = quizzes[0] ?? chapter.items.find((i) => i.mode === "flashcards") ?? null;
   return { type: "practice", itemId: item?.id ?? null, itemTitle: item?.title ?? null };
 }

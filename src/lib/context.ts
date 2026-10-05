@@ -190,7 +190,8 @@ export function chunkCourseContext(context: CourseContext): string[] {
 // EVERY document in the course, not just status === "extracted" ones — a
 // non-text document (an image, or one still pending/failed) still gets a
 // placeholder line naming it, so the model at least knows it exists, per
-// the "all documents" requirement this was built for. Deliberately doesn't
+// the "all documents" requirement this was built for. The course's notes
+// follow the documents. Deliberately doesn't
 // touch buildCourseContext itself — quiz/flashcard/notes generation must
 // keep their existing extracted-only behavior unchanged.
 export async function buildFullCourseContextText(
@@ -201,9 +202,10 @@ export async function buildFullCourseContextText(
     throw new Error(`Course ${courseId} not found`);
   }
 
-  const [documents, folders] = await Promise.all([
+  const [documents, folders, notes] = await Promise.all([
     listDocumentsForCourse(courseId),
     listFoldersForCourse(courseId),
+    listNotesForCourse(courseId),
   ]);
   const folderIds = new Set(folders.map((f) => f.id));
 
@@ -216,6 +218,14 @@ export async function buildFullCourseContextText(
     const statusLabel = d.status === "image" ? "image, no extracted text" : d.status;
     return `--- Document: ${d.filename} (${location}, ${statusLabel}) ---`;
   });
+
+  // Notes are course content too (the chat assistant can write them — see
+  // chatActions.ts), so they're listed after the documents, same header idiom.
+  for (const n of notes) {
+    const location =
+      n.folder_id != null && folderIds.has(n.folder_id) ? folderPathLabel(folders, n.folder_id) : "Unfiled";
+    sections.push(`--- Note: ${n.title} (${location}) ---\n${stripNoteLinkSyntax(omitEmbeddedImages(n.markdown))}`);
+  }
 
   return { courseName: course.name, text: sections.join("\n\n") };
 }

@@ -106,6 +106,8 @@ export const app_settings = sqliteTable("app_settings", {
   // See AppSettings.todayCardShown / todayCardFrosted in models.ts.
   today_card_shown: integer("today_card_shown", { mode: "boolean" }).notNull().default(true),
   today_card_frosted: integer("today_card_frosted", { mode: "boolean" }).notNull().default(true),
+  // See AppSettings.todayCoursesShown in models.ts.
+  today_courses_shown: integer("today_courses_shown", { mode: "boolean" }).notNull().default(true),
   // See AppSettings.dashboardLockBackgroundCrop's doc comment in models.ts.
   dashboard_lock_background_crop: integer("dashboard_lock_background_crop", { mode: "boolean" })
     .notNull()

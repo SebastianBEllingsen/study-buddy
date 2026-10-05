@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "today_courses_shown" boolean DEFAULT true NOT NULL;

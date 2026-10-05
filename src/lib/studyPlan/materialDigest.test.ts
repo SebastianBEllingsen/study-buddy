@@ -34,6 +34,16 @@ describe("buildMaterialDigest", () => {
     expect(digest).toContain("doc-199.pdf");
   });
 
+  it("labels notes as notes, alongside documents", () => {
+    const digest = buildMaterialDigest([
+      { filename: "slides.pdf", extracted_text: "1. Basics" },
+      { filename: "Key ideas", extracted_text: "# Key ideas\nbody", kind: "note" },
+    ]);
+    expect(digest).toContain("--- Document: slides.pdf ---");
+    expect(digest).toContain("--- Note: Key ideas ---");
+    expect(digest).toContain("- Key ideas");
+  });
+
   it("is empty with no documents", () => {
     expect(buildMaterialDigest([])).toBe("");
   });

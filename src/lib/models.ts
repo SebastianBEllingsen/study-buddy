@@ -230,6 +230,7 @@ interface SettingsRow {
   deck_reminder_icons: boolean;
   today_card_shown: boolean;
   today_card_frosted: boolean;
+  today_courses_shown: boolean;
 }
 
 async function getSettingsRow(): Promise<SettingsRow | undefined> {
@@ -281,6 +282,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       deck_reminder_icons: app_settings.deck_reminder_icons,
       today_card_shown: app_settings.today_card_shown,
       today_card_frosted: app_settings.today_card_frosted,
+      today_courses_shown: app_settings.today_courses_shown,
     })
     .from(app_settings)
     .where(eq(app_settings.id, 1))
@@ -471,6 +473,9 @@ export interface AppSettings {
   // straight on the picture, like the other widgets. Has no effect with
   // transparentWidgets off (the card is solid then).
   todayCardFrosted: boolean;
+  // On (the default): the Today card has a "Your courses" list for picking up
+  // any course with a study plan. Off: the list isn't offered.
+  todayCoursesShown: boolean;
   // On (the default): document rows show their status badge — "extracted,
   // Np", "processing…", the failure error, or "image, not used for
   // generation" — same as before this setting existed. Off: no badge at all.
@@ -568,6 +573,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     dashboardTransparentWidgets: row?.dashboard_transparent_widgets ?? false,
     todayCardShown: row?.today_card_shown ?? true,
     todayCardFrosted: row?.today_card_frosted ?? true,
+    todayCoursesShown: row?.today_courses_shown ?? true,
     dashboardLockBackgroundCrop: row?.dashboard_lock_background_crop ?? false,
     dashboardBackdropFullPage: row?.dashboard_backdrop_full_page ?? false,
     dashboardBackdropBlur: clampBackdropBlur(row?.dashboard_backdrop_blur ?? 0),
@@ -764,6 +770,7 @@ export async function setAppBranding(fields: {
   dashboardTransparentWidgets?: boolean;
   todayCardShown?: boolean;
   todayCardFrosted?: boolean;
+  todayCoursesShown?: boolean;
   dashboardLockBackgroundCrop?: boolean;
   dashboardBackdropFullPage?: boolean;
   dashboardBackdropBlur?: number;
@@ -778,6 +785,7 @@ export async function setAppBranding(fields: {
   if ("dashboardTransparentWidgets" in fields) values.dashboard_transparent_widgets = fields.dashboardTransparentWidgets ?? false;
   if ("todayCardShown" in fields) values.today_card_shown = fields.todayCardShown ?? true;
   if ("todayCardFrosted" in fields) values.today_card_frosted = fields.todayCardFrosted ?? true;
+  if ("todayCoursesShown" in fields) values.today_courses_shown = fields.todayCoursesShown ?? true;
   if ("dashboardLockBackgroundCrop" in fields) values.dashboard_lock_background_crop = fields.dashboardLockBackgroundCrop ?? false;
   if ("dashboardBackdropFullPage" in fields) values.dashboard_backdrop_full_page = fields.dashboardBackdropFullPage ?? false;
   if ("dashboardBackdropBlur" in fields) values.dashboard_backdrop_blur = clampBackdropBlur(fields.dashboardBackdropBlur ?? 0);
@@ -3247,9 +3255,32 @@ export type ChatAttachment =
 // A folder/save action the AI proposed via chat (see chatActions.ts) — kept
 // here rather than in chatActions.ts, which already imports several
 // functions from this file, to avoid a circular import.
+//
+// `courseId` on the write actions names an existing course to act in; absent
+// or null means "the course created earlier in the same batch, else this
+// conversation's own course" (see chatActions.ts's executeChatActions).
+// `readCourse` is a permission request, not a write: once the user confirms
+// it, that course's content is visible to the assistant for the rest of the
+// conversation (see chat.ts's grantedCourseIds).
 export type ChatAction =
-  | { action: "createFolder"; folderName: string }
-  | { action: "saveAttachment"; ref: string; folderId: number | null; newFolderName: string | null };
+  | { action: "createCourse"; courseName: string }
+  | { action: "createFolder"; folderName: string; courseId?: number | null }
+  | {
+      action: "createNote";
+      title: string;
+      markdown: string;
+      folderId: number | null;
+      newFolderName: string | null;
+      courseId?: number | null;
+    }
+  | {
+      action: "saveAttachment";
+      ref: string;
+      folderId: number | null;
+      newFolderName: string | null;
+      courseId?: number | null;
+    }
+  | { action: "readCourse"; courseId: number };
 
 export interface PendingChatAction {
   id: string;

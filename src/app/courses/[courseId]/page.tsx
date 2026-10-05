@@ -3308,6 +3308,7 @@ export default function CoursePage() {
         onOpenChange={setStudyPlanDialogOpen}
         courseId={Number(courseId)}
         documents={detail.documents}
+        hasNoteMaterial={detail.notes.some((n) => n.generation_source && n.markdown.trim() !== "")}
         scope={{
           folderId: generationDocIds.size === 0 && scope !== ALL_MATERIAL ? Number(scope) : null,
           documentIds: generationDocIds.size > 0 ? [...generationDocIds] : null,
