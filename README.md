@@ -43,7 +43,7 @@ Upload the PDFs for a course and generate study material scoped strictly to that
   <img src="docs/images/CoursePage2.png" width="500" alt="Generating notes, a quiz, or flashcards from a course">
   <img src="docs/images/QuizGenerationSettings.png" width="380" alt="Quiz settings, with a saved question-type preset">
 
-- ✅ **Quiz grading** — MCQ graded instantly, short answers graded by AI, with a **"Retry what you got wrong"** button for fresh practice on missed concepts
+- ✅ **Quiz grading** — MCQ graded instantly, short answers graded by AI once you turn on **AI grading** in Settings (until then a simple keyword match against the model answer is used, and says so), with a **"Retry what you got wrong"** button for fresh practice on missed concepts
 
   <table>
     <tr>
@@ -178,7 +178,7 @@ pnpm install
 pnpm dev
 ```
 
-Requires [Node.js](https://nodejs.org) 20+ and [pnpm](https://pnpm.io) (this repo uses `pnpm-lock.yaml` — don't install with `npm`/`yarn`, the lockfiles won't match). Open **http://localhost:3000** — a local SQLite database is created automatically under `data/` on first run and never leaves your machine.
+Requires [Node.js](https://nodejs.org) 22.13+ (some dependencies — the SQLite driver, PDF text extraction, Google Calendar — don't support older versions) and [pnpm](https://pnpm.io) (this repo uses `pnpm-lock.yaml` — don't install with `npm`/`yarn`, the lockfiles won't match). Open **http://localhost:3000** — a local SQLite database is created automatically under `data/` on first run and never leaves your machine.
 
 ### Connect an AI backend
 

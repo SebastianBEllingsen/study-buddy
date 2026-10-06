@@ -15,7 +15,7 @@ vi.mock("@/lib/models", () => ({
 }));
 vi.mock("@/lib/review/legacyMigration", () => ({ ensureFsrsMigrated: vi.fn() }));
 vi.mock("@/lib/review/store", () => ({ reconcileReviewItemsAfterRemoval: vi.fn() }));
-vi.mock("@/lib/spacedRepetition", () => ({ deckDueCardIndices: vi.fn(), deckDueReverseIndices: vi.fn() }));
+vi.mock("@/lib/dueCards", () => ({ deckDueCardIndices: vi.fn(), deckDueReverseIndices: vi.fn() }));
 vi.mock("@/lib/blobStorage/cleanup", () => ({ removeUnreferencedBlobs: vi.fn() }));
 
 const { PATCH } = await import("./route");

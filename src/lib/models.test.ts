@@ -939,6 +939,48 @@ describe("resilience to a corrupted content_json row", () => {
     const itemIds = results.filter((r) => r.kind === "item").map((r) => r.itemId);
     expect(itemIds).not.toContain(broken.id);
   });
+
+  it("searchAll copes with items whose JSON is valid but the wrong shape", async () => {
+    const { course, folder } = await makeCourseWithFolder();
+    const make = (mode: "quiz" | "flashcards" | "notes", title: string) =>
+      createGeneratedItem({
+        courseId: course.id,
+        folderId: folder.id,
+        sourceFolderId: null,
+        sourceHandpicked: false,
+        mode,
+        title,
+        contentJson: {},
+        sourceDocumentIds: [],
+      });
+    const wrongShapes: [Awaited<ReturnType<typeof make>>, string][] = [
+      [await make("quiz", "Odd quiz about mitochondria"), "{}"],
+      [await make("quiz", "Null quiz about mitochondria"), "null"],
+      [await make("flashcards", "Odd deck about mitochondria"), '{"cards":[{"front":"mitochondria"},{"back":null},null,5]}'],
+      [await make("notes", "Odd notes about mitochondria"), '{"markdown":42}'],
+    ];
+    for (const [item, json] of wrongShapes) {
+      testDb.db
+        .update(testDb.schema.generated_items)
+        .set({ content_json: json })
+        .where(eq(testDb.schema.generated_items.id, item.id))
+        .run();
+    }
+    const good = await createGeneratedItem({
+      courseId: course.id,
+      folderId: folder.id,
+      sourceFolderId: null,
+      sourceHandpicked: false,
+      mode: "flashcards",
+      title: "Good deck",
+      contentJson: { cards: [{ front: "What do mitochondria make?", back: "ATP" }] },
+      sourceDocumentIds: [],
+    });
+
+    const results = await searchAll("mitochondria", course.id);
+    const itemIds = results.filter((r) => r.kind === "item").map((r) => r.itemId);
+    expect(itemIds).toContain(good.id);
+  });
 });
 
 describe("getNewDocumentsForItem with nested folders", () => {

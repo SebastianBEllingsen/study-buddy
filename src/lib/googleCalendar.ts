@@ -73,9 +73,10 @@ async function buildAuthorizedClient() {
   return client;
 }
 
-export async function getGoogleAuthUrl(): Promise<string> {
+export async function getGoogleAuthUrl(state: string): Promise<string> {
   const client = await buildAuthClient();
   return client.generateAuthUrl({
+    state, // checked on the way back — see lib/oauthState.ts
     access_type: "offline", // required to get a refresh_token back
     prompt: "consent", // forces a refresh_token even on a re-auth
     scope: SCOPES,

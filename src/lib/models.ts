@@ -28,15 +28,15 @@ import {
   uploaded_images,
 } from "./db";
 import { appendBelow } from "./dashboardGrid";
-import { localDayOfUtc, nowUtc } from "./time";
+import { localDayOfUtc, nowUtc, toUtcText } from "./time";
 import { normalizeDateFormat, type DateFormat } from "./dateFormat";
 import { forgetItemContent, itemContents } from "./itemContentCache";
 import { blobKeyFromUrl, readBlob } from "./blobStorage";
 import { normalizeLanguage } from "./languages";
 import { clampRetention, DEFAULT_RETENTION } from "./fsrs";
 import { subtreeFolderIds, wouldCreateCycle } from "./folderTree";
-import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
-import { deckDueCardIndices, deckDueReverseIndices } from "./spacedRepetition";
+import type { FlashcardsContent, QuizGenerationSettings } from "./types";
+import { deckDueCardIndices, deckDueReverseIndices } from "./dueCards";
 import type { SourceTrust } from "./sources/types";
 import { listAllCardDueRows } from "./review/store";
 import { ensureFsrsMigrated } from "./review/legacyMigration";
@@ -2824,20 +2824,28 @@ function itemCandidates(
     console.error(`Skipping item ${key} with unparseable content_json in search:`, err);
     return [];
   }
+  // Valid JSON can still be the wrong shape (an older or hand-edited row, an
+  // imported deck with a gap) — take only what is really text, so one odd
+  // item can't take out every search.
+  const texts = (values: unknown): string[] =>
+    Array.isArray(values) ? values.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
+  const record = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const body = record(content);
   switch (mode) {
     case "quiz":
-      return (content as QuizContent).questions.map((q) => ({ key, text: q.question }));
+      return texts(list(body.questions).map((q) => record(q).question)).map((text) => ({ key, text }));
     case "flashcards":
-      return (content as FlashcardsContent).cards.flatMap((c) => [
-        { key, text: c.front },
-        { key, text: c.back },
-      ]);
+      return list(body.cards).flatMap((card) => texts([record(card).front, record(card).back]).map((text) => ({ key, text })));
     case "notes":
-      return (content as NotesContent).markdown
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .map((line) => ({ key, text: line }));
+      return texts([body.markdown]).flatMap((markdown) =>
+        markdown
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .map((line) => ({ key, text: line }))
+      );
   }
 }
 
@@ -3060,7 +3068,7 @@ export async function searchAll(query: string, courseId?: number): Promise<Searc
 function oneYearAgoUtc(): string {
   const d = new Date();
   d.setUTCFullYear(d.getUTCFullYear() - 1);
-  return d.toISOString().slice(0, 19).replace("T", " ");
+  return toUtcText(d);
 }
 
 export interface StudyActivity {

@@ -4,6 +4,8 @@
 // here or on another computer — from one cut off by a restart, which is
 // reported as failed so it can be retried.
 
+import { toUtcText } from "../time";
+
 // Longer than any real grading run takes.
 export const STUCK_GRADING_MS = 15 * 60 * 1000;
 
@@ -26,7 +28,7 @@ export function releaseGrading(attemptId: number): void {
 
 // UTC "YYYY-MM-DD HH:MM:SS" of the moment before which a run counts as cut off.
 export function stuckBefore(now = new Date()): string {
-  return new Date(now.getTime() - STUCK_GRADING_MS).toISOString().slice(0, 19).replace("T", " ");
+  return toUtcText(new Date(now.getTime() - STUCK_GRADING_MS));
 }
 
 // The status to show: "grading" only while a run is plausibly still going.

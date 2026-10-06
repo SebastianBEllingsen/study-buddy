@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { adaptStockCardCss, buildCardDocument, cardContentSecurityPolicy, hasCardHtml, withCardCss } from "./cardHtml";
+import { adaptStockCardCss, buildCardDocument, cardContentSecurityPolicy, frameKeyPress, hasCardHtml, withCardCss } from "./cardHtml";
 import type { Flashcard } from "./types";
 
 const options = {
@@ -116,5 +116,22 @@ describe("buildCardDocument", () => {
     expect(buildCardDocument(options)).toContain('var channel = "chan-1"');
     expect(buildCardDocument(options)).toContain("if (true) playFirst()");
     expect(buildCardDocument({ ...options, autoplay: false })).toContain("if (false) playFirst()");
+  });
+});
+
+describe("frameKeyPress", () => {
+  it("passes through the review shortcuts, with a code of our own", () => {
+    expect(frameKeyPress(" ")).toEqual({ key: " ", code: "Space" });
+    expect(frameKeyPress("3")).toEqual({ key: "3", code: "Digit3" });
+    expect(frameKeyPress("Enter")).toEqual({ key: "Enter", code: "Enter" });
+  });
+
+  it("refuses every other key a card's script might try to press on the page", () => {
+    for (const key of ["/", "Escape", "Delete", "a", "5", "0", "Meta", "constructor", "__proto__", "toString", "", " 1"]) {
+      expect(frameKeyPress(key), key).toBeNull();
+    }
+    expect(frameKeyPress(undefined)).toBeNull();
+    expect(frameKeyPress(1)).toBeNull();
+    expect(frameKeyPress({ toString: () => "1" })).toBeNull();
   });
 });

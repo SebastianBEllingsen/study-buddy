@@ -12,7 +12,7 @@ import {
   type GenerationMode,
 } from "@/lib/models";
 import { removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
-import { deckDueCardIndices, deckDueReverseIndices } from "@/lib/spacedRepetition";
+import { deckDueCardIndices, deckDueReverseIndices } from "@/lib/dueCards";
 import { cardDueRowsForItem, reverseDueRowsForItem, reconcileReviewItemsAfterRemoval } from "@/lib/review/store";
 import { ensureFsrsMigrated } from "@/lib/review/legacyMigration";
 import type { FlashcardsContent } from "@/lib/types";

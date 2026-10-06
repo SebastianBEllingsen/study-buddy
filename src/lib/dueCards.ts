@@ -1,3 +1,4 @@
+import { toUtcText } from "./time";
 import type { FlashcardsContent } from "./types";
 
 // Due-ness of a deck's cards from their review state (review_items rows,
@@ -10,7 +11,7 @@ export function computeDueCardIndices(
   cardCount: number,
   now = new Date()
 ): number[] {
-  const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
+  const nowStr = toUtcText(now);
   const scheduleByIndex = new Map(schedule.map((s) => [s.card_index, s]));
   const due: number[] = [];
   for (let i = 0; i < cardCount; i++) {
@@ -45,7 +46,7 @@ export function deckDueReverseIndices(
   now = new Date()
 ): number[] {
   if (!content.reverse || content.reminders === false) return [];
-  const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
+  const nowStr = toUtcText(now);
   const seen = new Set(forward.map((f) => f.card_index));
   const reverseByIndex = new Map(reverse.map((r) => [r.card_index, r]));
   const due: number[] = [];

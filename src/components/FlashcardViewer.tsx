@@ -4,6 +4,7 @@ import { Explain } from "@/components/Explain";
 import useSWR from "swr";
 import type { AppSettings } from "@/lib/models";
 import { useEffect, useRef, useState } from "react";
+import { useLatest } from "@/lib/useLatest";
 import { PartyPopper, CalendarCheck } from "lucide-react";
 import { saveInBackground } from "@/lib/backgroundSaves";
 import type { Flashcard } from "@/lib/types";
@@ -183,8 +184,12 @@ export default function FlashcardViewer({
   // reveal); 1-4 after it rate the revealed card (Again/Hard/Good/Easy,
   // left to right — matches RESULT_LABELS). This keeps the card review loop
   // fast without hijacking text entry in forms or the Ask AI panel.
+  // Read through a ref so the key handler is registered once and still acts
+  // on the newest state — confidence picked after the flip included.
+  const latest = useLatest({ flipped, handleResult, revealWith });
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      const { flipped, handleResult, revealWith } = latest.current;
       handleFlashcardKeyDown({
         event: e,
         flipped,
@@ -195,10 +200,7 @@ export default function FlashcardViewer({
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-    // handleResult closes over cardIndex/itemId, both already reflected by
-    // re-running this effect whenever `flipped` flips back on for a new card.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flipped, cardIndex]);
+  }, [latest]);
 
   // No cards due — the "all caught up" state, with a way to review anyway.
   if (queue === null) {

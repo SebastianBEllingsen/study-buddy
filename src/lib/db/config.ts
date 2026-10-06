@@ -71,5 +71,14 @@ export function writeStorageConfig(config: StorageConfig): void {
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  // Holds the database password and storage key: readable by this user only.
+  // `mode` applies when the file is created, so a file written by an older
+  // version is tightened too. (Windows ignores POSIX modes; its per-user
+  // profile folder already keeps other accounts out.)
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  try {
+    fs.chmodSync(configPath, 0o600);
+  } catch {
+    // Not every file system supports it — the write itself already succeeded.
+  }
 }

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db, exam_profiles, mock_exam_attempts, mock_exams } from "../db";
 import type { AiBackend } from "../models";
-import { nowUtc } from "../time";
+import { nowUtc, toUtcText } from "../time";
 import { INTERRUPTED_MESSAGE, liveStatus, stuckBefore } from "./gradingJobs";
 import type { AttemptStatus, ExamProfile, MockExam, MockExamAttempt, MockExamTask, TaskAnswer, TaskResult } from "./types";
 
@@ -177,7 +177,7 @@ export async function saveAnswers(id: number, answers: TaskAnswer[]): Promise<vo
 // win: only an attempt that's open, failed, or whose last run was cut off
 // can be claimed. `submitted` records the hand-in time on the first one.
 export async function claimForGrading(id: number, options: { submitted: boolean }, now = new Date()): Promise<boolean> {
-  const started = now.toISOString().slice(0, 19).replace("T", " ");
+  const started = toUtcText(now);
   const claimed = await db
     .update(mock_exam_attempts)
     .set({

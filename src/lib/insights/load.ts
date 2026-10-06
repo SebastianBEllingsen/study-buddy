@@ -15,15 +15,12 @@ import { localToday } from "../studyPlan/schedule";
 import { listReviewLogsSince } from "../review/store";
 import { listMistakes } from "../review/mistakes";
 import { calibrationTable, calibrationVerdict, topMisconceptions, type CalibrationRow, type WeekSummary } from "./summary";
+import { toUtcText } from "../time";
 
 // The insights page: calibration over the last 30 days and a review of the
 // last 7, across every course or one.
 
 const DAY = 86_400_000;
-
-function utcText(d: Date): string {
-  return d.toISOString().slice(0, 19).replace("T", " ");
-}
 
 export interface Insights {
   calibration: CalibrationRow[];
@@ -35,8 +32,8 @@ export interface Insights {
 }
 
 export async function loadInsights(courseId: number | null, now = new Date()): Promise<Insights> {
-  const monthAgo = utcText(new Date(now.getTime() - 30 * DAY));
-  const weekAgo = utcText(new Date(now.getTime() - 7 * DAY));
+  const monthAgo = toUtcText(new Date(now.getTime() - 30 * DAY));
+  const weekAgo = toUtcText(new Date(now.getTime() - 7 * DAY));
   const weekAgoDay = localToday(new Date(now.getTime() - 7 * DAY));
   const today = localToday(now);
   const inCourse = <T extends { course_id: number }>(rows: T[]) =>

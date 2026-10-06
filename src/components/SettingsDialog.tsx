@@ -1366,8 +1366,9 @@ function StorageSection() {
       <div className="space-y-1.5 border-t pt-3">
         <Label>Backup</Label>
         <p className="text-xs text-muted-foreground">
-          Download everything — courses, folders, extracted text, and every generated note, quiz,
-          and flashcard set with its full review history — as one JSON file.
+          Download your work as one JSON file — courses, folders, extracted text, your own notes and
+          canvases, study plans, exams, and every generated note, quiz, and flashcard set with its full
+          review history. Uploaded files themselves aren&apos;t included.
         </p>
         <Button
           type="button"

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 import useSWR from "swr";
 import type { AppSettings } from "@/lib/models";
-import { buildCardDocument, type CardFrameMessage } from "@/lib/cardHtml";
+import { buildCardDocument, frameKeyPress, type CardFrameMessage } from "@/lib/cardHtml";
 import type { CardHtml } from "@/lib/types";
 
 // One side of a card imported from Anki, drawn the way Anki draws it: the
@@ -54,10 +54,11 @@ export function HtmlCardFace({
       if (!m || m.sb !== channel) return;
       if (m.kind === "height" && Number.isFinite(m.height)) setHeight(Math.min(Math.max(m.height, 0), 20000));
       else if (m.kind === "flip") onFlipRef.current?.();
-      else if (m.kind === "key" && typeof m.key === "string") {
+      else if (m.kind === "key") {
         // Keys pressed inside the frame go to the same shortcuts as keys
-        // pressed on the page (space flips, 1–4 rate).
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: m.key, code: String(m.code), bubbles: true, cancelable: true }));
+        // pressed on the page (space flips, 1–4 rate) — and only those.
+        const press = frameKeyPress(m.key);
+        if (press) document.dispatchEvent(new KeyboardEvent("keydown", { ...press, bubbles: true, cancelable: true }));
       }
     }
     window.addEventListener("message", onMessage);

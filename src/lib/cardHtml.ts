@@ -65,6 +65,19 @@ export function cardContentSecurityPolicy(origin: string): string {
   ].join("; ");
 }
 
+// The keys a card frame may press on the page's behalf: the review
+// shortcuts only (space flips, 1–4 rate). The frame's own script already
+// filters to these, but a deck's own script can post any message it likes,
+// so the page filters again — a card can't type other shortcuts (search,
+// settings, …) into the app. The code is derived here, never taken from the
+// frame.
+const FRAME_KEYS: Record<string, string> = { " ": "Space", Enter: "Enter", "1": "Digit1", "2": "Digit2", "3": "Digit3", "4": "Digit4" };
+
+export function frameKeyPress(key: unknown): { key: string; code: string } | null {
+  if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(FRAME_KEYS, key)) return null;
+  return { key, code: FRAME_KEYS[key] };
+}
+
 const FRAME_SCRIPT = `
 (function () {
   var channel = __CHANNEL__;

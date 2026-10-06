@@ -1,10 +1,11 @@
 import { createEmptyCard, fsrs, generatorParameters, Rating, State, type Card, type Grade } from "ts-fsrs";
+import { fromUtcText, toUtcText } from "./time";
 import type { FlashcardResult } from "./models";
 import { DEFAULT_RETENTION, MAX_RETENTION, MIN_RETENTION, type Confidence } from "./review/types";
 
 // FSRS (Free Spaced Repetition Scheduler, via ts-fsrs) for every card and
 // quiz question the learner reviews — replaces the old SM-2 schedule in
-// spacedRepetition.ts. Whole-day granularity: short-term (sub-day learning
+// dueCards.ts. Whole-day granularity: short-term (sub-day learning
 // step) scheduling is off, and an item answered wrong is simply asked again
 // later in the same session until it's right — only its first answer of
 // the session is graded here.
@@ -36,13 +37,7 @@ export interface ReviewOutcome {
   log: { rating: Grade; stability: number; difficulty: number; scheduled_days: number };
 }
 
-export function toUtcText(date: Date): string {
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
-
-export function fromUtcText(text: string): Date {
-  return new Date(`${text.replace(" ", "T")}Z`);
-}
+export { fromUtcText, toUtcText };
 
 export function clampRetention(value: unknown): number {
   const n = typeof value === "number" ? value : Number.NaN;

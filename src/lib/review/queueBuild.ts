@@ -1,4 +1,5 @@
 import { withCardCss } from "../cardHtml";
+import { toUtcText } from "../time";
 import type { Flashcard, FlashcardsContent, QuizContent, QuizQuestion, SourceRef } from "../types";
 import type { ReviewItemKind } from "./types";
 
@@ -11,10 +12,6 @@ export interface QueueReview {
   item_index: number;
   due_at: string;
   last_reviewed_at?: string | null;
-}
-
-function toUtcText(date: Date): string {
-  return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
 // The review session's queue: everything due across courses — cards and

@@ -1,12 +1,23 @@
 // The single UTC "YYYY-MM-DD HH:MM:SS" timestamp format used everywhere in
 // this app (due_at comparisons, streak dates, created_at/updated_at, ...).
-// Generated here in the application layer rather than via a DB-side default
-// like SQLite's datetime('now') — Postgres's equivalent, now(), returns a
-// different representation, and generating it in JS keeps every timestamp
-// column plain TEXT with identical string-comparison semantics on both
-// backends (see spacedRepetition.ts's computeDueCardIndices and streak.ts).
+// Application code generates it here rather than relying on a database
+// clock — Postgres's now() has a different representation from SQLite's
+// datetime('now') — so every timestamp column is plain TEXT with identical
+// string-comparison semantics on both backends (see dueCards.ts's
+// computeDueCardIndices and streak.ts). The schema's own datetime('now')
+// defaults produce this same format and only cover rows written outside the app.
 export function nowUtc(): string {
-  return new Date().toISOString().slice(0, 19).replace("T", " ");
+  return toUtcText(new Date());
+}
+
+// A moment as that same UTC text — the one place that formats it.
+export function toUtcText(date: Date): string {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+// ...and back to a Date.
+export function fromUtcText(text: string): Date {
+  return new Date(`${text.replace(" ", "T")}Z`);
 }
 
 // The local calendar day ("YYYY-MM-DD") a stored UTC timestamp falls on —

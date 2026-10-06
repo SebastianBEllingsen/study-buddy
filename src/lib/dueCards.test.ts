@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeDueCardIndices, deckDueCardIndices, deckDueReverseIndices } from "./spacedRepetition";
+import { computeDueCardIndices, deckDueCardIndices, deckDueReverseIndices } from "./dueCards";
 
 describe("computeDueCardIndices", () => {
   const now = new Date("2026-01-10T00:00:00.000Z");

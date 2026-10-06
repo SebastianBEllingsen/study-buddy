@@ -9,12 +9,14 @@ const readFileSync = vi.fn();
 const writeFileSync = vi.fn();
 const existsSync = vi.fn();
 const mkdirSync = vi.fn();
+const chmodSync = vi.fn();
 vi.mock("node:fs", () => ({
-  default: { readFileSync, writeFileSync, existsSync, mkdirSync },
+  default: { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync },
   readFileSync,
   writeFileSync,
   existsSync,
   mkdirSync,
+  chmodSync,
 }));
 
 const { resolveStorageConfig, supabaseDetails, writeStorageConfig } = await import("./config");
@@ -26,6 +28,7 @@ beforeEach(() => {
   writeFileSync.mockReset();
   existsSync.mockReset();
   mkdirSync.mockReset();
+  chmodSync.mockReset();
   for (const key of ENV_KEYS) delete process.env[key];
 });
 
@@ -103,6 +106,21 @@ describe("writeStorageConfig", () => {
     expect(writtenPath).toMatch(/data[/\\]storage-config\.json$/);
     expect(JSON.parse(writtenContent)).toEqual(config);
     expect(writtenContent).toBe(JSON.stringify(config, null, 2));
+  });
+
+  it("keeps the file private to this user, including one an older version made world-readable", () => {
+    existsSync.mockReturnValue(true);
+    writeStorageConfig({ mode: "local" });
+    expect(writeFileSync.mock.calls[0][2]).toEqual({ mode: 0o600 });
+    expect(chmodSync).toHaveBeenCalledWith(expect.stringMatching(/storage-config\.json$/), 0o600);
+  });
+
+  it("still succeeds when the file system can't change modes", () => {
+    existsSync.mockReturnValue(true);
+    chmodSync.mockImplementation(() => {
+      throw new Error("EPERM");
+    });
+    expect(() => writeStorageConfig({ mode: "local" })).not.toThrow();
   });
 });
 
