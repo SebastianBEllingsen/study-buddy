@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
-import { handleFlashcardKeyDown } from "./FlashcardViewer";
+import { handleFlashcardKeyDown, mixTurns } from "./FlashcardViewer";
 
 describe("handleFlashcardKeyDown", () => {
   it("toggles the card when space is pressed outside a form field", () => {
@@ -81,5 +81,23 @@ describe("handleFlashcardKeyDown", () => {
       handleFlashcardKeyDown({ event: make("4"), flipped: false, onFlip: vi.fn(), onRate: vi.fn(), onConfidence })
     ).toBe(false);
     expect(onConfidence).not.toHaveBeenCalled();
+  });
+});
+
+describe("mixTurns", () => {
+  it("keeps the regular order and adds every reverse turn", () => {
+    const turns = mixTurns([0, 1, 2], [5, 6], () => 0.5);
+    expect(turns.filter((t) => !t.reverse).map((t) => t.index)).toEqual([0, 1, 2]);
+    expect(turns.filter((t) => t.reverse).map((t) => t.index).sort()).toEqual([5, 6]);
+  });
+
+  it("never puts a card's reverse turn next to its regular turn", () => {
+    for (let i = 0; i < 50; i++) {
+      const turns = mixTurns([0, 1, 2, 3], [1, 2, 3], Math.random);
+      turns.forEach((t, at) => {
+        const next = turns[at + 1];
+        if (next) expect(t.index === next.index).toBe(false);
+      });
+    }
   });
 });

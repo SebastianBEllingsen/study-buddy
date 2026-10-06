@@ -65,7 +65,7 @@ export function TopicLevelStep({
       <div className="space-y-1">
         <h2 className="font-heading text-lg font-semibold">What do you already know?</h2>
         <p className="text-sm text-muted-foreground">
-          Chapters you&apos;ve seen get faster-paced material; ones you know get a single refresher.
+          Chapters you&apos;ve seen get faster-paced material; ones you know are skipped and come back later for revision.
           {plan.options.webResources ? " Resources are found once you continue." : ""}
         </p>
       </div>

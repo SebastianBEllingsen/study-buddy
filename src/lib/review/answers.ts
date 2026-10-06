@@ -48,6 +48,8 @@ export async function recordCardAnswer(input: {
   result: FlashcardResult;
   confidence: Confidence | null;
   source: ReviewSource;
+  // Asked back-first (FlashcardsContent.reverse): scheduled on its own.
+  reverse?: boolean;
   now?: Date;
 }): Promise<RecordedAnswer> {
   const now = input.now ?? new Date();
@@ -68,7 +70,7 @@ export async function recordCardAnswer(input: {
   const correct = rating !== Rating.Again;
   const row = await recordReviewUnlessRecent({
     generatedItemId: input.item.id,
-    kind: "card",
+    kind: input.reverse ? "card_reverse" : "card",
     itemIndex: input.cardIndex,
     rating,
     correct,
@@ -81,7 +83,8 @@ export async function recordCardAnswer(input: {
   if (!row) return { index: input.cardIndex, scheduled: false, dueAt: null };
   if (correct) {
     await autoResolveMistakes(row.id);
-  } else {
+  } else if (!input.reverse) {
+    // The mistake log (and its focus sessions) only knows front-first cards.
     await logMistake({
       generatedItemId: input.item.id,
       reviewItemId: row.id,

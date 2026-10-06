@@ -47,22 +47,33 @@ export async function listReviewItemsForItems(generatedItemIds: number[]): Promi
   return db.select().from(review_items).where(inArray(review_items.generated_item_id, generatedItemIds));
 }
 
+// Like cardDueRowsForItem, for the back-first schedule of a reverse deck.
+export async function reverseDueRowsForItem(generatedItemId: number): Promise<{ card_index: number; due_at: string }[]> {
+  const rows = await listReviewItemsForItem(generatedItemId, "card_reverse");
+  return rows.map((r) => ({ card_index: r.item_index, due_at: r.due_at }));
+}
+
 // The shape deckDueCardIndices takes: one entry per reviewed card.
 export async function cardDueRowsForItem(generatedItemId: number): Promise<{ card_index: number; due_at: string }[]> {
   const rows = await listReviewItemsForItem(generatedItemId, "card");
   return rows.map((r) => ({ card_index: r.item_index, due_at: r.due_at }));
 }
 
-// Every reviewed card's due date, for the cross-course due counts.
-export async function listAllCardDueRows(): Promise<{ generated_item_id: number; card_index: number; due_at: string }[]> {
-  return db
+// Every reviewed card's due date (regular and back-first), for the
+// cross-course due counts.
+export async function listAllCardDueRows(): Promise<
+  { generated_item_id: number; card_index: number; due_at: string; reverse: boolean }[]
+> {
+  const rows = await db
     .select({
       generated_item_id: review_items.generated_item_id,
       card_index: review_items.item_index,
       due_at: review_items.due_at,
+      kind: review_items.kind,
     })
     .from(review_items)
-    .where(eq(review_items.kind, "card"));
+    .where(inArray(review_items.kind, ["card", "card_reverse"]));
+  return rows.map(({ kind, ...row }) => ({ ...row, reverse: kind === "card_reverse" }));
 }
 
 function memoryOf(row: ReviewItemRow): MemoryState {
@@ -183,11 +194,13 @@ export async function reconcileReviewItemsAfterRemoval(
   if (removed.length === 0) return;
   const shiftFor = (index: number) => removed.filter((i) => i < index).length;
 
+  // A card's back-first schedule is keyed by the same position.
+  const itemKinds: ReviewItemKind[] = kind === "card" ? ["card", "card_reverse"] : [kind];
   const [items, mistakeRows] = await Promise.all([
     db
       .select({ id: review_items.id, item_index: review_items.item_index })
       .from(review_items)
-      .where(and(eq(review_items.generated_item_id, generatedItemId), eq(review_items.kind, kind)))
+      .where(and(eq(review_items.generated_item_id, generatedItemId), inArray(review_items.kind, itemKinds)))
       .orderBy(asc(review_items.item_index)),
     db
       .select({ id: mistakes.id, item_index: mistakes.item_index })

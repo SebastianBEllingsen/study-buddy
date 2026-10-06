@@ -7,7 +7,7 @@ import { useDateFormatter } from "@/components/DateFormatProvider";
 import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { saveStateLabel, useAutosave } from "@/lib/autosave";
-import { Bell, BellOff, Download, Pencil, Sparkles } from "lucide-react";
+import { ArrowLeftRight, Bell, BellOff, Download, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useAppName } from "@/lib/useAppName";
 import type { GeneratedItem, QuizAttempt } from "@/lib/models";
@@ -56,6 +56,7 @@ interface ItemDetail {
   bestScore: number | null;
   availableNewDocuments: { id: number; filename: string }[];
   dueCardIndices: number[];
+  dueReverseIndices: number[];
 }
 
 // Starts a file download from one of the item's export routes (they reply
@@ -235,6 +236,33 @@ export default function ItemPage() {
     );
   }
 
+  // Whether the deck also asks its cards back-first (see
+  // FlashcardsContent.reverse). Stored only as `true`.
+  async function toggleDeckReverse() {
+    if (!detail) return;
+    const current = JSON.parse(detail.item.content_json) as FlashcardsContent;
+    const turningOn = current.reverse !== true;
+    const next: FlashcardsContent = { ...current };
+    if (turningOn) next.reverse = true;
+    else delete next.reverse;
+    const res = await fetch(`/api/items/${params.itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: next }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      toast.error(body.error ?? "Couldn't update this setting");
+      return;
+    }
+    await mutateItem();
+    toast.success(
+      turningOn
+        ? "Both directions on — reviewed cards will also come up back-first"
+        : "Both directions off — cards only come up front-first"
+    );
+  }
+
   // Quiet debounced autosave for notes content — unlike saveContent() above
   // (used for flashcards edits), this skips the toast and full item reload
   // on every keystroke, matching the Vault NoteEditor's own autosave feel.
@@ -289,6 +317,7 @@ export default function ItemPage() {
 
   const { item, attempts, bestScore } = detail;
   const content = JSON.parse(item.content_json);
+  const reverseOn = item.mode === "flashcards" && (content as FlashcardsContent).reverse === true;
   const remindersOn = item.mode !== "flashcards" || (content as FlashcardsContent).reminders !== false;
   // attempts is only the most recent RECENT_QUIZ_ATTEMPTS_LIMIT (see
   // listRecentQuizAttemptsForItem) — fine for "last score" (the most recent
@@ -377,6 +406,20 @@ export default function ItemPage() {
                     className="size-4 shrink-0 accent-primary"
                     checked={remindersOn}
                     onChange={toggleDeckReminders}
+                  />
+                </label>
+              )}
+              {item.mode === "flashcards" && (
+                <label className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+                  <span className="flex items-center gap-2">
+                    <ArrowLeftRight className="size-3.5 text-muted-foreground" />
+                    Practise both directions
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="size-4 shrink-0 accent-primary"
+                    checked={reverseOn}
+                    onChange={toggleDeckReverse}
                   />
                 </label>
               )}
@@ -502,6 +545,7 @@ export default function ItemPage() {
             itemId={item.id}
             cards={(content as FlashcardsContent).cards}
             dueCardIndices={detail.dueCardIndices}
+            dueReverseIndices={detail.dueReverseIndices}
             onFlagged={() => void mutateItem()}
           />
           <EditFlashcardsDialog

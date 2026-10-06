@@ -85,6 +85,10 @@ export function parseChapterPatch(body: Record<string, unknown>): Parsed<Chapter
     if (typeof body.completed !== "boolean") return { ok: false, error: "Invalid completed flag" };
     patch.completed = body.completed;
   }
+  if ("level" in body) {
+    if (!LEVELS.includes(body.level as ChapterLevel)) return { ok: false, error: "Invalid level" };
+    patch.level = body.level as ChapterLevel;
+  }
   return { ok: true, value: patch };
 }
 

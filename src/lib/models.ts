@@ -36,7 +36,7 @@ import { normalizeLanguage } from "./languages";
 import { clampRetention, DEFAULT_RETENTION } from "./fsrs";
 import { subtreeFolderIds, wouldCreateCycle } from "./folderTree";
 import type { QuizContent, FlashcardsContent, NotesContent, QuizGenerationSettings } from "./types";
-import { deckDueCardIndices } from "./spacedRepetition";
+import { deckDueCardIndices, deckDueReverseIndices } from "./spacedRepetition";
 import type { SourceTrust } from "./sources/types";
 import { listAllCardDueRows } from "./review/store";
 import { ensureFsrsMigrated } from "./review/legacyMigration";
@@ -3142,10 +3142,12 @@ export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
   ]);
 
   const scheduleByItem = new Map<number, { card_index: number; due_at: string }[]>();
+  const reverseByItem = new Map<number, { card_index: number; due_at: string }[]>();
   for (const row of schedule) {
-    const list = scheduleByItem.get(row.generated_item_id) ?? [];
+    const byItem = row.reverse ? reverseByItem : scheduleByItem;
+    const list = byItem.get(row.generated_item_id) ?? [];
     list.push(row);
-    scheduleByItem.set(row.generated_item_id, list);
+    byItem.set(row.generated_item_id, list);
   }
 
   const due: DueFlashcardItem[] = [];
@@ -3162,7 +3164,10 @@ export async function listDueFlashcardItems(): Promise<DueFlashcardItem[]> {
       console.error(`Skipping flashcard item ${item.id} with unparseable content_json:`, err);
       continue;
     }
-    const dueCount = deckDueCardIndices(scheduleByItem.get(item.id) ?? [], content).length;
+    const forward = scheduleByItem.get(item.id) ?? [];
+    const dueCount =
+      deckDueCardIndices(forward, content).length +
+      deckDueReverseIndices(forward, reverseByItem.get(item.id) ?? [], content).length;
     if (dueCount > 0) {
       due.push({
         itemId: item.id,

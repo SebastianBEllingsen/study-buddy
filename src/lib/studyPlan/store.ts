@@ -596,6 +596,7 @@ export interface ChapterPatch {
   linked_document_ids?: number[];
   linked_note_ids?: number[];
   completed?: boolean;
+  level?: ChapterLevel;
 }
 
 export async function updateChapter(id: number, patch: ChapterPatch): Promise<void> {
@@ -614,6 +615,7 @@ export async function updateChapter(id: number, patch: ChapterPatch): Promise<vo
       patch.linked_note_ids ?? current.noteIds
     );
   }
+  if (patch.level !== undefined) set.current_level = patch.level;
   if (patch.completed !== undefined) set.completed_at = patch.completed ? nowUtc() : null;
   await db.update(study_plan_chapters).set(set).where(eq(study_plan_chapters.id, id));
 }

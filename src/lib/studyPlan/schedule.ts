@@ -292,11 +292,10 @@ export function buildSchedule(input: ScheduleInput): ScheduleResult {
   const unfinished = works.some((w) => w.remaining > 0);
   if (!deadline && unfinished) warnings.push({ type: "too_long" });
 
-  // Review days: short sessions on the chapters least well known, round-robin.
+  // Review days: short sessions on the chapters least well known, round-robin
+  // (chapters the student said they know included — this is their revision).
   if (reviewDays > 0) {
-    const reviewOrder = ordered
-      .filter((c) => c.level !== "known")
-      .sort((a, b) => (a.mastery ?? 0.5) - (b.mastery ?? 0.5) || a.stage - b.stage || a.position - b.position);
+    const reviewOrder = [...ordered].sort((a, b) => (a.mastery ?? 0.5) - (b.mastery ?? 0.5) || a.stage - b.stage || a.position - b.position);
     // As many distinct chapters per day as whole review sessions fit.
     const perReviewDay = Math.min(reviewOrder.length, Math.max(1, Math.floor(perDay / REVIEW_SESSION_MINUTES)));
     const minutesEach = Math.min(REVIEW_SESSION_MINUTES, perDay);
@@ -357,7 +356,9 @@ export function scheduleInputFromPlan(
       const resources = c.resources ?? [];
       const total = c.subtopics.length + resources.length;
       const done = c.subtopics.filter((s) => s.done).length + resources.filter((r) => r.done_at).length;
-      const complete = !!c.completed_at || (c.subtopics.length > 0 && c.subtopics.every((s) => s.done));
+      // A chapter the student said they know has nothing left to study.
+      const known = c.current_level === "known";
+      const complete = !!c.completed_at || known || (c.subtopics.length > 0 && c.subtopics.every((s) => s.done));
       return {
         id: c.id,
         position: c.position,
@@ -373,6 +374,7 @@ export function scheduleInputFromPlan(
         needsCheck:
           !!plan.options.practice &&
           complete &&
+          !known &&
           !c.completed_at &&
           !hasPassed(
             c.mastery,

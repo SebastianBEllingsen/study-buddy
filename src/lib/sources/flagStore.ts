@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db, mistakes, review_items } from "../db";
 import {
   getAppSettings,
@@ -112,7 +112,11 @@ export async function resolveFlag(itemId: number, index: number, resolution: Fla
     .update(review_items)
     .set({ due_at: nowUtc() })
     .where(
-      and(eq(review_items.generated_item_id, itemId), eq(review_items.kind, loaded.kind), eq(review_items.item_index, index))
+      and(
+        eq(review_items.generated_item_id, itemId),
+        inArray(review_items.kind, loaded.kind === "card" ? ["card", "card_reverse"] : [loaded.kind]),
+        eq(review_items.item_index, index)
+      )
     );
   await dropOpenMistakes(itemId, loaded.kind, index);
 }

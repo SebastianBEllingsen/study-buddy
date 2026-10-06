@@ -2,8 +2,10 @@
 
 // What a review_items row points at inside a generated item: a flashcard
 // (content.cards[i]) or a quiz question (content.questions[i]).
-export type ReviewItemKind = "card" | "question";
-export const REVIEW_ITEM_KINDS: ReviewItemKind[] = ["card", "question"];
+// "card_reverse" is the same flashcard asked back-first (see
+// FlashcardsContent.reverse), with its own schedule.
+export type ReviewItemKind = "card" | "question" | "card_reverse";
+export const REVIEW_ITEM_KINDS: ReviewItemKind[] = ["card", "question", "card_reverse"];
 
 // The learner's own confidence, tapped before seeing whether they were
 // right. Feeds the FSRS rating for quiz answers and the calibration of the

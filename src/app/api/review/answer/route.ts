@@ -60,6 +60,7 @@ export async function POST(request: Request) {
         result: body.result as FlashcardResult,
         confidence,
         source: "queue",
+        reverse: body.reverse === true && (JSON.parse(item.content_json) as FlashcardsContent).reverse === true,
       });
       return Response.json({ scheduled: recorded.scheduled, dueAt: recorded.dueAt });
     }

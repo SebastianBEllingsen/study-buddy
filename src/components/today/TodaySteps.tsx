@@ -20,7 +20,7 @@ import {
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Button } from "@/components/ui/button";
 import { usePomodoro } from "@/components/pomodoro/PomodoroProvider";
-import { saveTodaySession, updateTodaySession } from "./todayStore";
+import { recordFinishedSession, saveTodaySession, updateTodaySession } from "./todayStore";
 
 async function post(url: string, body: unknown): Promise<boolean> {
   try {
@@ -107,6 +107,7 @@ export async function finishTodaySession(session: TodaySession, focusMs: number)
   for (const s of finishedPlanSessions(session, focusMs)) {
     await post("/api/today/complete", { type: "session", ...s });
   }
+  recordFinishedSession(session, focusMs);
   saveTodaySession(null);
 }
 

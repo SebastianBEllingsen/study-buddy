@@ -268,7 +268,7 @@ export function ChapterCard({
               Stage {chapter.stage}
               {prerequisites.length > 0 && <> · Builds on {prerequisites.join(", ")}</>}
               {chapter.current_level === "familiar" && <> · You&apos;ve seen this</>}
-              {chapter.current_level === "known" && <> · You know this — review only</>}
+              {chapter.current_level === "known" && <> · You know this — skipped, comes back for revision</>}
             </p>
           </div>
           <RowActionsMenu
@@ -279,7 +279,15 @@ export function ChapterCard({
               ...(aiEnabled
                 ? [{ label: "Find different resources", icon: RefreshCw, onSelect: handleFindResources }]
                 : []),
-              chapter.completed_at
+              chapter.current_level === "known"
+                ? {
+                    label: "Study this chapter",
+                    icon: Circle,
+                    onSelect: async () => {
+                      if (await send(base, "PATCH", { level: "new" })) onChanged();
+                    },
+                  }
+                : chapter.completed_at
                 ? {
                     label: "Mark as not done",
                     icon: Circle,
@@ -294,6 +302,17 @@ export function ChapterCard({
                       if (await send(base, "PATCH", { completed: true })) onChanged();
                     },
                   },
+              ...(chapter.current_level !== "known" && !chapter.completed_at
+                ? [
+                    {
+                      label: "I already know this",
+                      icon: CheckCircle2,
+                      onSelect: async () => {
+                        if (await send(base, "PATCH", { level: "known" })) onChanged();
+                      },
+                    },
+                  ]
+                : []),
             ]}
             deleteLabel="Delete chapter"
             deleteDescription="Removes the chapter, its checklist and its links. This can't be undone."

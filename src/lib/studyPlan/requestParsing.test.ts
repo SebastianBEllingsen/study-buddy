@@ -24,6 +24,13 @@ describe("parseSyllabusSource", () => {
   });
 });
 
+describe("parseChapterPatch level", () => {
+  it("accepts a chapter level and rejects anything else", () => {
+    expect(parseChapterPatch({ level: "known" })).toEqual({ ok: true, value: { level: "known" } });
+    expect(parseChapterPatch({ level: "expert" }).ok).toBe(false);
+  });
+});
+
 describe("parseChapterPatch", () => {
   it("keeps only the fields sent, trimmed", () => {
     expect(parseChapterPatch({ title: "  New  ", completed: true })).toEqual({

@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
 import { CardFace } from "@/components/CardFace";
+import { cardFaces } from "@/lib/cardFaces";
+import { Badge } from "@/components/ui/badge";
 import { tap } from "@/lib/haptics";
 import { CONFIDENCES, type Confidence } from "@/lib/review/types";
 import { ConfidencePicker } from "@/components/review/ConfidencePicker";
@@ -68,22 +70,48 @@ export function handleFlashcardKeyDown({
   return true;
 }
 
+// One card to study in a session — regular, or back-first.
+interface Turn {
+  index: number;
+  reverse: boolean;
+}
+
+// Regular turns first-to-last, with each back-first turn dropped in at a
+// random spot — but never straight after (or before) its own card's regular
+// turn, which would hand over the answer.
+export function mixTurns(regular: number[], reverse: number[], random: () => number = Math.random): Turn[] {
+  const turns: Turn[] = regular.map((index) => ({ index, reverse: false }));
+  for (const index of reverse) {
+    for (let attempt = 0; ; attempt++) {
+      const at = Math.floor(random() * (turns.length + 1));
+      const clashes = [turns[at - 1], turns[at]].some((t) => t?.index === index);
+      if (clashes && attempt < 20) continue;
+      turns.splice(at, 0, { index, reverse: true });
+      break;
+    }
+  }
+  return turns;
+}
+
 export default function FlashcardViewer({
   itemId,
   cards,
   dueCardIndices,
+  dueReverseIndices = [],
   onFlagged,
 }: {
   itemId: number;
   cards: Flashcard[];
   dueCardIndices: number[];
+  // Cards due back-first (the deck's "reverse" setting); mixed in at random.
+  dueReverseIndices?: number[];
   // A card was reported wrong (and so left this session).
   onFlagged?: () => void;
 }) {
   // The queue of card indices for this session — due cards by default, or
   // every card if the student explicitly asks to cram ahead of schedule.
-  const [queue, setQueue] = useState<number[] | null>(
-    dueCardIndices.length > 0 ? dueCardIndices : null
+  const [queue, setQueue] = useState<Turn[] | null>(() =>
+    dueCardIndices.length + dueReverseIndices.length > 0 ? mixTurns(dueCardIndices, dueReverseIndices) : null
   );
   const [position, setPosition] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -93,14 +121,17 @@ export default function FlashcardViewer({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const done = queue !== null && position >= queue.length;
-  const cardIndex = queue?.[position];
+  const turn = queue?.[position];
+  const cardIndex = turn?.index;
+  const reverse = turn?.reverse ?? false;
   const card = cardIndex != null ? cards[cardIndex] : undefined;
 
-  // Only the front, unless the back has actually been revealed — matches
-  // what's currently on screen, same principle as the quiz side.
+  // Only the side being asked, unless the other has actually been revealed —
+  // matches what's currently on screen, same principle as the quiz side.
   function getWholeContext() {
     if (!card) return "";
-    return flipped ? `${card.front}\n\n${card.back}` : card.front;
+    const faces = cardFaces(card, reverse);
+    return flipped ? `${card.front}\n\n${card.back}` : faces.prompt.text;
   }
 
   function handleCardClick() {
@@ -115,7 +146,7 @@ export default function FlashcardViewer({
     if (cardIndex == null) return;
     saveInBackground(
       `/api/items/${itemId}/review`,
-      { cardIndex, result, confidence },
+      { cardIndex, result, confidence, ...(reverse && { reverse: true }) },
       "Couldn't save a card rating — it'll come up again next review"
     );
     setLogged((n) => n + 1);
@@ -165,7 +196,7 @@ export default function FlashcardViewer({
         <Button
           variant="outline"
           onClick={() => {
-            setQueue(cards.flatMap((c, i) => (c.flag ? [] : [i])));
+            setQueue(cards.flatMap((c, i) => (c.flag ? [] : [{ index: i, reverse: false }])));
             setPosition(0);
           }}
         >
@@ -206,11 +237,17 @@ export default function FlashcardViewer({
   // over the front), so a card with media on either side reserves room for
   // it up front instead of squeezing a back-side image into text height.
   const hasMedia = !!(card.frontMedia?.length || card.backMedia?.length);
+  const faces = cardFaces(card, reverse);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Card {position + 1} of {queue.length} due
+        {reverse && (
+          <Badge variant="outline" className="ml-2">
+            Reverse
+          </Badge>
+        )}
       </p>
       <div className="flip-perspective">
         <Card
@@ -232,15 +269,15 @@ export default function FlashcardViewer({
               looked inconsistent. The caption now lives entirely outside
               the flipping card (below), always in the same place. */}
           <CardContent className="flip-face px-0">
-            <CardFace text={card.front} media={card.frontMedia} active={!flipped} />
+            <CardFace text={faces.prompt.text} media={faces.prompt.media} active={!flipped} />
           </CardContent>
           <CardContent className="flip-face flip-face-back px-0">
             {/* Like Anki's {{FrontSide}}: the back replays the front's media
                 (e.g. a video clip next to its answer). Mounted only once
                 revealed, so the clip isn't loaded twice before then. */}
             <CardFace
-              text={card.back}
-              media={flipped ? [...(card.frontMedia ?? []), ...(card.backMedia ?? [])] : []}
+              text={faces.answer.text}
+              media={flipped ? faces.answer.media : []}
               active={flipped}
             />
           </CardContent>
@@ -248,7 +285,7 @@ export default function FlashcardViewer({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          {flipped ? "Click to see front" : "Click to reveal answer"}
+          {flipped ? "Click to see the other side" : "Click to reveal answer"}
         </p>
         <ConfidencePicker value={confidence} onChange={revealWith} disabled={flipped} shortcuts={!flipped} />
       </div>

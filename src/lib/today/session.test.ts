@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_POMODORO_SETTINGS, initialPomodoroState, startTimer } from "../pomodoro";
 import type { TodayStep } from "./planDay";
 import {
+  addFinishedSession,
   currentStep,
   finishedPlanSessions,
   markDoneForToday,
   mergeFresh,
   newChapterQuizSteps,
+  parseDayTotals,
   parseSession,
   sessionFocusMs,
   sessionProgress,
@@ -232,5 +234,50 @@ describe("a chapter's quiz turning up", () => {
     expect(newChapterQuizSteps(other, known).map((x) => x.id)).toEqual([]);
     const quiz = mergeFresh(setStepStatus(start(), "chapter:5:resource:9", "done"), [step("chapter:5:practice", "chapter")]);
     expect(newChapterQuizSteps(setStepStatus(quiz, "chapter:5:practice", "skipped"), known)).toEqual([]);
+  });
+});
+
+describe("day totals", () => {
+  const session = (date: string, done: number) => {
+    const s = startSession({ date, courseId: null, minutes: 25, steps: base, now: 0 });
+    return { ...s, steps: s.steps.map((x, i) => (i < done ? { ...x, status: "done" as const } : x)) };
+  };
+
+  it("starts the day's totals with the first finished session", () => {
+    expect(addFinishedSession(null, session("2026-10-06", 2), 600_000)).toEqual({
+      date: "2026-10-06",
+      sessions: 1,
+      steps: 2,
+      focusMs: 600_000,
+    });
+  });
+
+  it("adds a later session to the same day", () => {
+    const first = addFinishedSession(null, session("2026-10-06", 2), 600_000);
+    expect(addFinishedSession(first, session("2026-10-06", 1), 300_000)).toMatchObject({
+      sessions: 2,
+      steps: 3,
+      focusMs: 900_000,
+    });
+  });
+
+  it("starts over on a new day", () => {
+    const yesterday = addFinishedSession(null, session("2026-10-05", 2), 600_000);
+    expect(addFinishedSession(yesterday, session("2026-10-06", 1), 0)).toMatchObject({
+      date: "2026-10-06",
+      sessions: 1,
+      steps: 1,
+    });
+  });
+
+  it("parses stored totals and rejects junk", () => {
+    expect(parseDayTotals({ date: "2026-10-06", sessions: 2, steps: 3, focusMs: 1000 })).toEqual({
+      date: "2026-10-06",
+      sessions: 2,
+      steps: 3,
+      focusMs: 1000,
+    });
+    expect(parseDayTotals({ date: "2026-10-06", sessions: 0 })).toBeNull();
+    expect(parseDayTotals("x")).toBeNull();
   });
 });

@@ -325,3 +325,55 @@ describe("prerequisites", () => {
     expect(sessions[0]).toMatchObject({ chapterId: 2, date: MONDAY });
   });
 });
+
+describe("chapters the student knows", () => {
+  const plan = (level: "known" | "new") => ({
+    options: { deadline: null, studyDays: [1], minutesPerDay: 30, practice: true },
+    chapters: [
+      {
+        id: 1,
+        position: 0,
+        stage: 1,
+        estimated_minutes: 120,
+        current_level: level as "known" | "new",
+        completed_at: null,
+        subtopics: [{ done: false }],
+        mastery: null,
+      },
+    ],
+    sessions: [],
+  });
+
+  it("need no study time and no check, even with practice on", () => {
+    const [chapter] = scheduleInputFromPlan(plan("known"), MONDAY).chapters;
+    expect(chapter).toMatchObject({ complete: true, needsCheck: false });
+    expect(chapterMinutesNeeded(chapter)).toBe(0);
+    expect(buildSchedule(scheduleInputFromPlan(plan("known"), MONDAY)).sessions).toEqual([]);
+  });
+
+  it("don't hold up the chapters that build on them", () => {
+    const { sessions } = buildSchedule(
+      input({ chapters: [ch(1, { complete: true, level: "known" }), ch(2, { stage: 2, prerequisites: [1] })] })
+    );
+    expect(sessions[0]).toMatchObject({ chapterId: 2, date: MONDAY });
+  });
+
+  it("still get a study session when the student doesn't know them", () => {
+    const [chapter] = scheduleInputFromPlan(plan("new"), MONDAY).chapters;
+    expect(chapterMinutesNeeded(chapter)).toBeGreaterThan(0);
+  });
+
+  it("are included in the final review days", () => {
+    const days = [1, 2, 3, 4, 5];
+    const { sessions } = buildSchedule(
+      input({
+        chapters: [ch(1, { complete: true, level: "known" }), ch(2, { estimatedMinutes: 60 })],
+        studyDays: days,
+        deadline: "2026-01-30",
+      })
+    );
+    const review = sessions.filter((s) => s.kind === "review");
+    expect(review.length).toBeGreaterThan(0);
+    expect(review.some((s) => s.chapterId === 1)).toBe(true);
+  });
+});

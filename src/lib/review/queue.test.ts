@@ -4,8 +4,8 @@ import type { QueueReview } from "./queueBuild";
 
 const NOW = new Date("2026-03-02T10:00:00Z");
 
-function review(kind: "card" | "question", index: number, due_at: string): QueueReview {
-  return { kind, item_index: index, due_at };
+function review(kind: "card" | "question" | "card_reverse", index: number, due_at: string, last?: string): QueueReview {
+  return { kind, item_index: index, due_at, ...(last && { last_reviewed_at: last }) };
 }
 
 function deck(itemId: number, cardCount: number, reviews: QueueReview[] = [], reminders?: boolean): QueueSource {
@@ -205,5 +205,44 @@ describe("flagged items", () => {
       "2:question:1",
     ]);
     expect(conceptKeys([flaggedDeck(), flaggedQuiz()], "topic")).toEqual([]);
+  });
+});
+
+describe("buildQueue — reverse decks", () => {
+  const reverseDeck = (reviews: QueueReview[]): QueueSource => {
+    const source = deck(1, 2, reviews);
+    (source.content as { reverse?: boolean }).reverse = true;
+    return source;
+  };
+  const opts = { now: NOW, newCardAllowance: 0, limit: 50 };
+
+  it("queues a reviewed card back-first once, with no reverse review yet", () => {
+    const { entries } = buildQueue(
+      [reverseDeck([review("card", 0, "2026-03-09 00:00:00", "2026-03-01 08:00:00")])],
+      opts
+    );
+    expect(entries.map((e) => [e.key, e.kind === "card" && e.reverse])).toEqual([["1:card_reverse:0", true]]);
+  });
+
+  it("doesn't ask a never-reviewed card back-first", () => {
+    const { entries } = buildQueue([reverseDeck([])], opts);
+    expect(entries).toEqual([]);
+  });
+
+  it("follows the reverse review's own due date", () => {
+    const forward = review("card", 0, "2026-03-01 00:00:00", "2026-02-20 00:00:00");
+    const later = buildQueue([reverseDeck([forward, review("card_reverse", 0, "2026-03-20 00:00:00")])], opts);
+    expect(later.entries.map((e) => e.key)).toEqual(["1:card:0"]);
+    const due = buildQueue([reverseDeck([forward, review("card_reverse", 0, "2026-03-01 00:00:00")])], opts);
+    expect(due.entries.map((e) => e.key).sort()).toEqual(["1:card:0", "1:card_reverse:0"]);
+    expect(due.counts.dueCards).toBe(2);
+  });
+
+  it("ignores reverse state in a deck that isn't reversed", () => {
+    const source = deck(1, 1, [
+      review("card", 0, "2026-03-09 00:00:00", "2026-03-01 08:00:00"),
+      review("card_reverse", 0, "2026-03-01 00:00:00"),
+    ]);
+    expect(buildQueue([source], opts).entries).toEqual([]);
   });
 });

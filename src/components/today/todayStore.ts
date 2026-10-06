@@ -5,7 +5,14 @@ import useSWR from "swr";
 import { localToday } from "@/lib/studyPlan/schedule";
 import { localDayStart } from "@/lib/review/session";
 import type { TodayStep } from "@/lib/today/planDay";
-import { mergeFresh, parseSession, type TodaySession } from "@/lib/today/session";
+import {
+  addFinishedSession,
+  mergeFresh,
+  parseDayTotals,
+  parseSession,
+  type DayTotals,
+  type TodaySession,
+} from "@/lib/today/session";
 
 // The running Today session lives in localStorage (per device, like the
 // Pomodoro timer), shared by every component through this tiny store.
@@ -57,6 +64,57 @@ export function saveTodaySession(session: TodaySession | null) {
     // storage unavailable: the session just won't persist
   }
   emit();
+}
+
+// What today's finished sessions add up to — see DayTotals. Per device too.
+const DONE_KEY = "studybuddy-today-finished";
+let cachedDoneRaw: string | null = null;
+let cachedDone: DayTotals | null = null;
+
+function readDone(): DayTotals | null {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(DONE_KEY);
+  } catch {
+    return null;
+  }
+  if (raw !== cachedDoneRaw) {
+    cachedDoneRaw = raw;
+    try {
+      cachedDone = raw ? parseDayTotals(JSON.parse(raw)) : null;
+    } catch {
+      cachedDone = null;
+    }
+  }
+  return cachedDone;
+}
+
+function subscribeDone(listener: () => void) {
+  listeners.add(listener);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === DONE_KEY) listener();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+// Adds a just-finished session to its day's totals.
+export function recordFinishedSession(session: TodaySession, focusMs: number) {
+  try {
+    localStorage.setItem(DONE_KEY, JSON.stringify(addFinishedSession(readDone(), session, focusMs)));
+  } catch {
+    // storage unavailable: the day just won't show as done
+  }
+  emit();
+}
+
+// Today's finished sessions, or null when none has been finished today.
+export function useTodayFinished(): DayTotals | null {
+  const totals = useSyncExternalStore(subscribeDone, readDone, () => null);
+  return totals && totals.date === localToday() ? totals : null;
 }
 
 export function updateTodaySession(fn: (s: TodaySession) => TodaySession) {

@@ -4,6 +4,7 @@ import {
   buildIsStuck,
   canBuildPlan,
   chapterIsComplete,
+  chapterIsPassed,
   formatMinutes,
   groupSessionsByWeek,
   linksAreStale,
@@ -64,6 +65,27 @@ describe("chapterIsComplete", () => {
     expect(chapterIsComplete(chapter({ subtopics: [{ text: "a", done: true }] }))).toBe(true);
     expect(chapterIsComplete(chapter({ subtopics: [{ text: "a", done: true }, { text: "b", done: false }] }))).toBe(false);
     expect(chapterIsComplete(chapter())).toBe(false);
+  });
+});
+
+describe("a chapter the student knows", () => {
+  const known = chapter({ id: 1, current_level: "known" });
+  const next = chapter({ id: 2, stage: 1, position: 1 });
+
+  it("counts as complete and passed without any work", () => {
+    expect(chapterIsComplete(known)).toBe(true);
+    expect(chapterIsPassed(known)).toBe(true);
+    expect(chapterIsComplete(chapter({ current_level: "familiar" }))).toBe(false);
+  });
+
+  it("is skipped when finding the next chapter to study, even when a pass is required", () => {
+    expect(nextChapter({ chapters: [known, next] }, true)?.id).toBe(2);
+    expect(nextChapter({ chapters: [known] }, true)).toBeNull();
+  });
+
+  it("counts toward plan progress", () => {
+    const withResource = chapter({ id: 1, current_level: "known", resources: [resource()] });
+    expect(planProgress({ chapters: [withResource, next] })).toMatchObject({ chaptersDone: 1, stepsDone: 1 });
   });
 });
 

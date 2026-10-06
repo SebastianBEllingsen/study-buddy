@@ -9,6 +9,7 @@ export interface QueueReview {
   kind: ReviewItemKind;
   item_index: number;
   due_at: string;
+  last_reviewed_at?: string | null;
 }
 
 function toUtcText(date: Date): string {
@@ -46,7 +47,8 @@ interface QueueEntryBase {
 }
 
 export type QueueEntry =
-  | (QueueEntryBase & { kind: "card"; card: Flashcard })
+  // `reverse`: asked back-first (a reverse deck), on its own schedule.
+  | (QueueEntryBase & { kind: "card"; card: Flashcard; reverse?: boolean })
   | (QueueEntryBase & { kind: "question"; question: QueueQuestion });
 
 export interface QueueSource {
@@ -119,17 +121,36 @@ export function buildQueue(
           fresh.push({ source, index });
           return;
         }
-        if (review.due_at > nowText) return;
+        if (review.due_at <= nowText) {
+          due.push({
+            ...base,
+            key: entryKey("card", index),
+            kind: "card",
+            index,
+            card,
+            concept: card.concept ?? null,
+            ...(card.source && { source: card.source }),
+            isNew: false,
+            dueAt: review.due_at,
+          });
+        }
+        // The back-first side of a reverse deck starts once the card has been
+        // reviewed the regular way, then comes due on its own schedule —
+        // whether or not the regular side is due.
+        if (!content.reverse || !review.last_reviewed_at) return;
+        const reverseDue = byIndex.get(`card_reverse:${index}`)?.due_at ?? review.last_reviewed_at;
+        if (reverseDue > nowText) return;
         due.push({
           ...base,
-          key: entryKey("card", index),
+          key: entryKey("card_reverse", index),
           kind: "card",
+          reverse: true,
           index,
           card,
           concept: card.concept ?? null,
           ...(card.source && { source: card.source }),
           isNew: false,
-          dueAt: review.due_at,
+          dueAt: reverseDue,
         });
       });
     } else {

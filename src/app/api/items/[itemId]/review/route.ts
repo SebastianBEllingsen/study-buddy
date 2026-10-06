@@ -46,6 +46,7 @@ export async function POST(request: Request, { params }: Params) {
       result,
       confidence,
       source: "deck",
+      reverse: body?.reverse === true && (JSON.parse(item.content_json) as FlashcardsContent).reverse === true,
     });
     return Response.json({ ok: true, dueAt: recorded.dueAt, scheduled: recorded.scheduled });
   } catch (err) {

@@ -18,8 +18,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { usePomodoro } from "@/components/pomodoro/PomodoroProvider";
 import { FROSTED_CARD, useTodayCardLook } from "@/lib/useTransparentWidgets";
 import { cn } from "cn";
-import { saveTodaySession, todayUrl, useTodaySession, useTodaySync } from "./todayStore";
-import { SessionStepList, StepLine, useOpenStep } from "./TodaySteps";
+import { saveTodaySession, todayUrl, useTodayFinished, useTodaySession, useTodaySync } from "./todayStore";
+import { SessionStepList, StepLine, formatFocus, useOpenStep } from "./TodaySteps";
 
 const LENGTHS = [15, 25, 45, 60, 90];
 
@@ -37,6 +37,10 @@ interface TodayResponse {
 export function TodayCard({ courseId }: { courseId: number | null }) {
   const session = useTodaySession();
   useTodaySync(session);
+  // Sessions finished today; once there are some the card shows the day as
+  // done until you ask for another.
+  const finished = useTodayFinished();
+  const [another, setAnother] = useState(false);
   // Settings: hidden or shown, and its look — a solid card, a see-through
   // frosted panel (FROSTED_CARD), or plain text on the picture (no surface, so
   // no side padding, to line up with the headings around it, and a halo).
@@ -76,6 +80,26 @@ export function TodayCard({ courseId }: { courseId: number | null }) {
   // Hidden in Settings. (A session that's already running keeps its task list,
   // above.)
   if (!shown) return null;
+  if (finished && !another) {
+    return (
+      <Card {...cardProps}>
+        <CardContent className={cn("space-y-3", contentClass)}>
+          <h2 className="flex items-center gap-2 font-heading text-base font-semibold">
+            <CircleCheck className="size-4 text-sage" />
+            Done for today
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {finished.sessions === 1 ? "Session finished" : `${finished.sessions} sessions finished`} ·{" "}
+            {finished.steps} {finished.steps === 1 ? "step" : "steps"} · {formatFocus(finished.focusMs)} focused
+          </p>
+          <Button variant="outline" onClick={() => setAnother(true)}>
+            <Play className="size-4" />
+            Do another session
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
   if (error) return null;
   if (!data) return <Skeleton className="h-32 rounded-xl" />;
 
@@ -87,8 +111,10 @@ export function TodayCard({ courseId }: { courseId: number | null }) {
 
   function start() {
     if (!data || data.steps.length === 0) return;
+    // A new session gets a fresh timer, not whatever the last one left behind.
+    pomodoro.restart();
+    setAnother(false);
     saveTodaySession(startSession({ date: data.date, courseId, minutes: length, steps: data.steps, chapterIds: picked, now: Date.now() }));
-    if (pomodoro.state.status !== "running") pomodoro.start();
     open(data.steps[0]);
   }
 
@@ -106,6 +132,8 @@ export function TodayCard({ courseId }: { courseId: number | null }) {
         toast.info("Nothing to study in that course right now");
         return;
       }
+      pomodoro.restart();
+      setAnother(false);
       saveTodaySession(
         startSession({
           date: plan.date,
@@ -116,7 +144,6 @@ export function TodayCard({ courseId }: { courseId: number | null }) {
           now: Date.now(),
         })
       );
-      if (pomodoro.state.status !== "running") pomodoro.start();
       open(plan.steps[0]);
     } catch {
       toast.error("Couldn't start that session");
@@ -191,6 +218,13 @@ export function TodayCard({ courseId }: { courseId: number | null }) {
               <CourseList rows={data.courses} startingCourseId={startingCourseId} onStudy={studyCourse} />
             )}
           </div>
+        )}
+        {finished && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CircleCheck className="size-3.5 text-sage" />
+            {finished.sessions === 1 ? "1 session" : `${finished.sessions} sessions`} done today ·{" "}
+            {formatFocus(finished.focusMs)} focused
+          </p>
         )}
         {data.steps.length === 0 ? (
           <p className="flex items-start gap-2 text-sm text-muted-foreground">

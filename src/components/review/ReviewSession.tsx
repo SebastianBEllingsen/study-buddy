@@ -25,6 +25,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { CardFace } from "@/components/CardFace";
+import { cardFaces } from "@/lib/cardFaces";
 import { MathText } from "@/components/MathText";
 import { handleFlashcardKeyDown } from "@/components/FlashcardViewer";
 import { ConfidencePicker } from "./ConfidencePicker";
@@ -70,7 +71,29 @@ function EntryLabel({ entry }: { entry: QueueEntry }) {
       </span>
       {entry.concept && <Badge variant="secondary">{entry.concept}</Badge>}
       {entry.isNew && <Badge variant="outline">New</Badge>}
+      {entry.kind === "card" && entry.reverse && <Badge variant="outline">Reverse</Badge>}
     </div>
+  );
+}
+
+// The two sides of a queued card. The back replays below the front; a
+// reverse card (see FlashcardsContent.reverse) asks with the back's text
+// and, once revealed, shows the front with its video.
+function CardSides({ entry, flipped }: { entry: Extract<QueueEntry, { kind: "card" }>; flipped: boolean }) {
+  const faces = cardFaces(entry.card, !!entry.reverse);
+  return (
+    <>
+      <CardFace text={faces.prompt.text} media={faces.prompt.media} active={!flipped} />
+      {flipped && (
+        <div className="animate-pop-in border-t border-border pt-4">
+          <CardFace
+            text={faces.answer.text}
+            media={entry.reverse ? faces.answer.media : entry.card.backMedia}
+            active={flipped}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -167,6 +190,7 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
         itemId: entry.itemId,
         kind: "card",
         index: entry.index,
+        ...(entry.reverse && { reverse: true }),
         result: rating,
         confidence,
         record: !answeredKeys.has(entry.key),
@@ -329,12 +353,7 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
             className="min-h-40 cursor-pointer gap-4 px-6 py-6 text-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <EntryLabel entry={entry} />
-            <CardFace text={entry.card.front} media={entry.card.frontMedia} active={!flipped} />
-            {flipped && (
-              <div className="animate-pop-in border-t border-border pt-4">
-                <CardFace text={entry.card.back} media={entry.card.backMedia} active={flipped} />
-              </div>
-            )}
+            <CardSides entry={entry} flipped={flipped} />
           </Card>
           {flipped && <WhyPrompt key={entry.key} itemId={entry.itemId} cardIndex={entry.index} />}
           {flipped && entryFooter()}

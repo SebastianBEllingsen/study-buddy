@@ -9,6 +9,7 @@ import {
   endedFocusMs,
   formatRemaining,
   getRemainingMs,
+  initialPomodoroState,
   pauseTimer,
   resetTimer,
   sanitizeSettings,
@@ -41,6 +42,8 @@ interface PomodoroContextValue {
   state: PomodoroState;
   now: number;
   start: () => void;
+  // A fresh timer — focus phase, full length, first of the cycle — running.
+  restart: () => void;
   pause: () => void;
   reset: () => void;
   skip: () => void;
@@ -226,9 +229,9 @@ export default function PomodoroProvider({ children }: { children: React.ReactNo
     setNow(n);
   }, []);
 
-  const start = useCallback(() => {
-    // Called from a click, so this is the moment we're allowed to unlock
-    // audio and ask for notification permission.
+  // Called from a click, so this is the moment we're allowed to unlock
+  // audio and ask for notification permission.
+  const unlockAlerts = useCallback(() => {
     if (!audioRef.current && typeof AudioContext !== "undefined") {
       try {
         audioRef.current = new AudioContext();
@@ -240,8 +243,17 @@ export default function PomodoroProvider({ children }: { children: React.ReactNo
     if ("Notification" in window && Notification.permission === "default") {
       void Notification.requestPermission().catch(() => {});
     }
+  }, []);
+
+  const start = useCallback(() => {
+    unlockAlerts();
     commit(startTimer(stateRef.current, Date.now()));
-  }, [commit]);
+  }, [commit, unlockAlerts]);
+
+  const restart = useCallback(() => {
+    unlockAlerts();
+    commit(startTimer(initialPomodoroState(settingsRef.current), Date.now()));
+  }, [commit, unlockAlerts]);
 
   const pause = useCallback(() => commit(pauseTimer(stateRef.current, Date.now())), [commit]);
   const reset = useCallback(() => commit(resetTimer(stateRef.current, settingsRef.current)), [commit]);
@@ -283,6 +295,7 @@ export default function PomodoroProvider({ children }: { children: React.ReactNo
       state,
       now,
       start,
+      restart,
       pause,
       reset,
       skip,
@@ -291,7 +304,7 @@ export default function PomodoroProvider({ children }: { children: React.ReactNo
       openFocusMode,
       closeFocusMode,
     }),
-    [hydrated, settings, state, now, start, pause, reset, skip, updateSettings, focusModeOpen, openFocusMode, closeFocusMode]
+    [hydrated, settings, state, now, start, restart, pause, reset, skip, updateSettings, focusModeOpen, openFocusMode, closeFocusMode]
   );
 
   return (

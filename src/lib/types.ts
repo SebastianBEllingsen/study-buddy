@@ -104,6 +104,10 @@ export interface FlashcardsContent {
   // scheduled: none of their cards count as due anywhere (see
   // deckDueCardIndices), though they can still be studied via "review all".
   reminders?: boolean;
+  // Also ask each card back-first (see lib/cardFaces.ts), so you produce the
+  // front from the back — e.g. do the sign for a word. Absent means off; only
+  // ever stored as `true`. Each direction has its own schedule.
+  reverse?: boolean;
 }
 
 export interface NotesContent {

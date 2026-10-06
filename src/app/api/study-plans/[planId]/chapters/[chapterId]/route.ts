@@ -43,7 +43,7 @@ export async function PATCH(request: Request, { params }: Params) {
   await updateChapter(found.chapter.id, patch);
   // Finishing (or reopening) a chapter, or moving it to another stage,
   // changes what's left to schedule.
-  if (patch.completed !== undefined || patch.stage !== undefined) await rescheduleIfScheduled(found.planId);
+  if (patch.completed !== undefined || patch.stage !== undefined || patch.level !== undefined) await rescheduleIfScheduled(found.planId);
   return Response.json({ ok: true });
 }
 

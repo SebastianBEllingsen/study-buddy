@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeDueCardIndices, deckDueCardIndices } from "./spacedRepetition";
+import { computeDueCardIndices, deckDueCardIndices, deckDueReverseIndices } from "./spacedRepetition";
 
 describe("computeDueCardIndices", () => {
   const now = new Date("2026-01-10T00:00:00.000Z");
@@ -53,5 +53,32 @@ describe("deckDueCardIndices", () => {
   it("holds flagged cards back", () => {
     const flagged = [cards[0], { ...cards[1], flag: { by: "student" as const, issue: "Wrong", at: "2026-01-01" } }];
     expect(deckDueCardIndices(schedule, { cards: flagged }, now)).toEqual([0]);
+  });
+});
+
+describe("deckDueReverseIndices", () => {
+  const now = new Date("2026-01-10T00:00:00.000Z");
+  const cards = [{ front: "a", back: "b" }, { front: "c", back: "d" }, { front: "e", back: "f", flag: { issue: "x" } }] as never;
+  const seen = [0, 1, 2].map((card_index) => ({ card_index, due_at: "2026-02-01 00:00:00" }));
+
+  it("is empty unless the deck is reversed", () => {
+    expect(deckDueReverseIndices(seen, [], { cards }, now)).toEqual([]);
+  });
+
+  it("starts a card's reverse side once it has been reviewed, skipping flagged cards", () => {
+    expect(deckDueReverseIndices([seen[0]], [], { cards, reverse: true }, now)).toEqual([0]);
+    expect(deckDueReverseIndices(seen, [], { cards, reverse: true }, now)).toEqual([0, 1]);
+  });
+
+  it("uses the reverse schedule's own due date", () => {
+    const reverse = [
+      { card_index: 0, due_at: "2026-03-01 00:00:00" },
+      { card_index: 1, due_at: "2026-01-01 00:00:00" },
+    ];
+    expect(deckDueReverseIndices(seen, reverse, { cards, reverse: true }, now)).toEqual([1]);
+  });
+
+  it("has nothing due when reminders are off", () => {
+    expect(deckDueReverseIndices(seen, [], { cards, reverse: true, reminders: false }, now)).toEqual([]);
   });
 });

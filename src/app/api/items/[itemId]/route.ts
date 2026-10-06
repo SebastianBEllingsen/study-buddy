@@ -12,8 +12,8 @@ import {
   type GenerationMode,
 } from "@/lib/models";
 import { removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
-import { deckDueCardIndices } from "@/lib/spacedRepetition";
-import { cardDueRowsForItem, reconcileReviewItemsAfterRemoval } from "@/lib/review/store";
+import { deckDueCardIndices, deckDueReverseIndices } from "@/lib/spacedRepetition";
+import { cardDueRowsForItem, reverseDueRowsForItem, reconcileReviewItemsAfterRemoval } from "@/lib/review/store";
 import { ensureFsrsMigrated } from "@/lib/review/legacyMigration";
 import type { FlashcardsContent } from "@/lib/types";
 import { parseId } from "@/lib/routeParams";
@@ -64,13 +64,14 @@ export async function GET(_request: Request, { params }: Params) {
 
     // Reviews (flashcard_reviews rows) aren't rendered anywhere on the item
     // detail page — dropped here rather than fetched and left unused.
-    const [attempts, bestScore, newDocuments, schedule] = await Promise.all([
+    const [attempts, bestScore, newDocuments, schedule, reverseSchedule] = await Promise.all([
       item.mode === "quiz" ? listRecentQuizAttemptsForItem(id) : Promise.resolve([]),
       item.mode === "quiz" ? getBestQuizScoreForItem(id) : Promise.resolve(null),
       getNewDocumentsForItem(item),
       item.mode === "flashcards"
         ? ensureFsrsMigrated().then(() => cardDueRowsForItem(id))
         : Promise.resolve([]),
+      item.mode === "flashcards" ? reverseDueRowsForItem(id) : Promise.resolve([]),
     ]);
 
     return Response.json({
@@ -84,6 +85,10 @@ export async function GET(_request: Request, { params }: Params) {
       dueCardIndices:
         item.mode === "flashcards"
           ? deckDueCardIndices(schedule, JSON.parse(item.content_json) as FlashcardsContent)
+          : [],
+      dueReverseIndices:
+        item.mode === "flashcards"
+          ? deckDueReverseIndices(schedule, reverseSchedule, JSON.parse(item.content_json) as FlashcardsContent)
           : [],
     });
   } catch (err) {

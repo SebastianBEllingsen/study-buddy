@@ -30,8 +30,15 @@ export const LINK_STATUS_BADGE: Record<LinkStatus, { label: string; tone: "muted
   blocked: { label: "Not free to use", tone: "danger" },
 };
 
+// "Know it" at plan setup: nothing to study here, so the chapter counts as
+// learned and passed (and so is skipped everywhere) — but it stays in the
+// revision rotation, and the learner can switch it back to studying it.
+export function chapterIsKnown(chapter: Pick<StudyPlanChapter, "current_level">): boolean {
+  return chapter.current_level === "known";
+}
+
 export function chapterIsComplete(chapter: StudyPlanChapter): boolean {
-  if (chapter.completed_at) return true;
+  if (chapter.completed_at || chapterIsKnown(chapter)) return true;
   return chapter.subtopics.length > 0 && chapter.subtopics.every((s) => s.done);
 }
 
@@ -41,6 +48,7 @@ export function chapterIsComplete(chapter: StudyPlanChapter): boolean {
 export function chapterIsPassed(chapter: StudyPlanChapter): boolean {
   return (
     !!chapter.completed_at ||
+    chapterIsKnown(chapter) ||
     hasPassed(
       chapter.mastery,
       chapter.items.filter((i) => i.mode === "quiz").map((i) => i.best_score)
@@ -68,7 +76,7 @@ export function planProgress(plan: Pick<StudyPlan, "chapters">): PlanProgress {
   let stepsDone = 0;
   let stepsTotal = 0;
   for (const chapter of plan.chapters) {
-    const complete = !!chapter.completed_at;
+    const complete = !!chapter.completed_at || chapterIsKnown(chapter);
     stepsTotal += chapter.subtopics.length + chapter.resources.length;
     stepsDone +=
       (complete ? chapter.subtopics.length : chapter.subtopics.filter((s) => s.done).length) +
