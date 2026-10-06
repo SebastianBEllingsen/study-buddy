@@ -123,11 +123,8 @@ const ANTHROPIC_IMAGE_MEDIA_TYPES: readonly string[] = [
   "image/webp",
 ];
 
-/** Calls Claude for a plain-text (e.g. markdown) response — no JSON parsing. */
-export async function generateText(params: GenerateTextParams): Promise<string> {
+function textRequest(params: GenerateTextParams): Anthropic.MessageCreateParamsNonStreaming {
   const { system, user, maxTokens = 8000, effort = "medium", efficient, images } = params;
-  const model = modelFor(efficient);
-  const anthropic = await client();
 
   const content: Anthropic.ContentBlockParam[] = [
     ...(images ?? []).map((image): Anthropic.ImageBlockParam => {
@@ -146,15 +143,29 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
     { type: "text", text: user },
   ];
 
-  const response = await anthropic.messages.create({
-    model,
+  return {
+    model: modelFor(efficient),
     max_tokens: maxTokens,
     system,
     messages: [{ role: "user", content }],
     output_config: { effort },
-  });
+  };
+}
 
-  return extractText(response);
+/** Calls Claude for a plain-text (e.g. markdown) response — no JSON parsing. */
+export async function generateText(params: GenerateTextParams): Promise<string> {
+  const request = textRequest(params);
+  const anthropic = await client();
+  return extractText(await anthropic.messages.create(request));
+}
+
+/** generateText, streamed: onDelta gets each text piece as Claude writes it. */
+export async function streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
+  const request = textRequest(params);
+  const anthropic = await client();
+  const stream = anthropic.messages.stream(request);
+  stream.on("text", onDelta);
+  return extractText(await stream.finalMessage());
 }
 
 // Server-side web search. The dynamic-filtering variant needs a current

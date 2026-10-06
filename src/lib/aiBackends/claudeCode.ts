@@ -117,6 +117,36 @@ function buildStdin(systemPrompt: string, userPrompt: string): string {
   return `SYSTEM INSTRUCTIONS:\n${sanitize(systemPrompt)}\n\n---\n\nUSER REQUEST:\n${sanitize(userPrompt)}`;
 }
 
+// The reply text carried by one stream-json line, or "" for any other event
+// (thinking, tool use, system/status events, ...).
+export function textDeltaFromStreamLine(line: string): string {
+  if (!line.startsWith("{")) return "";
+  try {
+    const event = JSON.parse(line);
+    if (event.type !== "stream_event") return "";
+    const delta = event.event?.type === "content_block_delta" ? event.event.delta : null;
+    return delta?.type === "text_delta" && typeof delta.text === "string" ? delta.text : "";
+  } catch {
+    return "";
+  }
+}
+
+// The final `result` event of a stream-json run — same shape as the single
+// object --output-format json prints.
+export function lastStreamResult(stdout: string): ClaudeResult {
+  const lines = stdout.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith("{")) continue;
+    try {
+      const event = JSON.parse(lines[i]);
+      if (event.type === "result") return event as ClaudeResult;
+    } catch {
+      // not a complete JSON line — keep looking
+    }
+  }
+  throw new Error("claude -p ended without a result");
+}
+
 async function runClaude(params: {
   userPrompt: string;
   systemPrompt: string;
@@ -129,6 +159,9 @@ async function runClaude(params: {
   images?: GenerateTextImage[];
   // Overrides the TRUSTED_ARGS/HARDENING_ARGS choice — see WEB_SEARCH_ARGS.
   toolArgs?: string[];
+  // Switches to --output-format stream-json and calls this with each piece
+  // of the reply's text as the CLI writes it.
+  onDelta?: (text: string) => void;
 }): Promise<ClaudeResult> {
   // Only pay for materializing a workspace when trusted mode is on AND
   // there's actually something to put in it — otherwise cwd stays
@@ -153,7 +186,7 @@ async function runClaude(params: {
       "-p",
       workspace ? STDIN_INSTRUCTION_WITH_WORKSPACE : STDIN_INSTRUCTION,
       "--output-format",
-      "json",
+      ...(params.onDelta ? ["stream-json", "--verbose", "--include-partial-messages"] : ["json"]),
       "--model",
       params.efficient ? "haiku" : "sonnet",
       "--effort",
@@ -170,9 +203,23 @@ async function runClaude(params: {
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
 
+    // stream-json is one JSON event per line; a chunk can end mid-line, so
+    // only complete lines are parsed.
+    let pending = "";
+    function onStdout(chunk: string) {
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        const text = textDeltaFromStreamLine(line);
+        if (text) params.onDelta?.(text);
+      }
+    }
+
     let stdout: string;
     try {
       ({ stdout } = await runCli({
+        onStdout: params.onDelta ? onStdout : undefined,
         command: "claude",
         args,
         stdin: buildStdin(params.systemPrompt, params.userPrompt),
@@ -190,7 +237,7 @@ async function runClaude(params: {
       throw err;
     }
 
-    return JSON.parse(stdout) as ClaudeResult;
+    return params.onDelta ? lastStreamResult(stdout) : (JSON.parse(stdout) as ClaudeResult);
   } finally {
     await workspace?.cleanup();
   }
@@ -250,6 +297,30 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
     cliTrustedModeEnabled,
     workspaceScope: params.workspaceScope,
     images: params.images,
+  });
+  if (result.is_error) {
+    throw new Error(result.result || `claude -p failed (${result.subtype})`);
+  }
+  return result.result;
+}
+
+export async function streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
+  const { cliTrustedModeEnabled } = await getAppSettings();
+  if (params.images?.length && !cliTrustedModeEnabled) {
+    throw new Error(
+      "Image input isn't supported with the Claude Code backend — switch to the Anthropic API, OpenAI, Gemini, or Free backend in Settings, or turn on full tool access for this CLI backend in Settings."
+    );
+  }
+  const effort = params.effort === "low" || params.effort === "high" ? params.effort : "medium";
+  const result = await runClaude({
+    userPrompt: params.user,
+    systemPrompt: params.system,
+    effort,
+    efficient: params.efficient,
+    cliTrustedModeEnabled,
+    workspaceScope: params.workspaceScope,
+    images: params.images,
+    onDelta,
   });
   if (result.is_error) {
     throw new Error(result.result || `claude -p failed (${result.subtype})`);

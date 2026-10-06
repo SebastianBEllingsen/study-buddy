@@ -88,6 +88,37 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
       return complete(system, user, maxTokens, false, images);
     },
 
+    async streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
+      const { system, user, maxTokens = 8000, images } = params;
+      const userContent: OpenAI.Chat.ChatCompletionContentPart[] = [
+        ...(images ?? []).map(
+          (image): OpenAI.Chat.ChatCompletionContentPart => ({
+            type: "image_url",
+            image_url: { url: `data:${image.mimeType};base64,${image.base64}` },
+          })
+        ),
+        { type: "text", text: user },
+      ];
+      const stream = await client().chat.completions.create({
+        model: config.model,
+        max_tokens: maxTokens,
+        stream: true,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: images?.length ? userContent : user },
+        ],
+      });
+      let full = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      }
+      return full;
+    },
+
     // OpenAI's Responses API web_search tool. Only the real OpenAI backend
     // exposes this (see openai.ts) — OpenRouter's compatible endpoint has no
     // Responses tools, so free.ts never calls it.

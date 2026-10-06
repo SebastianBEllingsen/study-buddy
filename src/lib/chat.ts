@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { generateText, resolveBackendId } from "./aiClient";
+import { generateText, resolveBackendId, streamText } from "./aiClient";
 import {
   addChatMessage,
   deleteChatMessage,
@@ -12,7 +12,8 @@ import {
   updateChatMessagePendingAction,
 } from "./models";
 import type { ChatAttachment, ChatConversation, ChatMessage, Course, PendingChatAction } from "./models";
-import { buildFullCourseContextText } from "./context";
+import { buildChatCourseContext } from "./context";
+import { tokenize } from "./courseRetrieval";
 import { parseDataUrlImage, isValidChatImageAttachment } from "./dataUrlImage";
 import { extensionOf } from "./documentFormats";
 import { extractDocxText, extractPdfText, EmptyDocumentError, ScannedPdfError } from "./extraction";
@@ -152,10 +153,17 @@ function buildTranscriptPrompt(messages: ChatMessage[]): string {
 // backend throws on failure (see describeAiError) — the caller (the
 // messages API route) is responsible for translating that into a response,
 // same pattern as generateForCourse.
+//
+// With onDelta, the reply's text is passed to it as the model writes it. The
+// action check above runs in parallel, so deltas are held back until it has
+// ruled out a proposal — a proposal replaces the reply, and half-shown text
+// would have to be taken back. The returned message is always the final,
+// sanitized one; callers should swap it in for whatever was streamed.
 export async function sendChatMessage(
   conversationId: number,
   content: string,
-  attachments?: ChatAttachment[]
+  attachments?: ChatAttachment[],
+  onDelta?: (text: string) => void
 ): Promise<ChatMessage> {
   const userMessage = await addChatMessage(conversationId, "user", content, attachments);
 
@@ -183,7 +191,10 @@ export async function sendChatMessage(
     const courses = await listCourses();
     const accessibleCourseIds = accessibleCourseIdsFor(detail.conversation, detail.messages, courses);
     const folders = (await Promise.all(accessibleCourseIds.map((id) => listFoldersForCourse(id)))).flat();
-    const detected = await detectChatActions({
+    // Run alongside the reply call below instead of before it, so a normal
+    // message costs one model round-trip of latency, not two. When an action
+    // is proposed the reply is simply discarded.
+    const detectedPromise = detectChatActions({
       transcript,
       availableAttachments: buildAvailableAttachmentsList(detail.messages),
       courses,
@@ -191,6 +202,28 @@ export async function sendChatMessage(
       accessibleCourseIds,
       folders,
     });
+
+    const images = (attachments ?? [])
+      .filter((a): a is Extract<ChatAttachment, { type: "image" }> => a.type === "image")
+      .map((a) => parseDataUrlImage(a.dataUrl))
+      .filter((img): img is { base64: string; mimeType: string } => img !== null);
+
+    let released = false;
+    let held = "";
+    const releasingOnDelta = onDelta
+      ? (text: string) => {
+          if (released) onDelta(text);
+          else held += text;
+        }
+      : undefined;
+    const replyPromise = generateConversationReply(detail.conversation, detail.messages, courses, {
+      images,
+      onDelta: releasingOnDelta,
+    });
+    // If detection wins, nobody awaits this — don't let its failure go unhandled.
+    replyPromise.catch(() => {});
+
+    const detected = await detectedPromise;
 
     if (detected.actions.length > 0 && detected.confirmationMessage) {
       const pendingAction: PendingChatAction = {
@@ -208,12 +241,9 @@ export async function sendChatMessage(
       );
     }
 
-    const images = (attachments ?? [])
-      .filter((a): a is Extract<ChatAttachment, { type: "image" }> => a.type === "image")
-      .map((a) => parseDataUrlImage(a.dataUrl))
-      .filter((img): img is { base64: string; mimeType: string } => img !== null);
-
-    const reply = await generateConversationReply(detail.conversation, detail.messages, courses, { images });
+    released = true;
+    if (held && onDelta) onDelta(held);
+    const reply = await replyPromise;
     return await addChatMessage(conversationId, "assistant", reply);
   } catch (err) {
     await deleteChatMessage(userMessage.id).catch(() => {});
@@ -252,6 +282,18 @@ function accessibleCourseIdsFor(
   return [...ids].filter((id) => existing.has(id));
 }
 
+// What to look up in the course for this turn: the user's latest message, plus
+// the exchange before it when the message is too short to search on by itself
+// ("explain that more", "and the second one?").
+export function retrievalQuery(messages: ChatMessage[]): string {
+  const users = messages.filter((m) => m.role === "user");
+  const latest = users[users.length - 1]?.content ?? "";
+  if (tokenize(latest).length >= 4) return latest;
+  const previousUser = users[users.length - 2]?.content ?? "";
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
+  return [latest, previousUser, lastAssistant.slice(0, 600)].join("\n");
+}
+
 // One free-text assistant reply for the conversation as it stands — shared
 // by sendChatMessage and the follow-up after a granted readCourse. Course
 // content is limited to accessibleCourseIdsFor; every other course appears
@@ -260,7 +302,11 @@ async function generateConversationReply(
   conversation: ChatConversation,
   messages: ChatMessage[],
   courses: Course[],
-  options: { images?: { base64: string; mimeType: string }[]; extraSystem?: string } = {}
+  options: {
+    images?: { base64: string; mimeType: string }[];
+    extraSystem?: string;
+    onDelta?: (text: string) => void;
+  } = {}
 ): Promise<string> {
   const { aiEfficiencyMode: efficient, cliTrustedModeEnabled } = await getAppSettings();
   const images = options.images ?? [];
@@ -285,26 +331,28 @@ async function generateConversationReply(
       // here (not just extracted ones) satisfies "include all documents".
       documentIds = (await Promise.all(accessibleIds.map((id) => listDocumentsForCourse(id)))).flat().map((d) => d.id);
     } else {
+      const query = retrievalQuery(messages);
       const sections = await Promise.all(
         accessibleIds.map(async (id) => {
-          const { courseName, text } = await buildFullCourseContextText(id);
+          const { courseName, text } = await buildChatCourseContext(id, query);
           return `=== Course: ${courseName} ===\n${text}`;
         })
       );
-      system += `\n\nThe user has made the following course material available in this conversation (the course it's scoped to and/or courses they allowed you to read) — use it to answer questions about those courses, but you can still discuss anything else too.\n\n${sections.join("\n\n")}`;
+      system += `\n\nThe user has made the following course material available in this conversation (the course it's scoped to and/or courses they allowed you to read) — use it to answer questions about those courses, but you can still discuss anything else too. Large courses are shown as an outline plus only the excerpts relevant to the latest message, not in full: if a question needs material you can't see, say which document or topic you'd need and ask the user to name it, rather than guessing.\n\n${sections.join("\n\n")}`;
     }
   }
   if (options.extraSystem) system += `\n\n${options.extraSystem}`;
 
-  const reply = await generateText({
+  const params = {
     system,
     user: buildTranscriptPrompt(messages),
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
-    effort: efficient ? "low" : "medium",
+    effort: efficient ? ("low" as const) : ("medium" as const),
     efficient,
     images: images.length > 0 ? images : undefined,
     workspaceScope: documentIds?.length ? { documentIds } : undefined,
-  });
+  };
+  const reply = options.onDelta ? await streamText(params, options.onDelta) : await generateText(params);
   return stripOrphanMathDelimiters(reply.trim());
 }
 

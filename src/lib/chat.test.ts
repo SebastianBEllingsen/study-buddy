@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const generateText = vi.fn();
+const streamText = vi.fn();
 const resolveBackendId = vi.fn();
 vi.mock("./aiClient", () => ({
   generateText: (...args: unknown[]) => generateText(...args),
+  streamText: (...args: unknown[]) => streamText(...args),
   resolveBackendId: (...args: unknown[]) => resolveBackendId(...args),
 }));
 
@@ -28,9 +30,9 @@ vi.mock("./models", () => ({
   updateChatMessagePendingAction: (...args: unknown[]) => updateChatMessagePendingAction(...args),
 }));
 
-const buildFullCourseContextText = vi.fn();
+const buildChatCourseContext = vi.fn();
 vi.mock("./context", () => ({
-  buildFullCourseContextText: (...args: unknown[]) => buildFullCourseContextText(...args),
+  buildChatCourseContext: (...args: unknown[]) => buildChatCourseContext(...args),
 }));
 
 const buildAvailableAttachmentsList = vi.fn();
@@ -58,6 +60,7 @@ const { sendChatMessage, validateAndExtractAttachments, resolvePendingAction, Pe
 
 beforeEach(() => {
   generateText.mockReset();
+  streamText.mockReset();
   resolveBackendId.mockReset();
   addChatMessage.mockReset();
   deleteChatMessage.mockReset().mockResolvedValue(undefined);
@@ -68,7 +71,7 @@ beforeEach(() => {
   listDocumentsForCourse.mockReset();
   listFoldersForCourse.mockReset().mockResolvedValue([]);
   updateChatMessagePendingAction.mockReset();
-  buildFullCourseContextText.mockReset();
+  buildChatCourseContext.mockReset();
   extractPdfText.mockReset();
   extractDocxText.mockReset();
   buildAvailableAttachmentsList.mockReset().mockReturnValue([]);
@@ -188,12 +191,12 @@ describe("sendChatMessage", () => {
         messages: [{ role: "user", content: "hi" }],
       });
       resolveBackendId.mockResolvedValue("api");
-      buildFullCourseContextText.mockResolvedValue({ courseName: "Bio", text: "--- Document: x.pdf ---\nhello" });
+      buildChatCourseContext.mockResolvedValue({ courseName: "Bio", text: "--- Document: x.pdf ---\nhello" });
       generateText.mockResolvedValue("hello");
 
       await sendChatMessage(1, "hi");
 
-      expect(buildFullCourseContextText).toHaveBeenCalledWith(7);
+      expect(buildChatCourseContext).toHaveBeenCalledWith(7, expect.any(String));
       expect(listDocumentsForCourse).not.toHaveBeenCalled();
       const call = generateText.mock.calls[0][0];
       expect(call.system).toContain("--- Document: x.pdf ---");
@@ -216,7 +219,7 @@ describe("sendChatMessage", () => {
       await sendChatMessage(1, "hi");
 
       expect(listDocumentsForCourse).toHaveBeenCalledWith(7);
-      expect(buildFullCourseContextText).not.toHaveBeenCalled();
+      expect(buildChatCourseContext).not.toHaveBeenCalled();
       const call = generateText.mock.calls[0][0];
       expect(call.workspaceScope).toEqual({ documentIds: [1, 2, 3] });
       expect(call.system).not.toContain("--- Document");
@@ -231,13 +234,13 @@ describe("sendChatMessage", () => {
         messages: [{ role: "user", content: "hi" }],
       });
       resolveBackendId.mockResolvedValue("api");
-      buildFullCourseContextText.mockResolvedValue({ courseName: "Bio", text: "bio text" });
+      buildChatCourseContext.mockResolvedValue({ courseName: "Bio", text: "bio text" });
       generateText.mockResolvedValue("hello");
 
       await sendChatMessage(1, "hi");
 
-      expect(buildFullCourseContextText).toHaveBeenCalledTimes(1);
-      expect(buildFullCourseContextText).not.toHaveBeenCalledWith(8);
+      expect(buildChatCourseContext).toHaveBeenCalledTimes(1);
+      expect(buildChatCourseContext).not.toHaveBeenCalledWith(8);
       const system: string = generateText.mock.calls[0][0].system;
       expect(system).toContain("- Chem");
       expect(system).not.toContain("- Bio");
@@ -265,12 +268,12 @@ describe("sendChatMessage", () => {
         ],
       });
       resolveBackendId.mockResolvedValue("api");
-      buildFullCourseContextText.mockResolvedValue({ courseName: "Chem", text: "--- Note: Atoms ---\nbody" });
+      buildChatCourseContext.mockResolvedValue({ courseName: "Chem", text: "--- Note: Atoms ---\nbody" });
       generateText.mockResolvedValue("ok");
 
       await sendChatMessage(1, "what's in chem?");
 
-      expect(buildFullCourseContextText).toHaveBeenCalledWith(8);
+      expect(buildChatCourseContext).toHaveBeenCalledWith(8, expect.any(String));
       expect(generateText.mock.calls[0][0].system).toContain("--- Note: Atoms ---");
       // The detector sees the granted course as accessible (and its folders).
       expect(detectChatActions.mock.calls[0][0]).toMatchObject({ accessibleCourseIds: [8], scopedCourseId: null });
@@ -294,8 +297,62 @@ describe("sendChatMessage", () => {
 
       await sendChatMessage(1, "hi");
 
-      expect(buildFullCourseContextText).not.toHaveBeenCalled();
+      expect(buildChatCourseContext).not.toHaveBeenCalled();
       expect(detectChatActions.mock.calls[0][0].accessibleCourseIds).toEqual([]);
+    });
+
+    it("streams the reply, holding text back until action detection has finished", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
+        .mockResolvedValueOnce({ id: 2, role: "assistant", content: "hello there" });
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: null },
+        messages: [{ id: 1, role: "user", content: "hi" }],
+      });
+      let finishDetection!: () => void;
+      detectChatActions.mockReturnValue(
+        new Promise((resolve) => {
+          finishDetection = () => resolve({ actions: [], confirmationMessage: null });
+        })
+      );
+      streamText.mockImplementation(async (_params: unknown, onDelta: (t: string) => void) => {
+        onDelta("hello ");
+        onDelta("there");
+        return "hello there";
+      });
+      const deltas: string[] = [];
+
+      const sent = sendChatMessage(1, "hi", undefined, (t) => deltas.push(t));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(deltas).toEqual([]);
+
+      finishDetection();
+      await sent;
+      expect(deltas.join("")).toBe("hello there");
+      expect(generateText).not.toHaveBeenCalled();
+    });
+
+    it("never shows streamed text when an action is proposed instead", async () => {
+      addChatMessage
+        .mockResolvedValueOnce({ id: 1, role: "user", content: "make a course" })
+        .mockResolvedValueOnce({ id: 2, role: "assistant", content: "Create it?" });
+      getChatConversation.mockResolvedValue({
+        conversation: { courseId: null },
+        messages: [{ id: 1, role: "user", content: "make a course" }],
+      });
+      detectChatActions.mockResolvedValue({
+        actions: [{ action: "createCourse", courseName: "Sample" }],
+        confirmationMessage: "Create it?",
+      });
+      streamText.mockImplementation(async (_params: unknown, onDelta: (t: string) => void) => {
+        onDelta("ignored reply");
+        return "ignored reply";
+      });
+      const deltas: string[] = [];
+
+      await sendChatMessage(1, "make a course", undefined, (t) => deltas.push(t));
+
+      expect(deltas).toEqual([]);
     });
 
     it("runs action detection for an unscoped conversation too", async () => {
@@ -313,7 +370,8 @@ describe("sendChatMessage", () => {
 
       await sendChatMessage(1, "make me a course");
 
-      expect(generateText).not.toHaveBeenCalled();
+      // The reply call runs in parallel with detection, but its text is discarded.
+      expect(addChatMessage.mock.calls[1][2]).toBe("Create it?");
       expect(addChatMessage.mock.calls[1][4]).toMatchObject({
         status: "pending",
         actions: [{ action: "createCourse", courseName: "Sample" }],
@@ -430,13 +488,13 @@ describe("resolvePendingAction", () => {
     listCourses.mockResolvedValue([{ id: 8, name: "Chem" }]);
     executeChatActions.mockResolvedValue('Allowed to read "Chem" in this conversation.');
     resolveBackendId.mockResolvedValue("api");
-    buildFullCourseContextText.mockResolvedValue({ courseName: "Chem", text: "chem text" });
+    buildChatCourseContext.mockResolvedValue({ courseName: "Chem", text: "chem text" });
     generateText.mockResolvedValue("Here is a summary");
     addChatMessage.mockResolvedValue({ id: 6, role: "assistant", content: "Here is a summary" });
 
     const result = await resolvePendingAction(1, 5, true);
 
-    expect(buildFullCourseContextText).toHaveBeenCalledWith(8);
+    expect(buildChatCourseContext).toHaveBeenCalledWith(8, expect.any(String));
     expect(generateText.mock.calls[0][0].system).toContain("chem text");
     expect(result.followUp).toEqual({ id: 6, role: "assistant", content: "Here is a summary" });
   });
@@ -453,7 +511,7 @@ describe("resolvePendingAction", () => {
     listCourses.mockResolvedValue([{ id: 8, name: "Chem" }]);
     executeChatActions.mockResolvedValue("ok");
     resolveBackendId.mockResolvedValue("api");
-    buildFullCourseContextText.mockResolvedValue({ courseName: "Chem", text: "t" });
+    buildChatCourseContext.mockResolvedValue({ courseName: "Chem", text: "t" });
     generateText.mockRejectedValue(new Error("rate limited"));
     vi.spyOn(console, "error").mockImplementation(() => {});
 

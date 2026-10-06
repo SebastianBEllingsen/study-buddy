@@ -6,6 +6,7 @@ import { descendantFolderIds, folderPathLabel } from "./folderTree";
 import { stripNoteLinkSyntax } from "./noteLinks";
 import type { SourceTrust } from "./sources/types";
 import type { SourceRef } from "./types";
+import { selectCourseContext, type CourseSection } from "./courseRetrieval";
 export { resolveSourceName } from "./sources/names";
 
 // One labelled section of generation material: a course document, or a
@@ -194,9 +195,9 @@ export function chunkCourseContext(context: CourseContext): string[] {
 // follow the documents. Deliberately doesn't
 // touch buildCourseContext itself — quiz/flashcard/notes generation must
 // keep their existing extracted-only behavior unchanged.
-export async function buildFullCourseContextText(
+export async function loadCourseSections(
   courseId: number
-): Promise<{ courseName: string; text: string }> {
+): Promise<{ courseName: string; sections: CourseSection[] }> {
   const course = await getCourse(courseId);
   if (!course) {
     throw new Error(`Course ${courseId} not found`);
@@ -209,14 +210,25 @@ export async function buildFullCourseContextText(
   ]);
   const folderIds = new Set(folders.map((f) => f.id));
 
-  const sections = documents.map((d) => {
+  const sections: CourseSection[] = documents.map((d) => {
     const location =
       d.folder_id != null && folderIds.has(d.folder_id) ? folderPathLabel(folders, d.folder_id) : "Unfiled";
     if (d.status === "extracted" && d.extracted_text) {
-      return `--- Document: ${d.filename} (${location}) ---\n${omitEmbeddedImages(d.extracted_text)}`;
+      return {
+        kind: "document",
+        title: d.filename,
+        header: `--- Document: ${d.filename} (${location}) ---`,
+        body: omitEmbeddedImages(d.extracted_text),
+      };
     }
     const statusLabel = d.status === "image" ? "image, no extracted text" : d.status;
-    return `--- Document: ${d.filename} (${location}, ${statusLabel}) ---`;
+    return {
+      kind: "document",
+      title: d.filename,
+      header: `--- Document: ${d.filename} (${location}, ${statusLabel}) ---`,
+      body: null,
+      note: statusLabel,
+    };
   });
 
   // Notes are course content too (the chat assistant can write them — see
@@ -224,8 +236,35 @@ export async function buildFullCourseContextText(
   for (const n of notes) {
     const location =
       n.folder_id != null && folderIds.has(n.folder_id) ? folderPathLabel(folders, n.folder_id) : "Unfiled";
-    sections.push(`--- Note: ${n.title} (${location}) ---\n${stripNoteLinkSyntax(omitEmbeddedImages(n.markdown))}`);
+    sections.push({
+      kind: "note",
+      title: n.title,
+      header: `--- Note: ${n.title} (${location}) ---`,
+      body: stripNoteLinkSyntax(omitEmbeddedImages(n.markdown)),
+    });
   }
 
-  return { courseName: course.name, text: sections.join("\n\n") };
+  return { courseName: course.name, sections };
+}
+
+export async function buildFullCourseContextText(
+  courseId: number
+): Promise<{ courseName: string; text: string }> {
+  const { courseName, sections } = await loadCourseSections(courseId);
+  return {
+    courseName,
+    text: sections.map((s) => (s.body !== null ? `${s.header}\n${s.body}` : s.header)).join("\n\n"),
+  };
+}
+
+// What the chat assistant gets of a course on one turn: the whole course if
+// it's small, otherwise an outline plus only the passages relevant to the
+// user's latest message (see courseRetrieval.ts) — never the full course on
+// every message.
+export async function buildChatCourseContext(
+  courseId: number,
+  query: string
+): Promise<{ courseName: string; text: string }> {
+  const { courseName, sections } = await loadCourseSections(courseId);
+  return { courseName, text: selectCourseContext(sections, query) };
 }

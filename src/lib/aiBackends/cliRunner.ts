@@ -20,6 +20,9 @@ export interface RunCliParams {
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
   maxBufferBytes: number;
+  // Called with each piece of stdout as it arrives (stdout is still
+  // collected and returned in full).
+  onStdout?: (chunk: string) => void;
 }
 
 export interface RunCliResult {
@@ -106,7 +109,9 @@ export function runCli(params: RunCliParams): Promise<RunCliResult> {
         });
         return;
       }
-      stdout += chunk.toString("utf-8");
+      const text = chunk.toString("utf-8");
+      stdout += text;
+      params.onStdout?.(text);
     });
 
     child.stderr.on("data", (chunk: Buffer) => {

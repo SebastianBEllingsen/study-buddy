@@ -32,6 +32,10 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   return (await backend()).generateText(params);
 }
 
+export async function streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
+  return (await backend()).streamText(params, onDelta);
+}
+
 export async function describeError(err: unknown): Promise<string> {
   return (await backend()).describeError(err);
 }

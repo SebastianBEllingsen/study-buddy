@@ -86,6 +86,36 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   return complete(system, user, maxTokens, false, images);
 }
 
+export async function streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
+  const { system, user, maxTokens = 8000, images } = params;
+  const genAI = await client();
+  const contents = images?.length
+    ? [
+        {
+          role: "user" as const,
+          parts: [
+            ...images.map((image) => ({ inlineData: { mimeType: image.mimeType, data: image.base64 } })),
+            { text: user },
+          ],
+        },
+      ]
+    : user;
+  const stream = await genAI.models.generateContentStream({
+    model: MODEL,
+    contents,
+    config: { systemInstruction: system, maxOutputTokens: maxTokens },
+  });
+  let full = "";
+  for await (const chunk of stream) {
+    const text = chunk.text;
+    if (text) {
+      full += text;
+      onDelta(text);
+    }
+  }
+  return full;
+}
+
 // Google Search grounding. Can't be combined with JSON mode
 // (responseMimeType), so the caller parses JSON out of plain text. The
 // grounding chunk URIs are Google redirect links, not the sources' own URLs

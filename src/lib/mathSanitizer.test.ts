@@ -21,6 +21,11 @@ describe("stripOrphanMathDelimiters", () => {
     expect(stripOrphanMathDelimiters(input)).toBe(input);
   });
 
+  it("keeps math whose colon is := or inside \\text{}", () => {
+    const input = "Run $u',s' := u+1$ and $\\text{where: } x$.";
+    expect(stripOrphanMathDelimiters(input)).toBe(input);
+  });
+
   it("strips delimiters (keeping the text) around content containing a colon", () => {
     // The known generation-merge bug: two "Label: <formula>" lines bridged
     // by MATH_PATTERN's lazy match into one fake pair. The colon heuristic

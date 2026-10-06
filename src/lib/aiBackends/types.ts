@@ -78,6 +78,10 @@ export interface WebSearchResult {
 export interface AiBackendImpl {
   generateStructured<T>(params: GenerateStructuredParams): Promise<T>;
   generateText(params: GenerateTextParams): Promise<string>;
+  // Same as generateText, but hands each piece of the reply to onDelta as it
+  // arrives. Resolves to the full text. Optional — aiClient.streamText falls
+  // back to one delta holding the whole reply for backends without it.
+  streamText?(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string>;
   generateTextWithWebSearch?(params: WebSearchParams): Promise<WebSearchResult>;
   describeError(err: unknown): string;
 }

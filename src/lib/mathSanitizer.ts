@@ -47,7 +47,12 @@ export function normalizeLatexDelimiters(text: string): string {
 // use bare colons; every observed false-pair case is exactly two
 // "Label: <formula>" lines bridged together) or fails to parse as LaTeX.
 function looksLikeRealMath(tex: string): boolean {
-  if (tex.includes(":")) return false;
+  // Colons that are real notation — `:=`, `=:`, `\colon`, or anything inside
+  // \text{...}/\mathrm{...} — don't count as the "Label:" tell.
+  const withoutNotation = tex
+    .replace(/\\(?:text|mathrm|textbf|mathbf)\{[^{}]*\}/g, "")
+    .replace(/\\colon|:=|=:/g, "");
+  if (withoutNotation.includes(":")) return false;
   try {
     katex.renderToString(tex, { throwOnError: true });
     return true;

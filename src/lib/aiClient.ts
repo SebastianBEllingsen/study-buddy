@@ -8,6 +8,7 @@ import * as openai from "./aiBackends/openai";
 import * as gemini from "./aiBackends/gemini";
 import * as free from "./aiBackends/free";
 import type {
+  AiBackendImpl,
   GenerateStructuredParams,
   GenerateTextParams,
   WebSearchParams,
@@ -78,6 +79,19 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   if (!(await isAiEnabled())) throw new AiDisabledError();
   const id = await resolveBackendId(!!params.images?.length);
   return backendModule(id).generateText(params);
+}
+
+// generateText, but onDelta receives the reply piece by piece as the backend
+// produces it (backends without streaming deliver it as one piece at the
+// end). Resolves to the full text either way.
+export async function streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
+  if (!(await isAiEnabled())) throw new AiDisabledError();
+  const id = await resolveBackendId(!!params.images?.length);
+  const backend: Pick<AiBackendImpl, "generateText" | "streamText"> = backendModule(id);
+  if (backend.streamText) return backend.streamText(params, onDelta);
+  const text = await backend.generateText(params);
+  if (text) onDelta(text);
+  return text;
 }
 
 // Every backend module exporting generateTextWithWebSearch, by id —

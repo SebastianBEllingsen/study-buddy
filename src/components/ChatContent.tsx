@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -95,6 +95,70 @@ function composerAttachmentToChatAttachment(a: ComposerAttachment): ChatAttachme
 // browser window rather than a cut-down copy — see lib/chat.ts for how a
 // reply is generated and the chat_conversations/chat_messages tables in
 // schema.sql for how history is persisted.
+// Memoized: the composer's draft lives in ChatContent, so without this every
+// keystroke would re-parse and re-typeset every message (markdown + KaTeX) and
+// make typing lag.
+const ChatMarkdown = memo(function ChatMarkdown({ content }: { content: string }) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeHighlight]}>
+        {normalizeLatexDelimiters(content)}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
+// Reads the NDJSON reply stream from the messages route (see its `stream`
+// option): hands the text so far to onText (at most once per animation frame,
+// so a fast stream doesn't re-render the markdown/KaTeX on every token), and
+// resolves to the saved message, or the error the stream ended with.
+async function readReplyStream(
+  res: Response,
+  onText: (text: string) => void
+): Promise<{ message: ChatMessage | null; error: string | null }> {
+  if (!res.body) return { message: null, error: null };
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let frame: number | null = null;
+  let result: { message: ChatMessage | null; error: string | null } = { message: null, error: null };
+
+  function handleLine(line: string) {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as
+      | { type: "delta"; text: string }
+      | { type: "done"; message: ChatMessage }
+      | { type: "error"; error: string };
+    if (event.type === "delta") {
+      text += event.text;
+      frame ??= requestAnimationFrame(() => {
+        frame = null;
+        onText(text);
+      });
+    } else if (event.type === "done") {
+      result = { message: event.message, error: null };
+    } else {
+      result = { message: null, error: event.error };
+    }
+  }
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      lines.forEach(handleLine);
+    }
+    handleLine(buffer);
+  } finally {
+    if (frame !== null) cancelAnimationFrame(frame);
+  }
+  return result;
+}
+
 export default function ChatContent({
   headerActions,
   initialConversationId,
@@ -123,6 +187,8 @@ export default function ChatContent({
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  // The assistant's reply as it streams in; null while nothing has arrived.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [attachmentDrafts, setAttachmentDrafts] = useState<ComposerAttachment[]>([]);
@@ -164,7 +230,7 @@ export default function ChatContent({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, sending]);
+  }, [messages, sending, streamingText]);
 
   async function loadConversations() {
     try {
@@ -384,17 +450,24 @@ export default function ChatContent({
       const res = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, attachments: attachments.map(composerAttachmentToRaw) }),
+        body: JSON.stringify({
+          content,
+          attachments: attachments.map(composerAttachmentToRaw),
+          stream: true,
+        }),
       });
-      const body = await res.json();
-      if (!res.ok) {
-        toast.error(body.error ?? "Couldn't get a reply");
+      const result: { message: ChatMessage | null; error: string | null } = res.headers.get("content-type")?.includes("application/x-ndjson")
+        ? await readReplyStream(res, setStreamingText)
+        : { error: ((await res.json().catch(() => ({}))) as { error?: string }).error ?? null, message: null };
+      const reply = result.message;
+      if (!reply) {
+        toast.error(result.error ?? "Couldn't get a reply");
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         setDraft(content);
         setAttachmentDrafts(attachments);
         return;
       }
-      setMessages((prev) => [...prev, body as ChatMessage]);
+      setMessages((prev) => [...prev, reply]);
       // Refreshes title (set from the first message) and reordering.
       const list: ChatConversation[] = await fetch("/api/chat/conversations").then((r) => r.json());
       setConversations(list);
@@ -405,6 +478,7 @@ export default function ChatContent({
       setAttachmentDrafts(attachments);
     } finally {
       setSending(false);
+      setStreamingText(null);
     }
   }
 
@@ -538,11 +612,7 @@ export default function ChatContent({
                     )
                   )}
                   {m.role === "assistant" ? (
-                    <div className="markdown-body">
-                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeHighlight]}>
-                        {normalizeLatexDelimiters(m.content)}
-                      </ReactMarkdown>
-                    </div>
+                    <ChatMarkdown content={m.content} />
                   ) : (
                     m.content && <p className="whitespace-pre-wrap">{m.content}</p>
                   )}
@@ -578,9 +648,13 @@ export default function ChatContent({
             ))}
             {sending && (
               <div className="flex justify-start">
-                <div className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
-                  Thinking…
-                </div>
+                {streamingText ? (
+                  <div className="max-w-[85%] rounded-xl bg-muted px-3 py-2 text-sm text-foreground">
+                    <ChatMarkdown content={streamingText} />
+                  </div>
+                ) : (
+                  <div className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">Thinking…</div>
+                )}
               </div>
             )}
           </div>
