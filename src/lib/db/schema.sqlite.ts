@@ -159,6 +159,8 @@ export const app_settings = sqliteTable("app_settings", {
   new_cards_per_day: integer("new_cards_per_day"),
   // "first" | "sequence" (lib/audioAutoplay.ts); null == "first".
   flashcard_audio_autoplay: text("flashcard_audio_autoplay"),
+  // "transparent" | "boxed" (lib/cardStyle.ts); null == "transparent".
+  flashcard_card_style: text("flashcard_card_style"),
   // The bell next to decks with review reminders on, on course pages.
   deck_reminder_icons: integer("deck_reminder_icons", { mode: "boolean" }).notNull().default(true),
   // Set once the old SM-2 flashcard history has been replayed into

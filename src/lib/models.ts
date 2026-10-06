@@ -57,6 +57,7 @@ import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
 import { wikiLinksToTitle } from "./obsidianLinks";
 import { canvasReferencesTarget, emptyCanvas, parseCanvasJson, type CanvasData } from "./canvas";
 import { parseAudioAutoplayMode, type AudioAutoplayMode } from "./audioAutoplay";
+import { parseCardStyle, type CardStyle } from "./cardStyle";
 
 // "image" is distinct from "failed": a plain image (png/jpg/...) has no text
 // to extract by design (no OCR — see extraction.ts), not a broken upload —
@@ -227,6 +228,7 @@ interface SettingsRow {
   review_retention: number | null;
   new_cards_per_day: number | null;
   flashcard_audio_autoplay: string | null;
+  flashcard_card_style: string | null;
   deck_reminder_icons: boolean;
   today_card_shown: boolean;
   today_card_frosted: boolean;
@@ -279,6 +281,7 @@ async function getSettingsRow(): Promise<SettingsRow | undefined> {
       review_retention: app_settings.review_retention,
       new_cards_per_day: app_settings.new_cards_per_day,
       flashcard_audio_autoplay: app_settings.flashcard_audio_autoplay,
+      flashcard_card_style: app_settings.flashcard_card_style,
       deck_reminder_icons: app_settings.deck_reminder_icons,
       today_card_shown: app_settings.today_card_shown,
       today_card_frosted: app_settings.today_card_frosted,
@@ -542,6 +545,9 @@ export interface AppSettings {
   // Which of a flashcard face's audio clips play on their own — see
   // lib/audioAutoplay.ts.
   flashcardAudioAutoplay: AudioAutoplayMode;
+  // Whether a flashcard shows in its own solid box or transparently over the
+  // page — see lib/cardStyle.ts.
+  flashcardCardStyle: CardStyle;
   // A small bell next to each deck on course pages whose review reminders
   // are on (see FlashcardsContent.reminders).
   deckReminderIcons: boolean;
@@ -597,6 +603,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     reviewRetention: clampRetention(row?.review_retention ?? DEFAULT_RETENTION),
     newCardsPerDay: clampNewCardsPerDay(row?.new_cards_per_day ?? DEFAULT_NEW_CARDS_PER_DAY),
     flashcardAudioAutoplay: parseAudioAutoplayMode(row?.flashcard_audio_autoplay),
+    flashcardCardStyle: parseCardStyle(row?.flashcard_card_style),
     deckReminderIcons: row?.deck_reminder_icons ?? true,
   };
 }
@@ -747,6 +754,13 @@ export async function setFlashcardAudioAutoplay(mode: AudioAutoplayMode): Promis
   await db
     .update(app_settings)
     .set({ flashcard_audio_autoplay: mode === "first" ? null : mode, updated_at: nowUtc() })
+    .where(eq(app_settings.id, 1));
+}
+
+export async function setFlashcardCardStyle(style: CardStyle): Promise<void> {
+  await db
+    .update(app_settings)
+    .set({ flashcard_card_style: style === "transparent" ? null : style, updated_at: nowUtc() })
     .where(eq(app_settings.id, 1));
 }
 

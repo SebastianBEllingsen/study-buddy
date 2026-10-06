@@ -577,6 +577,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("app_settings", "flashcard_audio_autoplay")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN flashcard_audio_autoplay TEXT");
   }
+  if (!hasColumn("app_settings", "flashcard_card_style")) {
+    database.exec("ALTER TABLE app_settings ADD COLUMN flashcard_card_style TEXT");
+  }
   if (!hasColumn("app_settings", "deck_reminder_icons")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN deck_reminder_icons INTEGER NOT NULL DEFAULT 1");
   }

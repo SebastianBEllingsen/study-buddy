@@ -16,7 +16,11 @@ vi.mock("@/lib/calendarFeeds", () => ({
 }));
 
 const listCalendarFeeds = vi.fn();
-vi.mock("@/lib/models", () => ({ listCalendarFeeds: (...args: unknown[]) => listCalendarFeeds(...args) }));
+const listCompletedAssignmentIds = vi.fn();
+vi.mock("@/lib/models", () => ({
+  listCalendarFeeds: (...args: unknown[]) => listCalendarFeeds(...args),
+  listCompletedAssignmentIds: (...args: unknown[]) => listCompletedAssignmentIds(...args),
+}));
 
 const listCalendarSessions = vi.fn();
 vi.mock("@/lib/studyPlan/store", () => ({
@@ -40,10 +44,29 @@ beforeEach(() => {
   fetchAllFeedEvents.mockReset().mockResolvedValue([]);
   fetchFeedEvents.mockReset().mockResolvedValue([]);
   listCalendarFeeds.mockReset().mockResolvedValue([]);
+  listCompletedAssignmentIds.mockReset().mockResolvedValue([]);
   listCalendarSessions.mockReset().mockResolvedValue([]);
 });
 
 describe("GET /api/calendar/events", () => {
+  it("includeOverdue looks back and keeps past-due events until they're completed", async () => {
+    const past = (id: string) => ({
+      id,
+      title: id,
+      start: new Date(Date.now() - 86_400_000).toISOString(),
+      end: new Date(Date.now() - 86_400_000).toISOString(),
+      allDay: false,
+    });
+    listCalendarFeeds.mockResolvedValue([{ label: "F", url: "https://x/f.ics", enabled: true, show_on_calendar: true }]);
+    listCompletedAssignmentIds.mockResolvedValue(["done"]);
+    fetchAllFeedEvents.mockResolvedValue([past("open"), past("done")]);
+    const res = await GET(new Request("http://localhost/api/calendar/events?includeOverdue=true"));
+    const { events } = await res.json();
+    expect(events.map((e: { id: string }) => e.id)).toEqual(["open"]);
+    const range = fetchAllFeedEvents.mock.calls[0][1];
+    expect(range.timeMin.getTime()).toBeLessThan(Date.now());
+  });
+
   it("caps results at the default of 20 when no maxResults is given", async () => {
     fetchAllFeedEvents.mockResolvedValue(makeEvents(30));
     const res = await GET(new Request("http://localhost/api/calendar/events"));

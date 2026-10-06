@@ -200,6 +200,8 @@ export const app_settings = pgTable("app_settings", {
   review_retention: real("review_retention"),
   new_cards_per_day: integer("new_cards_per_day"),
   flashcard_audio_autoplay: text("flashcard_audio_autoplay"),
+  // "transparent" | "boxed" (lib/cardStyle.ts); null == "transparent".
+  flashcard_card_style: text("flashcard_card_style"),
   deck_reminder_icons: boolean("deck_reminder_icons").notNull().default(true),
   fsrs_migrated_at: text("fsrs_migrated_at"),
   updated_at: text("updated_at").notNull(),

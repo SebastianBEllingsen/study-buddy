@@ -29,6 +29,13 @@ const CONTENT_TYPES: Record<string, string> = {
   ".ogv": "video/ogg",
   ".mov": "video/quicktime",
   ".pdf": "application/pdf",
+  // Fonts, stylesheets and scripts bundled with imported Anki card templates.
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".css": "text/css",
+  ".js": "text/javascript",
 };
 
 type Params = { params: Promise<{ key: string[] }> };

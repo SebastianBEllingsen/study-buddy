@@ -1,3 +1,4 @@
+import { withCardCss } from "../cardHtml";
 import type { Flashcard, FlashcardsContent, QuizContent, QuizQuestion, SourceRef } from "../types";
 import type { ReviewItemKind } from "./types";
 
@@ -127,7 +128,7 @@ export function buildQueue(
             key: entryKey("card", index),
             kind: "card",
             index,
-            card,
+            card: withCardCss(card, content.styles),
             concept: card.concept ?? null,
             ...(card.source && { source: card.source }),
             isNew: false,
@@ -146,7 +147,7 @@ export function buildQueue(
           kind: "card",
           reverse: true,
           index,
-          card,
+          card: withCardCss(card, content.styles),
           concept: card.concept ?? null,
           ...(card.source && { source: card.source }),
           isNew: false,
@@ -187,7 +188,8 @@ export function buildQueue(
   const newEntries: QueueEntry[] = interleave(newGroups)
     .slice(0, allowance)
     .map(({ source, index }) => {
-      const card = (source.content as FlashcardsContent).cards[index];
+      const content = source.content as FlashcardsContent;
+      const card = content.cards[index];
       return {
         itemId: source.itemId,
         itemTitle: source.itemTitle,
@@ -196,7 +198,7 @@ export function buildQueue(
         key: `${source.itemId}:card:${index}`,
         kind: "card" as const,
         index,
-        card,
+        card: withCardCss(card, content.styles),
         concept: card.concept ?? null,
         ...(card.source && { source: card.source }),
         isNew: true,
@@ -255,9 +257,10 @@ export function buildFocusQueue(sources: QueueSource[], keys: string[], limit: n
       dueAt: review?.due_at ?? null,
     };
     if (kind === "card" && source.mode === "flashcards") {
-      const card = (source.content as FlashcardsContent).cards[i];
+      const content = source.content as FlashcardsContent;
+      const card = content.cards[i];
       if (card && !card.flag) {
-        entries.push({ ...base, kind: "card", card, concept: card.concept ?? null, ...(card.source && { source: card.source }) });
+        entries.push({ ...base, kind: "card", card: withCardCss(card, content.styles), concept: card.concept ?? null, ...(card.source && { source: card.source }) });
       }
     } else if (kind === "question" && source.mode === "quiz") {
       const question = (source.content as QuizContent).questions[i];

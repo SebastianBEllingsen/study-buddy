@@ -24,6 +24,13 @@ import { isValidCardMediaList } from "@/lib/cardMedia";
 // full per-field validation. Good enough to reject an obviously wrong edit
 // (wrong mode's shape entirely) without crashing rendering downstream;
 // deeper validation of quiz question internals is out of scope for now.
+function isValidCardHtml(html: unknown): boolean {
+  if (html === undefined) return true;
+  if (!html || typeof html !== "object") return false;
+  const h = html as Record<string, unknown>;
+  return typeof h.front === "string" && typeof h.back === "string";
+}
+
 function isValidContent(mode: GenerationMode, content: unknown): boolean {
   if (!content || typeof content !== "object") return false;
   const c = content as Record<string, unknown>;
@@ -41,7 +48,9 @@ function isValidContent(mode: GenerationMode, content: unknown): boolean {
           ["frontMedia", "backMedia"].every((key) => {
             const media = (card as Record<string, unknown>)[key];
             return media === undefined || isValidCardMediaList(media);
-          })
+          }) &&
+          // Optional, cards imported from Anki — see CardHtml in lib/types.ts.
+          isValidCardHtml((card as Record<string, unknown>).html)
       ) &&
       (c.reminders === undefined || typeof c.reminders === "boolean")
     );
@@ -110,6 +119,27 @@ export async function PATCH(request: Request, { params }: Params) {
         return Response.json({ error: "folderId is required" }, { status: 400 });
       }
       await moveGeneratedItem(id, folderId);
+      return Response.json({ ok: true });
+    }
+
+    // Review reminders on/off for a flashcard set (see
+    // FlashcardsContent.reminders): stored only as `false`, so turning them
+    // on drops the key. Done here, from the saved content, so a bulk toggle
+    // doesn't need each set's cards on the client.
+    if (typeof body?.reminders === "boolean") {
+      const item = await getGeneratedItem(id);
+      if (!item) return Response.json({ error: "Item not found" }, { status: 404 });
+      if (item.mode !== "flashcards") {
+        return Response.json({ error: "Only flashcard sets have review reminders" }, { status: 400 });
+      }
+      const content = JSON.parse(item.content_json) as Record<string, unknown>;
+      if (body.reminders) delete content.reminders;
+      else content.reminders = false;
+      await updateGeneratedItemContent({
+        id,
+        contentJson: content,
+        sourceDocumentIds: JSON.parse(item.source_document_ids),
+      });
       return Response.json({ ok: true });
     }
 

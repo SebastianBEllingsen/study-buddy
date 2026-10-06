@@ -477,6 +477,13 @@
       "when": 1791119843114,
       "tag": "0067_today_courses_shown",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1791301101574,
+      "tag": "0068_flashcard_card_style",
+      "breakpoints": true
     }
   ]
 }

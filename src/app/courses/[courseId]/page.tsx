@@ -11,6 +11,7 @@ import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import {
   Bell,
+  BellOff,
   Brain,
   ChevronRight,
   ChevronsDownUp,
@@ -51,6 +52,7 @@ import {
   Code2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { applyClick } from "@/lib/rangeSelect";
 import type {
   AppSettings,
   CanvasSummary,
@@ -381,6 +383,18 @@ function DocumentPickerDialog({
   );
 }
 
+// A checkbox click as the selection logic needs it: the state the row ended
+// up in, whether shift was held, and the ids of the list it's in, in order.
+interface SelectClick {
+  checked: boolean;
+  shift: boolean;
+  orderedIds: number[];
+}
+
+function selectClick(checked: boolean, details: { event: Event }, orderedIds: number[]): SelectClick {
+  return { checked, shift: (details.event as MouseEvent).shiftKey === true, orderedIds };
+}
+
 function DocumentList({
   documents,
   folderId,
@@ -396,7 +410,7 @@ function DocumentList({
   folderId: number | null;
   editMode: boolean;
   selected: Set<number>;
-  onToggleSelect: (documentId: number) => void;
+  onToggleSelect: (documentId: number, click?: SelectClick) => void;
   onDelete: (documentId: number) => void;
   onRename: (documentId: number, filename: string) => void;
   onView: (doc: DocumentSummaryRow) => void;
@@ -459,8 +473,14 @@ function DocumentList({
             {editMode && (
               <Checkbox
                 checked={selected.has(doc.id)}
-                onCheckedChange={() => onToggleSelect(doc.id)}
+                onCheckedChange={(checked, details) =>
+                  onToggleSelect(doc.id, selectClick(checked, details, documents.map((d) => d.id)))
+                }
                 aria-label={`Select ${doc.filename}`}
+                // Shift-click would otherwise also highlight the text between rows.
+                onMouseDown={(e) => {
+                  if (e.shiftKey) e.preventDefault();
+                }}
               />
             )}
             {/* Drag source is this handle — grip icon, filename, and status
@@ -611,7 +631,7 @@ function GeneratedItemList({
   notifiedItemIds: Set<number>;
   editMode: boolean;
   selected: Set<number>;
-  onToggleSelect: (itemId: number) => void;
+  onToggleSelect: (itemId: number, click?: SelectClick) => void;
   folders: Folder[];
   onMove: (itemId: number, folderId: number | null) => void;
   onDelete: (itemId: number) => void;
@@ -655,8 +675,14 @@ function GeneratedItemList({
             {editMode && (
               <Checkbox
                 checked={selected.has(item.id)}
-                onCheckedChange={() => onToggleSelect(item.id)}
+                onCheckedChange={(checked, details) =>
+                  onToggleSelect(item.id, selectClick(checked, details, items.map((i) => i.id)))
+                }
                 aria-label={`Select ${item.title}`}
+                // Shift-click would otherwise also highlight the text between rows.
+                onMouseDown={(e) => {
+                  if (e.shiftKey) e.preventDefault();
+                }}
               />
             )}
             {/* Drag source is this handle — grip icon, title, badge, and
@@ -871,8 +897,8 @@ function FolderCard({
   editMode: boolean;
   selectedDocs: Set<number>;
   selectedItems: Set<number>;
-  onToggleSelectDoc: (documentId: number) => void;
-  onToggleSelectItem: (itemId: number) => void;
+  onToggleSelectDoc: (documentId: number, click?: SelectClick) => void;
+  onToggleSelectItem: (itemId: number, click?: SelectClick) => void;
   onUpload: (folderId: number, files: FileList) => Promise<void>;
   onDeleteDocument: (documentId: number) => void;
   onMoveDocument: (documentId: number, folderId: number | null) => void;
@@ -1244,14 +1270,20 @@ function FolderCard({
 
 function BulkActionBar({
   count,
+  flashcardSets,
   folders,
   onMove,
+  onSetReminders,
   onDelete,
   onClear,
 }: {
   count: number;
+  // How many of the selection are flashcard sets — the only ones with
+  // review reminders to switch.
+  flashcardSets: number;
   folders: Folder[];
   onMove: (folderId: number | null) => Promise<void>;
+  onSetReminders: (enabled: boolean) => Promise<void>;
   onDelete: () => Promise<void>;
   onClear: () => void;
 }) {
@@ -1263,6 +1295,15 @@ function BulkActionBar({
     setBusy(true);
     try {
       await onMove(moveTo === COURSE_PAGE_SENTINEL ? null : Number(moveTo));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemindersClick(enabled: boolean) {
+    setBusy(true);
+    try {
+      await onSetReminders(enabled);
     } finally {
       setBusy(false);
     }
@@ -1290,6 +1331,18 @@ function BulkActionBar({
       <Button size="sm" variant="outline" disabled={busy} onClick={handleMoveClick}>
         Move
       </Button>
+      {flashcardSets > 0 && (
+        <>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => handleRemindersClick(true)}>
+            <Bell />
+            Reminders on
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => handleRemindersClick(false)}>
+            <BellOff />
+            Reminders off
+          </Button>
+        </>
+      )}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogTrigger render={<Button size="sm" variant="destructive" disabled={busy} />}>
           <Trash2 />
@@ -1437,27 +1490,42 @@ export default function CoursePage() {
   const [selectedDocs, setSelectedDocs] = useState<Set<number>>(new Set());
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 
-  function toggleSelectDoc(id: number) {
-    setSelectedDocs((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Shift-click selects everything from the last-clicked row to this one
+  // (within the same list), like a file manager — see lib/rangeSelect.ts.
+  const lastDocClick = useRef<number | null>(null);
+  const lastItemClick = useRef<number | null>(null);
+
+  function toggleSelectDoc(id: number, click?: SelectClick) {
+    const anchor = lastDocClick.current;
+    lastDocClick.current = id;
+    setSelectedDocs((prev) =>
+      applyClick(prev, id, {
+        checked: click?.checked ?? !prev.has(id),
+        shift: click?.shift ?? false,
+        orderedIds: click?.orderedIds ?? [id],
+        anchor,
+      })
+    );
   }
 
-  function toggleSelectItem(id: number) {
-    setSelectedItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function toggleSelectItem(id: number, click?: SelectClick) {
+    const anchor = lastItemClick.current;
+    lastItemClick.current = id;
+    setSelectedItems((prev) =>
+      applyClick(prev, id, {
+        checked: click?.checked ?? !prev.has(id),
+        shift: click?.shift ?? false,
+        orderedIds: click?.orderedIds ?? [id],
+        anchor,
+      })
+    );
   }
 
   function clearSelection() {
     setSelectedDocs(new Set());
     setSelectedItems(new Set());
+    lastDocClick.current = null;
+    lastItemClick.current = null;
   }
 
   function toggleEditMode() {
@@ -1945,6 +2013,32 @@ export default function CoursePage() {
     clearSelection();
     toast.success(`Moved ${count} item${count === 1 ? "" : "s"}`);
     refresh();
+  }
+
+  // Switches review reminders (whether a set's cards come due) for every
+  // selected flashcard set; anything else in the selection is left alone.
+  async function handleBulkSetReminders(enabled: boolean) {
+    const sets = (detail?.items ?? []).filter((i) => selectedItems.has(i.id) && i.mode === "flashcards");
+    const results = await Promise.all(
+      sets.map((i) =>
+        fetch(`/api/items/${i.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reminders: enabled }),
+        })
+      )
+    );
+    const failed = results.filter((r) => !r.ok).length;
+    const done = sets.length - failed;
+    if (done > 0) {
+      toast.success(
+        `Reminders ${enabled ? "on" : "off"} for ${done} set${done === 1 ? "" : "s"}` +
+          (enabled ? "" : " — their cards won't come due")
+      );
+    }
+    if (failed > 0) toast.error(`Couldn't update ${failed} set${failed === 1 ? "" : "s"}`);
+    refresh();
+    mutateStats();
   }
 
   async function handleBulkDelete() {
@@ -2920,8 +3014,10 @@ export default function CoursePage() {
         {editMode && selectedDocs.size + selectedItems.size > 0 && (
           <BulkActionBar
             count={selectedDocs.size + selectedItems.size}
+            flashcardSets={detail.items.filter((i) => selectedItems.has(i.id) && i.mode === "flashcards").length}
             folders={detail.folders}
             onMove={handleBulkMove}
+            onSetReminders={handleBulkSetReminders}
             onDelete={handleBulkDelete}
             onClear={clearSelection}
           />

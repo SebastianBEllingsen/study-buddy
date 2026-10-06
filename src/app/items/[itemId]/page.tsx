@@ -544,6 +544,7 @@ export default function ItemPage() {
           <FlashcardViewer
             itemId={item.id}
             cards={(content as FlashcardsContent).cards}
+            styles={(content as FlashcardsContent).styles}
             dueCardIndices={detail.dueCardIndices}
             dueReverseIndices={detail.dueReverseIndices}
             onFlagged={() => void mutateItem()}

@@ -1,6 +1,8 @@
 "use client";
 
 import { Explain } from "@/components/Explain";
+import useSWR from "swr";
+import type { AppSettings } from "@/lib/models";
 import { useEffect, useRef, useState } from "react";
 import { PartyPopper, CalendarCheck } from "lucide-react";
 import { saveInBackground } from "@/lib/backgroundSaves";
@@ -10,9 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AskAiPanel } from "@/components/ask-ai/AskAiPanel";
 import { CardFace } from "@/components/CardFace";
+import { HtmlCardFace } from "@/components/HtmlCardFace";
+import { hasCardHtml, withCardCss } from "@/lib/cardHtml";
 import { cardFaces } from "@/lib/cardFaces";
 import { Badge } from "@/components/ui/badge";
 import { tap } from "@/lib/haptics";
+import { cn } from "cn";
 import { CONFIDENCES, type Confidence } from "@/lib/review/types";
 import { ConfidencePicker } from "@/components/review/ConfidencePicker";
 import { WhyPrompt } from "@/components/review/WhyPrompt";
@@ -93,15 +98,26 @@ export function mixTurns(regular: number[], reverse: number[], random: () => num
   return turns;
 }
 
+// The soft translucent panel a plain card's content sits in under the
+// transparent card style (an Anki-imported card's frame draws its own).
+export function plainPanelClass(tall: boolean): string {
+  return `flex h-full flex-col justify-center rounded-2xl bg-linear-to-br from-transparent to-black/30 px-6 py-8 ${
+    tall ? "min-h-[50vh]" : "min-h-40"
+  }`;
+}
+
 export default function FlashcardViewer({
   itemId,
   cards,
   dueCardIndices,
   dueReverseIndices = [],
+  styles,
   onFlagged,
 }: {
   itemId: number;
   cards: Flashcard[];
+  // Stylesheets of a deck imported from Anki (FlashcardsContent.styles).
+  styles?: Record<string, string>;
   dueCardIndices: number[];
   // Cards due back-first (the deck's "reverse" setting); mixed in at random.
   dueReverseIndices?: number[];
@@ -119,12 +135,14 @@ export default function FlashcardViewer({
   // Tapped before the reveal; sent with the rating, reset per card.
   const [confidence, setConfidence] = useState<Confidence | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { data: settings } = useSWR<AppSettings>("/api/settings");
+  const transparent = (settings?.flashcardCardStyle ?? "transparent") === "transparent";
 
   const done = queue !== null && position >= queue.length;
   const turn = queue?.[position];
   const cardIndex = turn?.index;
   const reverse = turn?.reverse ?? false;
-  const card = cardIndex != null ? cards[cardIndex] : undefined;
+  const card = cardIndex != null && cards[cardIndex] ? withCardCss(cards[cardIndex], styles) : undefined;
 
   // Only the side being asked, unless the other has actually been revealed —
   // matches what's currently on screen, same principle as the quiz side.
@@ -236,7 +254,8 @@ export default function FlashcardViewer({
   // Both faces share the card's height (the back is absolutely positioned
   // over the front), so a card with media on either side reserves room for
   // it up front instead of squeezing a back-side image into text height.
-  const hasMedia = !!(card.frontMedia?.length || card.backMedia?.length);
+  const htmlCard = hasCardHtml(card, reverse) ? card.html : null;
+  const hasMedia = !!(card.frontMedia?.length || card.backMedia?.length || htmlCard);
   const faces = cardFaces(card, reverse);
 
   return (
@@ -261,7 +280,16 @@ export default function FlashcardViewer({
             tap(10);
             setFlipped((f) => !f);
           }}
-          className={`flip-card ${hasMedia ? "min-h-[55vh]" : "min-h-40"} cursor-pointer justify-center overflow-visible px-6 py-8 text-lg outline-none hover:shadow-md focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50`}
+          className={cn(
+            "flip-card cursor-pointer justify-center overflow-visible text-lg outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+            // Transparent style: the app's own box is dropped and the content
+            // shows over the page (a card imported from Anki draws its own
+            // panel inside its frame; other cards get a soft one below).
+            // Boxed style keeps the solid, bordered card.
+            transparent
+              ? "flip-card-html gap-0 bg-transparent py-0 ring-0"
+              : `${hasMedia ? "min-h-[55vh]" : "min-h-40"} px-6 py-8 hover:shadow-md`
+          )}
         >
           {/* Each face holds ONLY its own text, so it centers on its own —
               the "Click to..." caption used to live inside these faces and
@@ -269,17 +297,30 @@ export default function FlashcardViewer({
               looked inconsistent. The caption now lives entirely outside
               the flipping card (below), always in the same place. */}
           <CardContent className="flip-face px-0">
-            <CardFace text={faces.prompt.text} media={faces.prompt.media} active={!flipped} />
+            {htmlCard ? (
+              <HtmlCardFace card={htmlCard} side="front" active={!flipped} onFlip={handleCardClick} />
+            ) : (
+              <div className={transparent ? plainPanelClass(hasMedia) : "h-full"}>
+                <CardFace text={faces.prompt.text} media={faces.prompt.media} active={!flipped} />
+              </div>
+            )}
           </CardContent>
           <CardContent className="flip-face flip-face-back px-0">
             {/* Like Anki's {{FrontSide}}: the back replays the front's media
                 (e.g. a video clip next to its answer). Mounted only once
                 revealed, so the clip isn't loaded twice before then. */}
-            <CardFace
-              text={faces.answer.text}
-              media={flipped ? faces.answer.media : []}
-              active={flipped}
-            />
+            {htmlCard ? (
+              // Mounted only once revealed, so its script runs when it's seen.
+              flipped && <HtmlCardFace card={htmlCard} side="back" active={flipped} onFlip={handleCardClick} />
+            ) : (
+              <div className={transparent ? plainPanelClass(hasMedia) : "h-full"}>
+                <CardFace
+                  text={faces.answer.text}
+                  media={flipped ? faces.answer.media : []}
+                  active={flipped}
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

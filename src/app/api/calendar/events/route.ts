@@ -1,6 +1,7 @@
 import { listUpcomingEvents, createEvent, describeGoogleCalendarError } from "@/lib/googleCalendar";
 import { fetchAllFeedEvents, fetchFeedEvents } from "@/lib/calendarFeeds";
-import { listCalendarFeeds } from "@/lib/models";
+import { listCalendarFeeds, listCompletedAssignmentIds } from "@/lib/models";
+import { OVERDUE_LOOKBACK_MS, keepUnlessCompletedAndPast } from "@/lib/overdueAssignments";
 import type { CalendarEvent } from "@/lib/googleCalendar";
 import { listCalendarSessions } from "@/lib/studyPlan/store";
 import { localToday } from "@/lib/studyPlan/schedule";
@@ -80,6 +81,10 @@ export async function GET(request: Request) {
   // less-frequent Google events). The Assignments widget/calendar tab
   // omit this, since they want every feed event regardless of that toggle.
   const excludeHiddenFeeds = url.searchParams.get("excludeHiddenFeeds") === "true";
+  // The Assignments widget passes this so past-due feed events stay listed
+  // until they're checked off, instead of vanishing the moment the due date
+  // passes. Applied before the maxResults cap, like excludeHiddenFeeds.
+  const includeOverdue = url.searchParams.get("includeOverdue") === "true";
   const now = new Date();
   const range = parseRange(url);
 
@@ -122,10 +127,15 @@ export async function GET(request: Request) {
   // the ?feedId= branch above instead).
   const activeFeeds = feeds.filter((f) => f.enabled && !f.own_calendar);
   const allowedFeeds = excludeHiddenFeeds ? activeFeeds.filter((f) => f.show_on_calendar) : activeFeeds;
-  const feedEvents = await fetchAllFeedEvents(
-    allowedFeeds,
-    range ?? { timeMin: now, timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) }
-  );
+  const feedRange =
+    range ??
+    (includeOverdue
+      ? { timeMin: new Date(now.getTime() - OVERDUE_LOOKBACK_MS), timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) }
+      : { timeMin: now, timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) });
+  let feedEvents = await fetchAllFeedEvents(allowedFeeds, feedRange);
+  if (includeOverdue) {
+    feedEvents = keepUnlessCompletedAndPast(feedEvents, new Set(await listCompletedAssignmentIds()), now);
+  }
 
   const sessionEvents = await studySessionEvents(range, now).catch((err) => {
     console.error("Listing study-plan sessions failed:", err);

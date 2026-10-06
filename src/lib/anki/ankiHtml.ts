@@ -28,6 +28,11 @@ export interface RenderContext {
   tags?: string;
   deck?: string;
   cardName?: string;
+  // Rendering for display as HTML rather than for flattening to text:
+  // `frontSide` is what {{FrontSide}} expands to on the back, and cloze
+  // deletions become the <span class="cloze"> Anki styles.
+  frontSide?: string;
+  rich?: boolean;
 }
 
 const NAMED_ENTITIES: Record<string, string> = {
@@ -70,10 +75,30 @@ export function decodeEntities(s: string): string {
 
 const CLOZE = /\{\{c(\d+)::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g;
 
-function renderCloze(text: string, ordinal: number | undefined, side: "front" | "back"): string {
+function renderCloze(text: string, ordinal: number | undefined, side: "front" | "back", rich = false): string {
   return text.replace(CLOZE, (_, n: string, answer: string, hint?: string) => {
     if (Number(n) !== ordinal) return answer;
+    if (rich) {
+      const shown = side === "front" ? `[${hint ?? "..."}]` : answer;
+      return `<span class="cloze" data-cloze="${escapeAttr(answer)}" data-ordinal="${n}">${shown}</span>`;
+    }
     return side === "front" ? `[${hint ?? "…"}]` : answer;
+  });
+}
+
+function escapeAttr(s: string): string {
+  return stripTags(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+// Anki's furigana syntax: "漢字[かんじ]" — the reading follows the base text
+// in brackets, after a space that marks where the base starts.
+const FURIGANA = / ?([^ >]+?)\[(.+?)\]/g;
+
+function renderFurigana(text: string, mode: "furigana" | "kanji" | "kana"): string {
+  return text.replace(FURIGANA, (_, base: string, reading: string) => {
+    if (mode === "kanji") return base;
+    if (mode === "kana") return reading;
+    return `<ruby><rb>${base}</rb><rt>${reading}</rt></ruby>`;
   });
 }
 
@@ -95,9 +120,10 @@ export function renderTemplate(template: string, side: "front" | "back", ctx: Re
       case "Card":
         return ctx.cardName ?? "";
       case "FrontSide":
-        // Study Buddy shows the back face on its own, so the back never
-        // repeats the front's text (media is carried over separately).
-        return "";
+        // Flattened to text, the back shows on its own and never repeats
+        // the front's text (media is carried over separately). Rendered as
+        // HTML it's the front, as in Anki.
+        return ctx.frontSide ?? "";
     }
     return ctx.fields[name] ?? "";
   };
@@ -121,8 +147,15 @@ export function renderTemplate(template: string, side: "front" | "back", ctx: Re
       return filters.includes("type") && side === "back" ? value(name) : "";
     }
     let v = value(name);
-    if (filters.includes("cloze")) v = renderCloze(v, ctx.clozeOrdinal, side);
+    if (filters.includes("cloze")) v = renderCloze(v, ctx.clozeOrdinal, side, ctx.rich);
     if (filters.includes("text")) v = stripTags(v);
+    for (const f of ["furigana", "kanji", "kana"] as const) {
+      if (filters.includes(f)) v = renderFurigana(v, f);
+    }
+    if (filters.includes("hint") && ctx.rich && v.trim()) {
+      // Anki's click-to-reveal: a link that swaps itself for the field.
+      return `<a class="hint" href="#" onclick="this.style.display='none';this.nextElementSibling.style.display='block';return false;">${name}</a><div class="hint" style="display:none">${v}</div>`;
+    }
     return v;
   });
 }
@@ -159,7 +192,10 @@ export function htmlToCardFace(html: string): CardFaceContent {
 
   let s = html
     .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<(script|style|canvas|template)\b[\s\S]*?<\/\1>/gi, "");
+    .replace(/<(script|style|canvas|template)\b[\s\S]*?<\/\1>/gi, "")
+    // Elements the template hides (e.g. a hidden {{Deck}} span used by its
+    // own script) aren't part of what the card says.
+    .replace(/<(span|div|p)\b[^>]*\bstyle\s*=\s*"[^"]*display\s*:\s*none[^"]*"[^>]*>[\s\S]*?<\/\1>/gi, "");
 
   s = s.replace(/<(video|audio)\b([^>]*)>([\s\S]*?)<\/\1>/gi, (_, tag: string, attrs: string, inner: string) => {
     const type = tag.toLowerCase() as CardMediaType;
@@ -207,4 +243,26 @@ export function htmlToCardFace(html: string): CardFaceContent {
 export function answerPart(renderedBack: string): string {
   const m = renderedBack.match(/<hr\s+id\s*=\s*["']?answer["']?\s*\/?>/i);
   return m ? renderedBack.slice(m.index! + m[0].length) : renderedBack;
+}
+
+// Tags the plain-text rendering (text + media) represents faithfully.
+const PLAIN_TAGS = new Set([
+  "br", "div", "p", "span", "b", "i", "u", "strong", "em", "sup", "sub", "ul", "ol", "li", "hr",
+  "img", "audio", "video", "source",
+]);
+
+// Whether a card's HTML does something the plain-text form can't show —
+// a script, a link, a table, anything styled by class or inline style — so
+// it needs to be displayed as the HTML its note type renders. Simple cards
+// (text, images, audio, video) stay plain text and keep the app's own card
+// view. Judged on the template and on what it renders to.
+export function needsRichRendering(...sources: string[]): boolean {
+  for (const source of sources) {
+    if (/<script\b/i.test(source)) return true;
+    for (const tag of source.matchAll(/<\/?([a-z][a-z0-9-]*)\b([^>]*)>/gi)) {
+      if (!PLAIN_TAGS.has(tag[1].toLowerCase())) return true;
+      if (/\s(class|style)\s*=/i.test(tag[2])) return true;
+    }
+  }
+  return false;
 }

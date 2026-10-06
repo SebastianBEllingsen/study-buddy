@@ -2383,6 +2383,9 @@ html[data-header-brand="adapt"] [data-slot="app-brand"] {
 .flip-face {
   backface-visibility: hidden;
 }
+.flip-card-html .flip-face-back {
+  padding: 0;
+}
 .flip-face-back {
   position: absolute;
   inset: 0;

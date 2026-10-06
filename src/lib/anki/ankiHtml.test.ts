@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { answerPart, decodeEntities, htmlToCardFace, renderTemplate } from "./ankiHtml";
+import { answerPart, decodeEntities, htmlToCardFace, needsRichRendering, renderTemplate } from "./ankiHtml";
 
 describe("renderTemplate", () => {
   const ctx = { fields: { Front: "hund", Back: "dog", Extra: "", Text: "{{c1::Oslo}} and {{c2::Bergen::city}}" } };
@@ -84,5 +84,44 @@ describe("answerPart", () => {
 describe("decodeEntities", () => {
   it("decodes named, decimal and hex entities and leaves unknown ones alone", () => {
     expect(decodeEntities("&aring;&#248;&#xe6; &bogus;")).toBe("åøæ &bogus;");
+  });
+});
+
+describe("needsRichRendering", () => {
+  it("is false for text, images, audio, video and basic formatting", () => {
+    expect(needsRichRendering("{{Front}}", "{{FrontSide}}<hr id=answer>{{Back}}", "<div>hi<br><b>x</b><img src=a.png></div>")).toBe(false);
+  });
+
+  it("is true for scripts, links, tables and anything styled by class or style", () => {
+    expect(needsRichRendering("<script>1</script>")).toBe(true);
+    expect(needsRichRendering('<a href="https://x.test">x</a>')).toBe(true);
+    expect(needsRichRendering("<table><tr><td>1</td></tr></table>")).toBe(true);
+    expect(needsRichRendering('<div class="card-front">x</div>')).toBe(true);
+    expect(needsRichRendering('<span style="color:red">x</span>')).toBe(true);
+  });
+});
+
+describe("renderTemplate for display as HTML", () => {
+  const ctx = { fields: { Text: "{{c1::Oslo::city}} is in {{c2::Norway}}", Hint: "a hint" }, clozeOrdinal: 1, rich: true };
+
+  it("renders the active cloze as a styled span and keeps the answer on the back", () => {
+    expect(renderTemplate("{{cloze:Text}}", "front", ctx)).toBe(
+      '<span class="cloze" data-cloze="Oslo" data-ordinal="1">[city]</span> is in Norway'
+    );
+    expect(renderTemplate("{{cloze:Text}}", "back", ctx)).toContain('<span class="cloze" data-cloze="Oslo" data-ordinal="1">Oslo</span>');
+  });
+
+  it("expands {{FrontSide}} to the rendered front", () => {
+    expect(renderTemplate("{{FrontSide}}|{{Hint}}", "back", { ...ctx, frontSide: "<b>F</b>" })).toBe("<b>F</b>|a hint");
+  });
+
+  it("makes {{hint:Field}} a click-to-reveal link", () => {
+    const out = renderTemplate("{{hint:Hint}}", "front", ctx);
+    expect(out).toContain('class="hint"');
+    expect(out).toContain("a hint");
+  });
+
+  it("drops elements a template hides when flattening to text", () => {
+    expect(htmlToCardFace('<div>Hello</div><span style="display:none">Deck::Name</span>').text).toBe("Hello");
   });
 });

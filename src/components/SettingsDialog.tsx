@@ -15,6 +15,7 @@ import { SyncPanel } from "@/components/SyncIndicator";
 import type { BackupInfo } from "@/lib/backup/service";
 import { MAX_RETENTION, MIN_RETENTION } from "@/lib/review/types";
 import { AUDIO_AUTOPLAY_LABELS, AUDIO_AUTOPLAY_MODES } from "@/lib/audioAutoplay";
+import { CARD_STYLE_LABELS, CARD_STYLES } from "@/lib/cardStyle";
 import { setExplanationsEnabled, useExplanationsEnabled } from "@/components/Explain";
 import { isSettingsTab, loadSettingsView, saveSettingsView, type SettingsTab, type SettingsView } from "@/lib/settingsView";
 import useSWR, { useSWRConfig } from "swr";
@@ -2003,7 +2004,7 @@ function ReviewSection() {
   const [retentionDraft, setRetentionDraft] = useState<number | null>(null);
   const [newCardsDraft, setNewCardsDraft] = useState<number | null>(null);
 
-  async function save<K extends "reviewRetention" | "newCardsPerDay" | "flashcardAudioAutoplay">(
+  async function save<K extends "reviewRetention" | "newCardsPerDay" | "flashcardAudioAutoplay" | "flashcardCardStyle">(
     field: K,
     value: AppSettings[K]
   ) {
@@ -2094,6 +2095,30 @@ function ReviewSection() {
         <p className="text-xs text-muted-foreground">
           For cards with several audio clips, like a word and an example sentence: play just the first, or all of
           them in turn.
+        </p>
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span>Card style</span>
+          <Select
+            value={settings.flashcardCardStyle}
+            onValueChange={(value: AppSettings["flashcardCardStyle"] | null) =>
+              value && void save("flashcardCardStyle", value)
+            }
+          >
+            <SelectTrigger className="h-8 w-40 text-xs">
+              <SelectValue>{(v: AppSettings["flashcardCardStyle"]) => CARD_STYLE_LABELS[v] ?? v}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {CARD_STYLES.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {CARD_STYLE_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Transparent shows the card&apos;s content straight over the page, in a soft panel. Boxed keeps each card in
+          its own solid box.
         </p>
       </SettingGroup>
     </div>

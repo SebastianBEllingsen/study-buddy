@@ -55,7 +55,14 @@ export default function EditFlashcardsDialog({
 
   function updateCard(index: number, field: "front" | "back", value: string) {
     setDraft((prev) =>
-      prev.map((d, i) => (i === index ? { ...d, card: { ...d.card, [field]: value } } : d))
+      // An edited card is shown as the plain text you edited — the Anki
+      // rendering it was imported with would no longer match.
+      prev.map((d, i) => {
+        if (i !== index) return d;
+        const { html: _html, ...rest } = d.card;
+        void _html;
+        return { ...d, card: { ...rest, [field]: value } };
+      })
     );
   }
 

@@ -55,36 +55,43 @@ export function CardFace({
     autoRunClip.current = position + 1;
     audioEls.current.get(next)?.play().catch(() => {});
   }
+  // Centered, with the picture or clip on top, then the text, then audio —
+  // the same arrangement as a card imported from Anki, so decks look alike
+  // whichever way they were made.
   if (safe.length === 0) {
     return (
-      <div className="max-h-56 overflow-y-auto whitespace-pre-line">
+      <div className="max-h-56 overflow-y-auto text-center text-xl whitespace-pre-line">
         <MathText text={text} />
       </div>
     );
   }
+  const clip = (m: CardMedia, i: number) => (
+    <MediaClip
+      key={`${m.src}-${i}`}
+      media={m}
+      active={active}
+      autoPlayAudio={i === audioOrder[0]}
+      audioRef={(el) => {
+        if (el) audioEls.current.set(i, el);
+        else audioEls.current.delete(i);
+      }}
+      onAudioPlay={() => handleAudioPlay(i)}
+      onAudioEnded={() => handleAudioEnded(i)}
+    />
+  );
+  const visual = safe.flatMap((m, i) => (m.type === "audio" ? [] : [clip(m, i)]));
+  const sound = safe.flatMap((m, i) => (m.type === "audio" ? [clip(m, i)] : []));
   return (
-    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3">
-      <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2">
-        {safe.map((m, i) => (
-          <MediaClip
-            key={`${m.src}-${i}`}
-            media={m}
-            active={active}
-            autoPlayAudio={i === audioOrder[0]}
-            audioRef={(el) => {
-              if (el) audioEls.current.set(i, el);
-              else audioEls.current.delete(i);
-            }}
-            onAudioPlay={() => handleAudioPlay(i)}
-            onAudioEnded={() => handleAudioEnded(i)}
-          />
-        ))}
-      </div>
+    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 text-center">
+      {visual.length > 0 && (
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2">{visual}</div>
+      )}
       {text && (
-        <div className="max-h-40 w-full shrink-0 overflow-y-auto whitespace-pre-line">
+        <div className="max-h-40 w-full shrink-0 overflow-y-auto text-xl whitespace-pre-line">
           <MathText text={text} />
         </div>
       )}
+      {sound.length > 0 && <div className="flex w-full shrink-0 flex-col items-center gap-2">{sound}</div>}
     </div>
   );
 }

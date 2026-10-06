@@ -85,6 +85,59 @@ describe("readApkg round trip with apkgWriter", () => {
   });
 });
 
+describe("readApkg rich rendering", () => {
+  const scripted: AnkiNoteType = {
+    id: stableId("scripted"),
+    name: "Scripted",
+    css: ".card { color: teal; } .answer { font-weight: bold; }",
+    fields: ["Sentence", "Translation", "Audio"],
+    templates: [
+      {
+        name: "Card 1",
+        qfmt: '<div class="s">{{Sentence}}{{Audio}}</div><div id="back"></div><span style="display:none">{{Deck}}</span>',
+        afmt: '{{FrontSide}}<script>document.getElementById("back").innerHTML = `<p class="answer">{{Translation}}</p>`;</script>',
+      },
+    ],
+  };
+
+  it("keeps the HTML, CSS and script of a card whose template needs them", async () => {
+    const apkg = await writeApkg({
+      noteType: scripted,
+      decks: [{ name: "Fr", notes: [{ guid: "g", fields: ["Bonjour", "Hello", "[sound:hi.mp3]"] }] }],
+    });
+    const { decks } = await readApkg(apkg);
+    const [card] = decks[0].cards;
+    expect(card.html?.front).toContain('<div class="s">Bonjour[sound:hi.mp3]</div>');
+    // {{FrontSide}} expands to the front on the back, as in Anki, so the script finds its target.
+    expect(card.html?.back).toContain('<div id="back"></div>');
+    expect(card.html?.back).toContain("<p class=\"answer\">Hello</p>");
+    expect(decks[0].styles?.[card.html!.style]).toContain("color: teal");
+  });
+
+  it("falls back to the unshown fields for the text copy of a script-built answer, and hides hidden elements", async () => {
+    const apkg = await writeApkg({
+      noteType: scripted,
+      decks: [{ name: "Fr", notes: [{ guid: "g", fields: ["Bonjour", "Hello", ""] }] }],
+    });
+    const [card] = (await readApkg(apkg)).decks[0].cards;
+    expect(card.front.text).toBe("Bonjour");
+    expect(card.back.text).toBe("Hello");
+  });
+
+  it("leaves a plain card as plain text, with no HTML kept", async () => {
+    const plain: AnkiNoteType = {
+      id: stableId("plain"),
+      name: "Plain",
+      fields: ["Front", "Back"],
+      templates: [{ name: "Card 1", qfmt: "{{Front}}", afmt: "{{FrontSide}}<hr id=answer>{{Back}}" }],
+    };
+    const apkg = await writeApkg({ noteType: plain, decks: [{ name: "D", notes: [{ guid: "g", fields: ["q", "a"] }] }] });
+    const { decks } = await readApkg(apkg);
+    expect(decks[0].cards[0].html).toBeUndefined();
+    expect(decks[0].styles).toBeUndefined();
+  });
+});
+
 describe("readApkg errors", () => {
   it("rejects a file that isn't a zip", async () => {
     await expect(readApkg(Buffer.from("not a zip"))).rejects.toThrow(ApkgFormatError);

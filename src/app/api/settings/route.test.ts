@@ -4,12 +4,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // date format.
 const setReviewSettings = vi.fn();
 const setDateFormat = vi.fn();
+const setFlashcardCardStyle = vi.fn();
 const setAppBranding = vi.fn();
 const getAppSettings = vi.fn();
 vi.mock("@/lib/models", () => ({
   getAppSettings: (...a: unknown[]) => getAppSettings(...a),
   setReviewSettings: (...a: unknown[]) => setReviewSettings(...a),
   setDateFormat: (...a: unknown[]) => setDateFormat(...a),
+  setFlashcardCardStyle: (...a: unknown[]) => setFlashcardCardStyle(...a),
   setAppBranding: (...a: unknown[]) => setAppBranding(...a),
   MAX_NEW_CARDS_PER_DAY: 200,
   HOME_WIDGET_IDS: [],
@@ -25,6 +27,7 @@ const post = (body: unknown) =>
 beforeEach(() => {
   setReviewSettings.mockReset();
   setDateFormat.mockReset();
+  setFlashcardCardStyle.mockReset();
   setAppBranding.mockReset();
   getAppSettings.mockReset().mockResolvedValue({ reviewRetention: 0.9, newCardsPerDay: 20 });
 });
@@ -77,5 +80,21 @@ describe("POST /api/settings Today card", () => {
       expect((await post(body)).status, JSON.stringify(body)).toBe(400);
     }
     expect(setAppBranding).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/settings flashcard card style", () => {
+  it("saves either style", async () => {
+    expect((await post({ flashcardCardStyle: "boxed" })).status).toBe(200);
+    expect(setFlashcardCardStyle).toHaveBeenLastCalledWith("boxed");
+    expect((await post({ flashcardCardStyle: "transparent" })).status).toBe(200);
+    expect(setFlashcardCardStyle).toHaveBeenLastCalledWith("transparent");
+  });
+
+  it("rejects anything else", async () => {
+    for (const value of ["glass", "", null, 1]) {
+      expect((await post({ flashcardCardStyle: value })).status).toBe(400);
+    }
+    expect(setFlashcardCardStyle).not.toHaveBeenCalled();
   });
 });

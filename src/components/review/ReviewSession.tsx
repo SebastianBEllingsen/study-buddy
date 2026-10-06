@@ -26,6 +26,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { CardFace } from "@/components/CardFace";
 import { cardFaces } from "@/lib/cardFaces";
+import type { AppSettings } from "@/lib/models";
+import { hasCardHtml } from "@/lib/cardHtml";
+import { HtmlCardFace } from "@/components/HtmlCardFace";
 import { MathText } from "@/components/MathText";
 import { handleFlashcardKeyDown } from "@/components/FlashcardViewer";
 import { ConfidencePicker } from "./ConfidencePicker";
@@ -79,10 +82,40 @@ function EntryLabel({ entry }: { entry: QueueEntry }) {
 // The two sides of a queued card. The back replays below the front; a
 // reverse card (see FlashcardsContent.reverse) asks with the back's text
 // and, once revealed, shows the front with its video.
-function CardSides({ entry, flipped }: { entry: Extract<QueueEntry, { kind: "card" }>; flipped: boolean }) {
+function CardSides({
+  entry,
+  flipped,
+  onFlip,
+  transparent,
+}: {
+  entry: Extract<QueueEntry, { kind: "card" }>;
+  flipped: boolean;
+  onFlip: () => void;
+  // The transparent card style: plain cards sit in a soft panel instead of
+  // a solid box (see lib/cardStyle.ts).
+  transparent: boolean;
+}) {
+  // A card imported from Anki shows as its template renders it: the front,
+  // then — once revealed — the back, which already includes the front.
+  if (hasCardHtml(entry.card, !!entry.reverse)) {
+    return (
+      <HtmlCardFace
+        key={flipped ? "back" : "front"}
+        card={entry.card.html}
+        side={flipped ? "back" : "front"}
+        active
+        onFlip={onFlip}
+      />
+    );
+  }
   const faces = cardFaces(entry.card, !!entry.reverse);
   return (
-    <>
+    <div
+      className={cn(
+        "space-y-4",
+        transparent && "rounded-2xl bg-linear-to-br from-transparent to-black/30 px-6 py-8"
+      )}
+    >
       <CardFace text={faces.prompt.text} media={faces.prompt.media} active={!flipped} />
       {flipped && (
         <div className="animate-pop-in border-t border-border pt-4">
@@ -93,7 +126,7 @@ function CardSides({ entry, flipped }: { entry: Extract<QueueEntry, { kind: "car
           />
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -126,6 +159,8 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
   const [busy, setBusy] = useState(false);
   const continueRef = useRef<HTMLButtonElement>(null);
   const counts = data?.counts ?? null;
+  const { data: appSettings } = useSWR<AppSettings>("/api/settings");
+  const cardStyle = appSettings?.flashcardCardStyle ?? "transparent";
   const todayActive = !!useTodaySession();
 
   // Seeded only from a finished fetch, so a cached queue from an earlier
@@ -350,10 +385,21 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
               tap(10);
               setFlipped((f) => !f);
             }}
-            className="min-h-40 cursor-pointer gap-4 px-6 py-6 text-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className={cn(
+              "cursor-pointer gap-4 text-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              cardStyle === "transparent" ? "bg-transparent px-0 py-0 ring-0" : "min-h-40 px-6 py-6"
+            )}
           >
             <EntryLabel entry={entry} />
-            <CardSides entry={entry} flipped={flipped} />
+            <CardSides
+              entry={entry}
+              flipped={flipped}
+              transparent={cardStyle === "transparent"}
+              onFlip={() => {
+                tap(10);
+                setFlipped((f) => !f);
+              }}
+            />
           </Card>
           {flipped && <WhyPrompt key={entry.key} itemId={entry.itemId} cardIndex={entry.index} />}
           {flipped && entryFooter()}

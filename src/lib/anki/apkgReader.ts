@@ -16,17 +16,22 @@
 import zlib from "node:zlib";
 import Database from "better-sqlite3";
 import JSZip from "jszip";
-import { answerPart, htmlToCardFace, renderTemplate, type CardFaceContent } from "./ankiHtml";
+import { answerPart, htmlToCardFace, needsRichRendering, renderTemplate, type CardFaceContent } from "./ankiHtml";
 
 export interface ImportedCard {
   front: CardFaceContent;
   back: CardFaceContent;
+  // The card as its note type renders it, for showing it the way Anki
+  // does. Media references inside are still the package's own filenames.
+  html?: { front: string; back: string; style: string; ordinal: number };
 }
 
 export interface ImportedDeck {
   // Anki's full deck path, "::"-separated.
   name: string;
   cards: ImportedCard[];
+  // Stylesheet of each note type the cards use, by ImportedCard.html.style.
+  styles?: Record<string, string>;
 }
 
 export interface ApkgContents {
@@ -135,6 +140,7 @@ function protoString(fields: ProtoField[], field: number): string {
 }
 
 interface NoteType {
+  css: string;
   fieldNames: string[];
   templates: { name: string; qfmt: string; afmt: string }[];
   isCloze: boolean;
@@ -173,7 +179,7 @@ function hasTable(db: Database.Database, name: string): boolean {
 function loadNoteTypes(db: Database.Database): Map<number, NoteType> {
   const types = new Map<number, NoteType>();
   if (hasTable(db, "notetypes")) {
-    for (const nt of db.prepare("SELECT id FROM notetypes").all() as { id: number }[]) {
+    for (const nt of db.prepare("SELECT id, config FROM notetypes").all() as { id: number; config: Buffer | null }[]) {
       const fieldNames = (
         db.prepare("SELECT name FROM fields WHERE ntid = ? ORDER BY ord").all(nt.id) as { name: string }[]
       ).map((f) => f.name);
@@ -187,6 +193,7 @@ function loadNoteTypes(db: Database.Database): Map<number, NoteType> {
         return { name: t.name, qfmt: protoString(config, 1), afmt: protoString(config, 2) };
       });
       types.set(nt.id, {
+        css: nt.config ? protoString(readProto(nt.config), 3) : "",
         fieldNames,
         templates,
         isCloze: templates.some((t) => /\{\{[^}]*cloze:/.test(t.qfmt)),
@@ -198,10 +205,11 @@ function loadNoteTypes(db: Database.Database): Map<number, NoteType> {
   const row = db.prepare("SELECT models FROM col").get() as { models: string } | undefined;
   const models = JSON.parse(row?.models || "{}") as Record<
     string,
-    { type?: number; flds: { name: string; ord: number }[]; tmpls: { name: string; ord: number; qfmt: string; afmt: string }[] }
+    { type?: number; css?: string; flds: { name: string; ord: number }[]; tmpls: { name: string; ord: number; qfmt: string; afmt: string }[] }
   >;
   for (const [id, m] of Object.entries(models)) {
     types.set(Number(id), {
+      css: m.css ?? "",
       fieldNames: [...m.flds].sort((a, b) => a.ord - b.ord).map((f) => f.name),
       templates: [...m.tmpls].sort((a, b) => a.ord - b.ord).map(({ name, qfmt, afmt }) => ({ name, qfmt, afmt })),
       isCloze: m.type === 1,
@@ -298,12 +306,31 @@ export async function readApkg(bytes: Buffer): Promise<ApkgContents> {
         deck: deckName,
         cardName: template.name,
       };
-      const front = htmlToCardFace(renderTemplate(template.qfmt, "front", ctx));
-      const back = htmlToCardFace(answerPart(renderTemplate(template.afmt, "back", ctx)));
+      const plainFront = renderTemplate(template.qfmt, "front", ctx);
+      const plainBack = renderTemplate(template.afmt, "back", ctx);
+      const front = htmlToCardFace(plainFront);
+      const back = htmlToCardFace(answerPart(plainBack));
+
+      // Some note types build their answer side with a script, so the
+      // static render of the template shows nothing new. The text copy of
+      // such a card (search, AI, export) falls back to the note's own
+      // fields that the front doesn't show.
+      if (!back.text && !back.media.length) {
+        back.text = unshownFieldsText(noteType, fields, template.qfmt);
+      }
       if (!front.text && !front.media.length && !back.text && !back.media.length) continue;
 
       const deck = decks.get(deckName) ?? { name: deckName, cards: [] };
-      deck.cards.push({ front, back });
+      const card: ImportedCard = { front, back };
+      if (needsRichRendering(template.qfmt, template.afmt, plainFront, plainBack)) {
+        const richCtx = { ...ctx, rich: true };
+        const frontHtml = renderTemplate(template.qfmt, "front", richCtx);
+        const backHtml = renderTemplate(template.afmt, "back", { ...richCtx, frontSide: frontHtml });
+        const style = String(row.mid);
+        (deck.styles ??= {})[style] = noteType.css;
+        card.html = { front: frontHtml, back: backHtml, style, ordinal: row.ord + 1 };
+      }
+      deck.cards.push(card);
       decks.set(deckName, deck);
     }
 
@@ -324,6 +351,19 @@ export async function readApkg(bytes: Buffer): Promise<ApkgContents> {
   } finally {
     db.close();
   }
+}
+
+// Text of the note's fields whose names the front template doesn't use —
+// the answer, for a note type that assembles its back with a script.
+function unshownFieldsText(noteType: NoteType, fields: Record<string, string>, qfmt: string): string {
+  const parts: string[] = [];
+  for (const name of noteType.fieldNames) {
+    if (/^(id|guid|uuid|key|index|audio|image|picture|sound)$/i.test(name)) continue;
+    if (new RegExp(`\\{\\{[^}]*\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\}\\}`).test(qfmt)) continue;
+    const text = htmlToCardFace(fields[name] ?? "").text;
+    if (text) parts.push(text);
+  }
+  return parts.join("\n\n");
 }
 
 function safeDecodeUri(s: string): string {

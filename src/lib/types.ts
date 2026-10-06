@@ -90,15 +90,31 @@ export interface CardMedia {
   src: string;
 }
 
+// An imported Anki card kept as the HTML its note type renders (template,
+// scripts and all), shown in a sandboxed frame — see lib/cardHtml.ts. The
+// plain `front`/`back` text on the card stays alongside it for search, the
+// AI features and export. `css` is not stored per card: decks keep each note
+// type's stylesheet once in FlashcardsContent.styles (keyed by `style`) and
+// it is attached when the card is loaded for studying.
+export interface CardHtml {
+  front: string;
+  back: string;
+  style?: string;
+  css?: string;
+}
+
 export interface Flashcard extends ConceptTagged {
   front: string;
   back: string;
   frontMedia?: CardMedia[];
   backMedia?: CardMedia[];
+  html?: CardHtml;
 }
 
 export interface FlashcardsContent {
   cards: Flashcard[];
+  // Stylesheets of an imported deck's note types, by CardHtml.style.
+  styles?: Record<string, string>;
   // Due-date reminders for the whole deck. Absent means on (the default) —
   // only ever stored as `false`, for decks the student doesn't want
   // scheduled: none of their cards count as due anywhere (see

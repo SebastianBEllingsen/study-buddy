@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: Params) {
     const items: { id: number; title: string; cards: number }[] = [];
     let mediaSkipped = 0;
     for (const deck of contents.decks) {
-      const { cards, stats } = await importDeckCards(deck, contents, storeFile, storedUrls);
+      const { cards, styles, stats } = await importDeckCards(deck, contents, storeFile, storedUrls);
       mediaSkipped += stats.mediaSkipped;
       const title = deckTitle(deck.name);
       const item = await createGeneratedItem({
@@ -71,7 +71,7 @@ export async function POST(request: Request, { params }: Params) {
         sourceHandpicked: true,
         mode: "flashcards",
         title,
-        contentJson: { cards },
+        contentJson: { cards, ...(Object.keys(styles).length ? { styles } : {}) },
         sourceDocumentIds: [],
       });
       items.push({ id: item.id, title, cards: cards.length });

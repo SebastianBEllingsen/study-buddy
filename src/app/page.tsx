@@ -28,6 +28,7 @@ import {
   StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
+import { isPastDue } from "@/lib/overdueAssignments";
 import { cn } from "cn";
 import type {
   AppSettings,
@@ -640,7 +641,7 @@ function AssignmentsWidget({
   const fmt = useDateFormatter();
   // Cached across navigation, revalidates on focus — see UpcomingEventsWidget.
   const { data: eventsData, error: fetchError } = useSWR<{ events: UpcomingCalendarEvent[] }>(
-    "/api/calendar/events?maxResults=50"
+    "/api/calendar/events?maxResults=100&includeOverdue=true"
   );
   const events = eventsData?.events ?? null;
   const error = fetchError instanceof Error ? fetchError.message : null;
@@ -650,6 +651,7 @@ function AssignmentsWidget({
   );
   const completedIds = completedData ? new Set(completedData.ids) : null;
   const compact = layout.colSpan <= 2 || layout.rowSpan === 1;
+  const overdueIds = new Set((events ?? []).filter((e) => isPastDue(e, new Date())).map((e) => e.id));
 
   async function toggleCompleted(eventId: string) {
     const wasCompleted = completedIds?.has(eventId) ?? false;
@@ -671,6 +673,11 @@ function AssignmentsWidget({
         }),
         { optimisticData: { ids: Array.from(optimisticIds) }, rollbackOnError: true }
       );
+      // A past-due item drops out of the list the moment it's checked
+      // (the optimistic update above), so offer a way back.
+      if (!wasCompleted && overdueIds.has(eventId)) {
+        toast("Marked as done", { action: { label: "Undo", onClick: () => void toggleCompleted(eventId) } });
+      }
     } catch {
       toast.error("Couldn't save that");
     }
@@ -691,7 +698,11 @@ function AssignmentsWidget({
   }
 
   const enabledLabels = new Set((feeds ?? []).filter((f) => f.show_in_widget).map((f) => f.label));
-  const assignments = (events ?? []).filter((e) => enabledLabels.has(e.source));
+  const now = new Date();
+  // Past-due items stay until checked; once checked they leave immediately.
+  const assignments = (events ?? []).filter(
+    (e) => enabledLabels.has(e.source) && !(isPastDue(e, now) && completedIds?.has(e.id))
+  );
   const loading = events === null || feeds === null || completedIds === null;
 
   if (compact) {
@@ -708,7 +719,10 @@ function AssignmentsWidget({
         {!error && next && (
           <Link href={assignmentsCalendarHref(next)} className="w-full hover:underline">
             <p className="truncate text-sm font-medium">{next.title}</p>
-            <p className="text-xs text-muted-foreground">{eventDayLabel(next, fmt)}</p>
+            <p className={cn("text-xs", isPastDue(next, now) ? "text-destructive" : "text-muted-foreground")}>
+              {isPastDue(next, now) ? "Overdue · " : ""}
+              {eventDayLabel(next, fmt)}
+            </p>
           </Link>
         )}
       </Card>
@@ -746,6 +760,7 @@ function AssignmentsWidget({
           <ul className="divide-y">
             {assignments.map((event) => {
               const done = completedIds?.has(event.id) ?? false;
+              const overdue = !done && isPastDue(event, now);
               return (
                 <li
                   key={event.id}
@@ -764,7 +779,12 @@ function AssignmentsWidget({
                       href={assignmentsCalendarHref(event)}
                       className="flex min-w-0 flex-1 items-center gap-3"
                     >
-                      <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                      <span
+                        className={cn(
+                          "w-20 shrink-0 whitespace-nowrap text-xs",
+                          overdue ? "font-medium text-destructive" : "text-muted-foreground"
+                        )}
+                      >
                         {eventDayLabel(event, fmt)}
                       </span>
                       <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
@@ -777,6 +797,11 @@ function AssignmentsWidget({
                         >
                           {event.title}
                         </span>
+                        {overdue && (
+                          <span className="shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-destructive">
+                            Overdue
+                          </span>
+                        )}
                       </span>
                       <span className="shrink-0 text-xs text-muted-foreground">{eventTimeLabel(event, fmt)}</span>
                     </Link>
