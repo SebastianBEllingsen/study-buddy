@@ -2,6 +2,9 @@
 // not to; strip them defensively before parsing rather than failing/retrying
 // on a purely cosmetic mismatch.
 export function stripCodeFences(text: string): string {
+  // Already JSON: any ``` in there belongs to a string value (e.g. a note
+  // with a code block), not to a wrapper.
+  if (/^\s*[{[]/.test(text)) return text;
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   return fenced ? fenced[1] : text;
 }

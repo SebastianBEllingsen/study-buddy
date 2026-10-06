@@ -24,9 +24,20 @@ export async function POST(request: Request, { params }: Params) {
   // (the saved, final message) or {type:"error",error}.
   if (body?.stream === true) {
     const encoder = new TextEncoder();
+    // Set when the browser goes away (chat closed, page left). The reply is
+    // still finished and saved — it's there when the conversation is next
+    // opened — it just has nobody to stream to.
+    let disconnected = false;
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const send = (event: object) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        const send = (event: object) => {
+          if (disconnected) return;
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          } catch {
+            disconnected = true;
+          }
+        };
         try {
           const message = await sendChatMessage(id, content, attachments, (text) => send({ type: "delta", text }));
           send({ type: "done", message });
@@ -37,7 +48,10 @@ export async function POST(request: Request, { params }: Params) {
             error: err instanceof AiDisabledError ? err.message : await describeAiError(err),
           });
         }
-        controller.close();
+        if (!disconnected) controller.close();
+      },
+      cancel() {
+        disconnected = true;
       },
     });
     return new Response(stream, {

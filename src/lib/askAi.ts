@@ -58,13 +58,13 @@ export async function askAi(courseName: string, body: unknown): Promise<Response
           user: askImageUserPrompt(question, priorTurns),
           images: [image],
           effort: "low",
-          maxTokens: 500,
+          maxTokens: 1500,
         })
       : await generateText({
           system: kind === "hint" ? hintSystemPrompt(courseName) : explainSystemPrompt(courseName),
           user: askUserPrompt({ context, selection }),
           effort: "low",
-          maxTokens: 500,
+          maxTokens: 1500,
         });
     return Response.json({ answer: answer.trim() });
   } catch (err) {

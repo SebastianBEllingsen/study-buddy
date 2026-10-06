@@ -69,6 +69,15 @@ export function describeError(err: unknown): string {
   return err instanceof Error ? err.message : "Generation failed.";
 }
 
+export class ResponseTruncatedError extends Error {
+  constructor() {
+    super(
+      "The AI's response was cut off by its length limit — try again with less material at once, or turn off efficiency mode in Settings."
+    );
+    this.name = "ResponseTruncatedError";
+  }
+}
+
 /**
  * Calls Claude expecting a single JSON object back, parses it, and retries
  * once with a corrective follow-up if the first response isn't valid JSON.
@@ -90,6 +99,9 @@ export async function generateStructured<T>(
     output_config: { effort },
   });
 
+  // Cut off by the length limit: the JSON is incomplete, and asking again
+  // with the same limit would only cut off again.
+  if (response.stop_reason === "max_tokens") throw new ResponseTruncatedError();
   const raw = extractText(response);
   try {
     return JSON.parse(stripCodeFences(raw)) as T;
@@ -110,6 +122,7 @@ export async function generateStructured<T>(
       output_config: { effort },
     });
 
+    if (retry.stop_reason === "max_tokens") throw new ResponseTruncatedError();
     const retryRaw = extractText(retry);
     return JSON.parse(stripCodeFences(retryRaw)) as T;
   }
@@ -156,7 +169,9 @@ function textRequest(params: GenerateTextParams): Anthropic.MessageCreateParamsN
 export async function generateText(params: GenerateTextParams): Promise<string> {
   const request = textRequest(params);
   const anthropic = await client();
-  return extractText(await anthropic.messages.create(request));
+  const response = await anthropic.messages.create(request);
+  if (response.stop_reason === "max_tokens") params.onTruncated?.();
+  return extractText(response);
 }
 
 /** generateText, streamed: onDelta gets each text piece as Claude writes it. */
@@ -165,7 +180,9 @@ export async function streamText(params: GenerateTextParams, onDelta: (text: str
   const anthropic = await client();
   const stream = anthropic.messages.stream(request);
   stream.on("text", onDelta);
-  return extractText(await stream.finalMessage());
+  const message = await stream.finalMessage();
+  if (message.stop_reason === "max_tokens") params.onTruncated?.();
+  return extractText(message);
 }
 
 // Server-side web search. The dynamic-filtering variant needs a current

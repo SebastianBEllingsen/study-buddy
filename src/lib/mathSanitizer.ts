@@ -32,10 +32,30 @@ export const MATH_PATTERN =
 // \[...\]/\(...\) delimiters. Converting them here, at render time, fixes
 // pasted-from-the-web math without ever touching what's actually stored
 // (the note/document keeps whatever delimiters were originally pasted).
+//
+// Code is left alone: a regex like /\(a\)/ in a code block is not math.
 export function normalizeLatexDelimiters(text: string): string {
-  return text
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_, inner: string) => `$$${inner}$$`)
-    .replace(/\\\(([^\n]+?)\\\)/g, (_, inner: string) => `$${inner}$`);
+  return withCodeProtected(text, (outside) =>
+    outside
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_, inner: string) => `$$${inner}$$`)
+      .replace(/\\\(([^\n]+?)\\\)/g, (_, inner: string) => `$${inner}$`)
+  );
+}
+
+// Fenced blocks (``` or ~~~, an unclosed one running to the end — as in a
+// reply cut off mid-block) and `inline code`.
+const CODE_PATTERN = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|(`{1,2})(?!`)[^`\n]+?\1(?!`)/g;
+
+// Runs `fn` on `text` with every code span swapped for an inert placeholder,
+// then puts the code back untouched — so math handling never reads or edits
+// a `$` or `\(` that belongs to code.
+function withCodeProtected(text: string, fn: (outside: string) => string): string {
+  const code: string[] = [];
+  const masked = text.replace(CODE_PATTERN, (match) => {
+    code.push(match);
+    return `\uE000${code.length - 1}\uE001`;
+  });
+  return fn(masked).replace(/\uE000(\d+)\uE001/g, (_, i: string) => code[Number(i)] ?? "");
 }
 
 // Two ORPHAN delimiters (e.g. two separate lines each ending in a stray,
@@ -69,6 +89,10 @@ function looksLikeRealMath(tex: string): boolean {
 // bridged orphans (see looksLikeRealMath) has its delimiters stripped too,
 // falling back to plain text rather than rendering nonsense math.
 export function stripOrphanMathDelimiters(text: string): string {
+  return withCodeProtected(text, stripOrphansOutsideCode);
+}
+
+function stripOrphansOutsideCode(text: string): string {
   let result = "";
   let lastIndex = 0;
   for (const match of text.matchAll(MATH_PATTERN)) {

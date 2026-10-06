@@ -64,3 +64,19 @@ describe("mapWithConcurrency", () => {
     expect(result).toEqual([2, 4, 6]);
   });
 });
+
+describe("mapWithConcurrency after a failure", () => {
+  it("stops starting new items once one call has failed", async () => {
+    const started: number[] = [];
+    await expect(
+      mapWithConcurrency([0, 1, 2, 3, 4, 5], 2, async (n) => {
+        started.push(n);
+        if (n === 0) throw new Error("boom");
+        await new Promise((r) => setTimeout(r, 5));
+        return n;
+      })
+    ).rejects.toThrow("boom");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(started.length).toBeLessThan(6);
+  });
+});

@@ -11,6 +11,7 @@ import { ArrowUp, Bot, BookOpen, FileText, Paperclip, Plus, Save, Trash2, X } fr
 import type { ChatAttachment, ChatConversation, ChatMessage, CourseSummary } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog,
@@ -179,7 +180,11 @@ export default function ChatContent({
 }) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeId, setActiveIdState] = useState<number | null>(null);
+  // Mirrors activeId for async work (a reply arriving after the user has
+  // moved to another conversation) that must not read a stale closure.
+  const activeIdRef = useRef<number | null>(null);
   function setActiveId(id: number | null) {
+    activeIdRef.current = id;
     setActiveIdState(id);
     onActiveConversationChange?.(id);
   }
@@ -189,6 +194,10 @@ export default function ChatContent({
   const [sending, setSending] = useState(false);
   // The assistant's reply as it streams in; null while nothing has arrived.
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  // Which conversation the in-flight send belongs to — its "Thinking…" /
+  // streaming bubble only shows there.
+  const [sendingConversationId, setSendingConversationId] = useState<number | null>(null);
+  const [viewImage, setViewImage] = useState<{ src: string; alt: string } | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [attachmentDrafts, setAttachmentDrafts] = useState<ComposerAttachment[]>([]);
@@ -414,6 +423,7 @@ export default function ChatContent({
     setDraft("");
     setAttachmentDrafts([]);
     setSending(true);
+    setSendingConversationId(activeId);
 
     // A failed send below removes exactly this optimistic message (by id)
     // and restores `content`/attachments to the input — without this, a
@@ -431,6 +441,7 @@ export default function ChatContent({
         }).then((r) => r.json());
         conversationId = created.id;
         setActiveId(created.id);
+        setSendingConversationId(created.id);
         setConversations((prev) => [created, ...prev]);
       }
 
@@ -467,7 +478,9 @@ export default function ChatContent({
         setAttachmentDrafts(attachments);
         return;
       }
-      setMessages((prev) => [...prev, reply]);
+      // Only where the user still is: if they've opened another conversation
+      // meanwhile, this one's reply is already saved and shows when they go back.
+      if (activeIdRef.current === conversationId) setMessages((prev) => [...prev, reply]);
       // Refreshes title (set from the first message) and reordering.
       const list: ChatConversation[] = await fetch("/api/chat/conversations").then((r) => r.json());
       setConversations(list);
@@ -478,6 +491,7 @@ export default function ChatContent({
       setAttachmentDrafts(attachments);
     } finally {
       setSending(false);
+      setSendingConversationId(null);
       setStreamingText(null);
     }
   }
@@ -583,13 +597,17 @@ export default function ChatContent({
                 >
                   {(m.attachments ?? []).map((a, i) =>
                     a.type === "image" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <button
                         key={i}
-                        src={a.dataUrl}
-                        alt={a.filename}
-                        className="mb-1.5 max-h-48 rounded-md object-contain"
-                      />
+                        type="button"
+                        aria-label={`View ${a.filename}`}
+                        title="Click to enlarge"
+                        className="mb-1.5 block cursor-zoom-in rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => setViewImage({ src: a.dataUrl, alt: a.filename })}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={a.dataUrl} alt={a.filename} className="max-h-48 rounded-md object-contain" />
+                      </button>
                     ) : (
                       <div
                         key={i}
@@ -646,7 +664,7 @@ export default function ChatContent({
                 </div>
               </div>
             ))}
-            {sending && (
+            {sending && sendingConversationId === activeId && (
               <div className="flex justify-start">
                 {streamingText ? (
                   <div className="max-w-[85%] rounded-xl bg-muted px-3 py-2 text-sm text-foreground">
@@ -723,8 +741,17 @@ export default function ChatContent({
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
+                  if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  if (e.ctrlKey || e.metaKey) {
+                    // Ctrl/Cmd+Enter: a newline at the cursor (browsers don't
+                    // insert one themselves for this combination). Shift+Enter
+                    // already does, natively.
+                    const el = e.currentTarget;
+                    const { selectionStart, selectionEnd } = el;
+                    setDraft(`${draft.slice(0, selectionStart)}\n${draft.slice(selectionEnd)}`);
+                    requestAnimationFrame(() => el.setSelectionRange(selectionStart + 1, selectionStart + 1));
+                  } else {
                     handleSend();
                   }
                 }}
@@ -763,6 +790,19 @@ export default function ChatContent({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <Dialog open={viewImage !== null} onOpenChange={(open) => !open && setViewImage(null)}>
+        <DialogContent className="flex max-h-[95dvh] w-fit max-w-[95vw] items-center justify-center bg-transparent p-0 ring-0 sm:max-w-[95vw]">
+          <DialogTitle className="sr-only">{viewImage?.alt ?? "Image"}</DialogTitle>
+          {viewImage && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={viewImage.src}
+              alt={viewImage.alt}
+              className="max-h-[92dvh] max-w-[95vw] rounded-lg object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
       <SaveAttachmentToCourseDialog
         attachment={saveTarget}
         onOpenChange={(open) => !open && setSaveTarget(null)}

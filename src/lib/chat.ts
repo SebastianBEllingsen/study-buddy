@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { generateText, resolveBackendId, streamText } from "./aiClient";
 import {
   addChatMessage,
+  clearChatConversationTitleIfEmpty,
   deleteChatMessage,
   getChatConversation,
   getChatMessage,
@@ -20,8 +21,12 @@ import { extractDocxText, extractPdfText, EmptyDocumentError, ScannedPdfError } 
 import { stripOrphanMathDelimiters } from "./mathSanitizer";
 import { buildAvailableAttachmentsList, detectChatActions, executeChatActions } from "./chatActions";
 
-const MAX_TOKENS = 4000;
-const EFFICIENT_MAX_TOKENS = 2000;
+// Ceilings, not targets — the model writes as much as the answer needs. Kept
+// roomy because a reply that hits the ceiling is cut off mid-thought.
+const MAX_TOKENS = 8000;
+const EFFICIENT_MAX_TOKENS = 4000;
+// Appended to a reply that stopped at the ceiling, so it doesn't just end.
+const TRUNCATED_NOTICE = "\n\n*(This reply was cut off by the length limit — ask me to continue.)*";
 
 // pdf/docx only for v1 — not txt/md — so a later "Save to course" action can
 // file a chat-attached document straight through the existing course-upload
@@ -106,13 +111,50 @@ export async function validateAndExtractAttachments(raw: unknown[]): Promise<Cha
   return results;
 }
 
-function attachmentSuffix(m: ChatMessage): string {
+type ImageAttachment = Extract<ChatAttachment, { type: "image" }>;
+
+// How many pictures from the conversation go out with a request, newest
+// first. Earlier pictures are mentioned in the transcript but not sent.
+const MAX_IMAGES_PER_REQUEST = 4;
+// Only the most recent attachments' document text is repeated each turn;
+// older ones are mentioned by name.
+const DOCUMENT_TEXT_ATTACHMENTS = 2;
+// Rough ceiling on the transcript (~25k tokens): the oldest messages drop
+// out first.
+const MAX_TRANSCRIPT_CHARS = 100_000;
+
+interface TranscriptOptions {
+  // Pictures that go out with this request, oldest first.
+  images?: ImageAttachment[];
+}
+
+// Pictures to send with this turn: the newest first, up to the limit, each
+// shown at its place in the history — so a follow-up like "what about the
+// second part?" still has the picture it refers to. Returned oldest first.
+// `includeHistory: false` keeps only the latest message's own pictures.
+export function selectImages(messages: ChatMessage[], includeHistory: boolean): ImageAttachment[] {
+  const picked: ImageAttachment[] = [];
+  for (let i = messages.length - 1; i >= 0 && picked.length < MAX_IMAGES_PER_REQUEST; i--) {
+    if (!includeHistory && i < messages.length - 1) break;
+    const images = (messages[i].attachments ?? []).filter((a): a is ImageAttachment => a.type === "image");
+    for (let j = images.length - 1; j >= 0 && picked.length < MAX_IMAGES_PER_REQUEST; j--) picked.unshift(images[j]);
+  }
+  return picked;
+}
+
+function attachmentSuffix(m: ChatMessage, options: TranscriptOptions, fullDocuments: Set<ChatMessage>): string {
   return (m.attachments ?? [])
-    .map((a) =>
-      a.type === "document"
-        ? `\n[Attached document: ${a.filename}]\n${a.extractedText}`
-        : `\n[Attached image: ${a.filename} — see the image provided with this request, if any]`
-    )
+    .map((a) => {
+      if (a.type === "document") {
+        return fullDocuments.has(m)
+          ? `\n[Attached document: ${a.filename}]\n${a.extractedText}`
+          : `\n[Attached document: ${a.filename} — text left out of this older message]`;
+      }
+      const n = (options.images ?? []).indexOf(a);
+      return n >= 0
+        ? `\n[Attached image ${n + 1}: ${a.filename} — image ${n + 1} of those provided with this request]`
+        : `\n[Attached image: ${a.filename} — not shown with this request]`;
+    })
     .join("");
 }
 
@@ -139,13 +181,23 @@ function pendingActionSuffix(m: ChatMessage): string {
 // transcript here. This is what a "send the whole history every time" chat
 // API amounts to anyway, and it works identically across every backend with
 // zero changes to any of them.
-function buildTranscriptPrompt(messages: ChatMessage[]): string {
-  return messages
-    .map(
-      (m) =>
-        `${m.role === "user" ? "User" : "Assistant"}: ${m.content}${attachmentSuffix(m)}${pendingActionSuffix(m)}`
-    )
-    .join("\n\n");
+function buildTranscriptPrompt(messages: ChatMessage[], options: TranscriptOptions = {}): string {
+  const withDocuments = messages.filter((m) => (m.attachments ?? []).some((a) => a.type === "document"));
+  const fullDocuments = new Set(withDocuments.slice(-DOCUMENT_TEXT_ATTACHMENTS));
+  const entries = messages.map(
+    (m) =>
+      `${m.role === "user" ? "User" : "Assistant"}: ${m.content}${attachmentSuffix(m, options, fullDocuments)}${pendingActionSuffix(m)}`
+  );
+
+  // Newest first until the budget is spent; the latest message always stays.
+  let used = 0;
+  let first = entries.length;
+  while (first > 0 && (first === entries.length || used + entries[first - 1].length <= MAX_TRANSCRIPT_CHARS)) {
+    used += entries[first - 1].length;
+    first--;
+  }
+  const kept = entries.slice(first).join("\n\n");
+  return first > 0 ? `[Earlier messages in this conversation are left out for length]\n\n${kept}` : kept;
 }
 
 // Persists the user's message, calls the model with the full conversation so
@@ -203,11 +255,6 @@ export async function sendChatMessage(
       folders,
     });
 
-    const images = (attachments ?? [])
-      .filter((a): a is Extract<ChatAttachment, { type: "image" }> => a.type === "image")
-      .map((a) => parseDataUrlImage(a.dataUrl))
-      .filter((img): img is { base64: string; mimeType: string } => img !== null);
-
     let released = false;
     let held = "";
     const releasingOnDelta = onDelta
@@ -217,7 +264,6 @@ export async function sendChatMessage(
         }
       : undefined;
     const replyPromise = generateConversationReply(detail.conversation, detail.messages, courses, {
-      images,
       onDelta: releasingOnDelta,
     });
     // If detection wins, nobody awaits this — don't let its failure go unhandled.
@@ -247,6 +293,7 @@ export async function sendChatMessage(
     return await addChatMessage(conversationId, "assistant", reply);
   } catch (err) {
     await deleteChatMessage(userMessage.id).catch(() => {});
+    await clearChatConversationTitleIfEmpty(conversationId).catch(() => {});
     throw err;
   }
 }
@@ -303,13 +350,21 @@ async function generateConversationReply(
   messages: ChatMessage[],
   courses: Course[],
   options: {
-    images?: { base64: string; mimeType: string }[];
     extraSystem?: string;
     onDelta?: (text: string) => void;
   } = {}
 ): Promise<string> {
   const { aiEfficiencyMode: efficient, cliTrustedModeEnabled } = await getAppSettings();
-  const images = options.images ?? [];
+  // A CLI backend without full tool access rejects any image, so pictures
+  // from earlier turns (which the user isn't sending right now) are left out
+  // rather than breaking every follow-up. The latest message's own pictures
+  // are always sent, so that case still gets the explanatory error.
+  const imageBackend = await resolveBackendId(true);
+  const cliWithoutImages = (imageBackend === "claude_code" || imageBackend === "codex_cli") && !cliTrustedModeEnabled;
+  const imageAttachments = selectImages(messages, !cliWithoutImages);
+  const images = imageAttachments
+    .map((a) => parseDataUrlImage(a.dataUrl))
+    .filter((img): img is { base64: string; mimeType: string } => img !== null);
   const accessibleIds = accessibleCourseIdsFor(conversation, messages, courses);
   const accessible = new Set(accessibleIds);
 
@@ -330,30 +385,74 @@ async function generateConversationReply(
       // document's real bytes regardless of status, so passing every id
       // here (not just extracted ones) satisfies "include all documents".
       documentIds = (await Promise.all(accessibleIds.map((id) => listDocumentsForCourse(id)))).flat().map((d) => d.id);
-    } else {
-      const query = retrievalQuery(messages);
-      const sections = await Promise.all(
-        accessibleIds.map(async (id) => {
-          const { courseName, text } = await buildChatCourseContext(id, query);
-          return `=== Course: ${courseName} ===\n${text}`;
-        })
-      );
-      system += `\n\nThe user has made the following course material available in this conversation (the course it's scoped to and/or courses they allowed you to read) — use it to answer questions about those courses, but you can still discuss anything else too. Large courses are shown as an outline plus only the excerpts relevant to the latest message, not in full: if a question needs material you can't see, say which document or topic you'd need and ask the user to name it, rather than guessing.\n\n${sections.join("\n\n")}`;
     }
+
+    // The extracted text goes in either way. A CLI left to open the raw files
+    // alone can't read formats like .pptx (they need a shell command, and a
+    // non-interactive CLI can't get one approved), even though the app has
+    // already extracted their text.
+    const query = retrievalQuery(messages);
+    const sections = await Promise.all(
+      accessibleIds.map(async (id) => {
+        const { courseName, text } = await buildChatCourseContext(id, query);
+        return `=== Course: ${courseName} ===\n${text}`;
+      })
+    );
+    system += `\n\nThe user has made the following course material available in this conversation (the course it's scoped to and/or courses they allowed you to read) — use it to answer questions about those courses, but you can still discuss anything else too. Large courses are shown as an outline plus only the excerpts relevant to the latest message, not in full: if a question needs material you can't see, say which document or topic you'd need and ask the user to name it, rather than guessing.${
+      useCliWorkspace
+        ? " The original files are also in your working directory (see manifest.json), but the text below is already extracted from them — use it first, and open an original file only for what text can't carry, like an image or a scanned page. Never run shell commands to convert files."
+        : ""
+    }\n\n${sections.join("\n\n")}`;
   }
   if (options.extraSystem) system += `\n\n${options.extraSystem}`;
 
   const params = {
     system,
-    user: buildTranscriptPrompt(messages),
+    user: buildTranscriptPrompt(messages, { images: imageAttachments }),
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
     effort: efficient ? ("low" as const) : ("medium" as const),
     efficient,
     images: images.length > 0 ? images : undefined,
     workspaceScope: documentIds?.length ? { documentIds } : undefined,
   };
-  const reply = options.onDelta ? await streamText(params, options.onDelta) : await generateText(params);
-  return stripOrphanMathDelimiters(reply.trim());
+  let truncated = false;
+  const withNotice = { ...params, onTruncated: () => void (truncated = true) };
+  const reply = options.onDelta
+    ? await streamText(withNotice, options.onDelta)
+    : await generateText(withNotice);
+  // A reply cut off mid-code-block or mid-formula still renders sensibly.
+  const text = stripOrphanMathDelimiters(reply.trim());
+  if (!truncated) return text;
+  // Shown to the user live too, so the streamed text and the saved message match.
+  options.onDelta?.(TRUNCATED_NOTICE);
+  return text + TRUNCATED_NOTICE;
+}
+
+// Proposals being carried out right now (this process). Two quick
+// confirmations of the same one would otherwise both see "pending" and run it
+// twice; and a proposal marked as running that isn't in here was cut short by
+// a restart.
+const actionsInFlight = new Set<number>();
+
+export function isPendingActionInFlight(messageId: number): boolean {
+  return actionsInFlight.has(messageId);
+}
+
+// Marks any proposal left "running" by an interrupted process as failed, so
+// the chat doesn't show "Working on it…" forever.
+export async function failInterruptedActions(messages: ChatMessage[]): Promise<ChatMessage[]> {
+  return Promise.all(
+    messages.map(async (m) => {
+      if (m.pendingAction?.status !== "confirmed_executing" || actionsInFlight.has(m.id)) return m;
+      const failed: PendingChatAction = {
+        ...m.pendingAction,
+        status: "failed",
+        resultSummary: "This was interrupted before it finished — ask again to retry.",
+      };
+      await updateChatMessagePendingAction(m.id, failed);
+      return { ...m, pendingAction: failed };
+    })
+  );
 }
 
 export class PendingActionNotFoundError extends Error {
@@ -387,22 +486,39 @@ export async function resolvePendingAction(
   }
   // Already resolved (double-click, stale UI reload) — return as-is rather
   // than erroring or executing a second time.
-  if (message.pendingAction.status !== "pending") {
+  if (message.pendingAction.status !== "pending" || actionsInFlight.has(messageId)) {
     return { ...message, followUp: null };
   }
 
+  // Claimed in the same synchronous step as the check above, so a second
+  // request for this message can't slip past it.
+  actionsInFlight.add(messageId);
+  try {
+    return await carryOutPendingAction(conversationId, message, message.pendingAction, confirm);
+  } finally {
+    actionsInFlight.delete(messageId);
+  }
+}
+
+async function carryOutPendingAction(
+  conversationId: number,
+  message: ChatMessage,
+  pendingAction: PendingChatAction,
+  confirm: boolean
+): Promise<ResolvedPendingAction> {
+  const messageId = message.id;
   if (!confirm) {
-    const cancelled: PendingChatAction = { ...message.pendingAction, status: "cancelled" };
+    const cancelled: PendingChatAction = { ...pendingAction, status: "cancelled" };
     await updateChatMessagePendingAction(messageId, cancelled);
     return { ...message, pendingAction: cancelled, followUp: null };
   }
 
-  await updateChatMessagePendingAction(messageId, { ...message.pendingAction, status: "confirmed_executing" });
+  await updateChatMessagePendingAction(messageId, { ...pendingAction, status: "confirmed_executing" });
 
   const detail = await getChatConversation(conversationId);
   if (!detail) {
     const failed: PendingChatAction = {
-      ...message.pendingAction,
+      ...pendingAction,
       status: "failed",
       resultSummary: "This conversation no longer exists.",
     };
@@ -413,14 +529,14 @@ export async function resolvePendingAction(
   const availableAttachments = buildAvailableAttachmentsList(detail.messages);
   const resultSummary = await executeChatActions(
     detail.conversation.courseId,
-    message.pendingAction.actions,
+    pendingAction.actions,
     availableAttachments
   );
-  const resolved: PendingChatAction = { ...message.pendingAction, status: "executed", resultSummary };
+  const resolved: PendingChatAction = { ...pendingAction, status: "executed", resultSummary };
   await updateChatMessagePendingAction(messageId, resolved);
 
   const resolvedMessage: ChatMessage = { ...message, pendingAction: resolved };
-  const followUp = message.pendingAction.actions.some((a) => a.action === "readCourse")
+  const followUp = pendingAction.actions.some((a) => a.action === "readCourse")
     ? await answerAfterGrant(conversationId, resolvedMessage)
     : null;
   return { ...resolvedMessage, followUp };

@@ -10,6 +10,27 @@ import {
 import { InvalidAiResponseError } from "./aiResponseValidation";
 import type { QuizContent, FlashcardsContent } from "./types";
 
+describe("code is left alone", () => {
+  it("keeps $ inside fenced blocks and inline code", () => {
+    const input = "Run:\n```bash\necho $HOME\n$ npm i\n```\nand `$1` here";
+    expect(stripOrphanMathDelimiters(input)).toBe(input);
+  });
+
+  it("still strips an orphan $ outside code next to code", () => {
+    expect(stripOrphanMathDelimiters("Costs $5 then `$x` ok")).toBe("Costs 5 then `$x` ok");
+  });
+
+  it("keeps an unclosed fence (a cut-off reply) untouched", () => {
+    const input = "Try:\n```js\nconst a = `$${x}`;";
+    expect(stripOrphanMathDelimiters(input)).toBe(input);
+  });
+
+  it("does not turn \\(..\\) in code into math, but still converts it in prose", () => {
+    expect(normalizeLatexDelimiters("```js\nconst r = /\\(a\\)/;\n```")).toBe("```js\nconst r = /\\(a\\)/;\n```");
+    expect(normalizeLatexDelimiters("see `\\(x\\)` and \\(y\\)")).toBe("see `\\(x\\)` and $y$");
+  });
+});
+
 describe("stripOrphanMathDelimiters", () => {
   it("leaves a legitimate inline math span byte-for-byte untouched", () => {
     const input = "The formula is $E=mc^2$ approximately.";

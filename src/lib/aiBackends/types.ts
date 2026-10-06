@@ -43,6 +43,9 @@ export interface GenerateTextParams {
   // throw, same as always.
   images?: GenerateTextImage[];
   workspaceScope?: GenerateWorkspaceScope;
+  // Called when the reply stopped because it hit maxTokens, i.e. the text is
+  // cut off mid-thought. Backends that can't tell never call it.
+  onTruncated?: () => void;
 }
 
 // A text call that may search the web first — used to find learning

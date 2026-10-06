@@ -3453,6 +3453,18 @@ export async function deleteChatMessage(id: number): Promise<void> {
   await db.delete(chat_messages).where(eq(chat_messages.id, id));
 }
 
+// A conversation's first user message names it (see addChatMessage). When
+// that message is rolled back and nothing else is left, the name goes with
+// it, so the next first message names the conversation instead.
+export async function clearChatConversationTitleIfEmpty(id: number): Promise<void> {
+  const [remaining] = await db
+    .select({ id: chat_messages.id })
+    .from(chat_messages)
+    .where(eq(chat_messages.conversation_id, id))
+    .limit(1);
+  if (!remaining) await db.update(chat_conversations).set({ title: null }).where(eq(chat_conversations.id, id));
+}
+
 export async function getChatMessage(id: number): Promise<ChatMessage | undefined> {
   const rows = await db.select().from(chat_messages).where(eq(chat_messages.id, id)).limit(1);
   return rows[0] ? toChatMessage(rows[0]) : undefined;

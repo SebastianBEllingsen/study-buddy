@@ -18,7 +18,9 @@ const listCourses = vi.fn();
 const listDocumentsForCourse = vi.fn();
 const listFoldersForCourse = vi.fn();
 const updateChatMessagePendingAction = vi.fn();
+const clearChatConversationTitleIfEmpty = vi.fn();
 vi.mock("./models", () => ({
+  clearChatConversationTitleIfEmpty: (...args: unknown[]) => clearChatConversationTitleIfEmpty(...args),
   addChatMessage: (...args: unknown[]) => addChatMessage(...args),
   deleteChatMessage: (...args: unknown[]) => deleteChatMessage(...args),
   getChatConversation: (...args: unknown[]) => getChatConversation(...args),
@@ -55,8 +57,14 @@ vi.mock("./extraction", async () => {
   };
 });
 
-const { sendChatMessage, validateAndExtractAttachments, resolvePendingAction, PendingActionNotFoundError } =
-  await import("./chat");
+const {
+  sendChatMessage,
+  validateAndExtractAttachments,
+  resolvePendingAction,
+  PendingActionNotFoundError,
+  selectImages,
+  failInterruptedActions,
+} = await import("./chat");
 
 beforeEach(() => {
   generateText.mockReset();
@@ -71,6 +79,7 @@ beforeEach(() => {
   listDocumentsForCourse.mockReset();
   listFoldersForCourse.mockReset().mockResolvedValue([]);
   updateChatMessagePendingAction.mockReset();
+  clearChatConversationTitleIfEmpty.mockReset().mockResolvedValue(undefined);
   buildChatCourseContext.mockReset();
   extractPdfText.mockReset();
   extractDocxText.mockReset();
@@ -203,7 +212,7 @@ describe("sendChatMessage", () => {
       expect(call.workspaceScope).toBeUndefined();
     });
 
-    it("passes every course document id as a workspaceScope when the resolved backend is a trusted CLI backend", async () => {
+    it("passes every course document id as a workspaceScope, and still includes the extracted text, when the resolved backend is a trusted CLI backend", async () => {
       addChatMessage
         .mockResolvedValueOnce({ id: 1, role: "user", content: "hi" })
         .mockResolvedValueOnce({ id: 2, role: "assistant", content: "hello" });
@@ -214,15 +223,16 @@ describe("sendChatMessage", () => {
       getAppSettings.mockResolvedValue({ aiEfficiencyMode: false, cliTrustedModeEnabled: true });
       resolveBackendId.mockResolvedValue("claude_code");
       listDocumentsForCourse.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }]);
+      buildChatCourseContext.mockResolvedValue({ courseName: "Bio", text: "--- Document: slides.pptx ---\nrule 1" });
       generateText.mockResolvedValue("hello");
 
       await sendChatMessage(1, "hi");
 
       expect(listDocumentsForCourse).toHaveBeenCalledWith(7);
-      expect(buildChatCourseContext).not.toHaveBeenCalled();
       const call = generateText.mock.calls[0][0];
       expect(call.workspaceScope).toEqual({ documentIds: [1, 2, 3] });
-      expect(call.system).not.toContain("--- Document");
+      expect(call.system).toContain("--- Document: slides.pptx ---");
+      expect(call.system).toContain("Never run shell commands to convert files");
     });
 
     it("lists courses the conversation can't see by name only, and never loads their content", async () => {
@@ -598,5 +608,162 @@ describe("validateAndExtractAttachments", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ type: "document", filename: "scanned.pdf" });
     expect((result[0] as { extractedText: string }).extractedText).toContain("Could not extract text from scanned.pdf");
+  });
+});
+
+const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const image = (filename: string) => ({ type: "image" as const, filename, mimeType: "image/png", dataUrl: png });
+
+describe("selectImages", () => {
+  const messages = [
+    { id: 1, role: "user", content: "a", attachments: [image("one.png")] },
+    { id: 2, role: "assistant", content: "b", attachments: null },
+    { id: 3, role: "user", content: "c", attachments: null },
+  ] as never[];
+
+  it("keeps pictures from earlier turns so follow-ups can still see them", () => {
+    expect(selectImages(messages, true).map((a) => a.filename)).toEqual(["one.png"]);
+  });
+
+  it("keeps only the latest message's own pictures when history is excluded", () => {
+    expect(selectImages(messages, false)).toEqual([]);
+  });
+
+  it("caps how many go out, newest first, returned oldest first", () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: "",
+      attachments: [image(`p${i}.png`)],
+    })) as never[];
+    expect(selectImages(many, true).map((a) => a.filename)).toEqual(["p2.png", "p3.png", "p4.png", "p5.png"]);
+  });
+});
+
+describe("chat reply context", () => {
+  function setup(messages: unknown[], backend = "api", trusted = false) {
+    addChatMessage
+      .mockResolvedValueOnce({ id: 99, role: "user", content: "x" })
+      .mockResolvedValueOnce({ id: 100, role: "assistant", content: "ok" });
+    getChatConversation.mockResolvedValue({ conversation: { courseId: null }, messages });
+    getAppSettings.mockResolvedValue({ aiEfficiencyMode: false, cliTrustedModeEnabled: trusted });
+    resolveBackendId.mockResolvedValue(backend);
+  }
+
+  it("sends pictures from earlier turns and numbers them in the transcript", async () => {
+    setup([
+      { id: 1, role: "user", content: "what is this?", attachments: [image("quiz.png")] },
+      { id: 2, role: "assistant", content: "A quiz." },
+      { id: 3, role: "user", content: "and the second part?" },
+    ]);
+    generateText.mockResolvedValue("ok");
+
+    await sendChatMessage(1, "and the second part?");
+
+    const call = generateText.mock.calls[0][0];
+    expect(call.images).toHaveLength(1);
+    expect(call.user).toContain("[Attached image 1: quiz.png");
+  });
+
+  it("leaves earlier pictures out for a CLI backend that can't take images", async () => {
+    setup(
+      [
+        { id: 1, role: "user", content: "what is this?", attachments: [image("quiz.png")] },
+        { id: 2, role: "assistant", content: "A quiz." },
+        { id: 3, role: "user", content: "and the second part?" },
+      ],
+      "claude_code"
+    );
+    generateText.mockResolvedValue("ok");
+
+    await sendChatMessage(1, "and the second part?");
+
+    const call = generateText.mock.calls[0][0];
+    expect(call.images).toBeUndefined();
+    expect(call.user).toContain("not shown with this request");
+  });
+
+  it("repeats document text only for the two most recent attachments", async () => {
+    const doc = (name: string) => ({
+      type: "document" as const,
+      filename: name,
+      mimeType: "application/pdf",
+      fileBase64: "x",
+      extractedText: `TEXT-OF-${name}`,
+    });
+    setup([
+      { id: 1, role: "user", content: "a", attachments: [doc("one.pdf")] },
+      { id: 2, role: "user", content: "b", attachments: [doc("two.pdf")] },
+      { id: 3, role: "user", content: "c", attachments: [doc("three.pdf")] },
+    ]);
+    generateText.mockResolvedValue("ok");
+
+    await sendChatMessage(1, "c");
+
+    const { user } = generateText.mock.calls[0][0];
+    expect(user).not.toContain("TEXT-OF-one.pdf");
+    expect(user).toContain("TEXT-OF-two.pdf");
+    expect(user).toContain("TEXT-OF-three.pdf");
+  });
+
+  it("drops the oldest messages once the transcript is too long, keeping the latest", async () => {
+    const big = "word ".repeat(15_000);
+    setup([
+      { id: 1, role: "user", content: `OLDEST ${big}` },
+      { id: 2, role: "assistant", content: `MIDDLE ${big}` },
+      { id: 3, role: "user", content: `NEWEST ${big}` },
+    ]);
+    generateText.mockResolvedValue("ok");
+
+    await sendChatMessage(1, "x");
+
+    const { user } = generateText.mock.calls[0][0];
+    expect(user).toContain("left out for length");
+    expect(user).toContain("NEWEST");
+    expect(user).not.toContain("OLDEST");
+  });
+
+  it("tells the user when the reply was cut off by the length limit", async () => {
+    setup([{ id: 1, role: "user", content: "hi" }]);
+    generateText.mockImplementation(async (params: { onTruncated?: () => void }) => {
+      params.onTruncated?.();
+      return "A long answer that stops mid-";
+    });
+
+    await sendChatMessage(1, "hi");
+
+    expect(addChatMessage.mock.calls[1][2]).toContain("cut off by the length limit");
+  });
+
+  it("clears the conversation title when a failed first message is rolled back", async () => {
+    addChatMessage.mockResolvedValueOnce({ id: 99, role: "user", content: "x" });
+    getChatConversation.mockResolvedValue(undefined);
+
+    await expect(sendChatMessage(1, "x")).rejects.toThrow();
+
+    expect(clearChatConversationTitleIfEmpty).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("pending action safety", () => {
+  const pendingAction = { id: "a", actions: [{ action: "createFolder", folderName: "X" }], status: "pending" as const, resultSummary: null };
+
+  it("runs a proposal once when it is confirmed twice at the same time", async () => {
+    getChatMessage.mockResolvedValue({ id: 5, conversationId: 1, pendingAction });
+    getChatConversation.mockResolvedValue({ conversation: { courseId: 7 }, messages: [] });
+    executeChatActions.mockResolvedValue("Created.");
+
+    await Promise.all([resolvePendingAction(1, 5, true), resolvePendingAction(1, 5, true)]);
+
+    expect(executeChatActions).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a proposal left running by an interrupted process as failed", async () => {
+    const stuck = { id: 7, pendingAction: { ...pendingAction, status: "confirmed_executing" as const } };
+
+    const [fixed] = await failInterruptedActions([stuck as never]);
+
+    expect(fixed.pendingAction?.status).toBe("failed");
+    expect(updateChatMessagePendingAction).toHaveBeenCalledWith(7, expect.objectContaining({ status: "failed" }));
   });
 });

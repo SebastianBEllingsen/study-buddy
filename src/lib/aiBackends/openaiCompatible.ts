@@ -42,7 +42,8 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
     user: string,
     maxTokens: number,
     jsonMode: boolean,
-    images?: GenerateTextImage[]
+    images?: GenerateTextImage[],
+    onTruncated?: () => void
   ): Promise<string> {
     const userContent: OpenAI.Chat.ChatCompletionContentPart[] = [
       ...(images ?? []).map(
@@ -63,6 +64,7 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
       ],
       ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
     });
+    if (response.choices[0]?.finish_reason === "length") onTruncated?.();
     return response.choices[0]?.message?.content ?? "";
   }
 
@@ -84,8 +86,8 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
     },
 
     async generateText(params: GenerateTextParams): Promise<string> {
-      const { system, user, maxTokens = 8000, images } = params;
-      return complete(system, user, maxTokens, false, images);
+      const { system, user, maxTokens = 8000, images, onTruncated } = params;
+      return complete(system, user, maxTokens, false, images, onTruncated);
     },
 
     async streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
@@ -110,6 +112,7 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
       });
       let full = "";
       for await (const chunk of stream) {
+        if (chunk.choices[0]?.finish_reason === "length") params.onTruncated?.();
         const delta = chunk.choices[0]?.delta?.content;
         if (delta) {
           full += delta;

@@ -55,6 +55,10 @@ export class NoDocumentsError extends Error {
 // call sites below that read it.
 const MAX_TOKENS = 8000;
 const EFFICIENT_MAX_TOKENS = 4000;
+// Added to notes that stopped at the limit, so a cut-off ending isn't mistaken
+// for the whole thing.
+const TRUNCATED_NOTES_NOTICE =
+  "\n\n> ⚠️ These notes hit the AI's length limit and may be cut off here. Generate from fewer documents at a time, or turn off efficiency mode in Settings.";
 
 // How many chunks' generation calls run at once — see mapWithConcurrency's
 // own comment for why this can't be a plain Promise.all. Low enough to stay
@@ -163,7 +167,9 @@ async function generateNotes(
   efficient?: boolean,
   documentIds?: number[]
 ): Promise<NotesContent> {
+  let truncated = false;
   const markdown = await generateText({
+    onTruncated: () => void (truncated = true),
     system: notesSystemPrompt(courseName),
     user: notesUserPrompt(text, alreadyCovered),
     maxTokens: efficient ? EFFICIENT_MAX_TOKENS : MAX_TOKENS,
@@ -171,7 +177,7 @@ async function generateNotes(
     efficient,
     workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
-  return sanitizeNotesContent({ markdown });
+  return sanitizeNotesContent({ markdown: truncated ? markdown + TRUNCATED_NOTES_NOTICE : markdown });
 }
 
 async function generateNotesChunked(
@@ -185,7 +191,9 @@ async function generateNotesChunked(
     generateNotes(courseName, chunk, undefined, efficient, documentIds)
   );
   // Reduce: merge the chunk-level notes into one coherent document.
+  let mergeTruncated = false;
   const merged = await generateText({
+    onTruncated: () => void (mergeTruncated = true),
     system: notesMergeSystemPrompt(courseName),
     user: chunkSummaries
       .map((s, i) => `--- Section ${i + 1} notes ---\n${s.markdown}`)
@@ -195,7 +203,7 @@ async function generateNotesChunked(
     efficient,
     workspaceScope: documentIds?.length ? { documentIds } : undefined,
   });
-  return sanitizeNotesContent({ markdown: merged });
+  return sanitizeNotesContent({ markdown: mergeTruncated ? merged + TRUNCATED_NOTES_NOTICE : merged });
 }
 
 const MODE_LABELS: Record<GenerationMode, string> = {
@@ -586,6 +594,11 @@ export async function createRetryQuiz(
       correctAnswer: correctAnswerText(q),
       explanation: q.explanation,
     }));
+
+  // Indices that name no question (a stale list) leave nothing to retry.
+  if (missed.length === 0) {
+    throw new NoMissedQuestionsError();
+  }
 
   const { aiEfficiencyMode: efficient, preferredLanguage: language } = await getAppSettings();
 

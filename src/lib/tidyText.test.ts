@@ -62,16 +62,11 @@ describe("tidyPastedText", () => {
   });
 
   describe("maxTokens", () => {
-    it("uses the ~4-chars-per-token estimate, not chars/2", async () => {
-      // 4000 chars -> ~1000 tokens by the chars/4 estimate, well under the
-      // 2000-token floor, so this pins down which estimate is in use: the
-      // old chars/2 formula would compute 2000 here too (coincidentally
-      // hitting the floor from the other side) at this exact length, so use
-      // a size where the two formulas diverge enough to tell them apart.
-      const text = "x".repeat(24_000); // chars/4 -> 6000, chars/2 -> 12000
-      generateText.mockResolvedValue("x".repeat(5000)); // within MAX_TIDY_RATIO of a 24000-char input
+    it("gives the output room beyond the input's own ~4-chars-per-token size", async () => {
+      const text = "x".repeat(12_000); // chars/4 -> 3000 tokens, x1.3 -> 3900
+      generateText.mockResolvedValue("x".repeat(5000)); // within MAX_TIDY_RATIO of a 12000-char input
       await tidyPastedText(text);
-      expect(generateText.mock.calls[0][0].maxTokens).toBe(6000);
+      expect(generateText.mock.calls[0][0].maxTokens).toBe(3900);
     });
 
     it("floors maxTokens at 2000 for a short paste", async () => {
@@ -79,17 +74,32 @@ describe("tidyPastedText", () => {
       await tidyPastedText("short text");
       expect(generateText.mock.calls[0][0].maxTokens).toBe(2000);
     });
+  });
 
-    // Regression coverage: the old chars/2 formula had no ceiling at all —
-    // a large paste (a raw Ctrl+A page dump can easily be 100k+ characters)
-    // computed a maxTokens value exceeding every supported backend's real
-    // output-token limit, so the very first request on it was rejected
-    // outright by the provider instead of degrading gracefully.
-    it("caps maxTokens at 8000 for a very large paste", async () => {
-      const huge = "x".repeat(200_000); // chars/4 -> 50000, uncapped
-      generateText.mockResolvedValue("x".repeat(50_000)); // within MAX_TIDY_RATIO of a 200k input
-      await tidyPastedText(huge);
-      expect(generateText.mock.calls[0][0].maxTokens).toBe(8000);
+  // Regression coverage: a paste whose cleaned text can't fit in one reply
+  // used to be cut off at the output limit and accepted as if complete.
+  describe("a large paste", () => {
+    const paragraph = (n: number) => `Paragraph ${n}. ${"word ".repeat(400)}`;
+    const large = Array.from({ length: 40 }, (_, i) => paragraph(i)).join("\n\n"); // ~20k tokens
+
+    it("is cleaned in pieces and every piece's result is kept, in order", async () => {
+      generateText.mockImplementation(async (params: { user: string }) => `CLEAN(${params.user.match(/Paragraph (\d+)/)?.[1]}) ${"x".repeat(2000)}`);
+      const result = await tidyPastedText(large);
+      expect(generateText.mock.calls.length).toBeGreaterThan(1);
+      for (const call of generateText.mock.calls) expect(call[0].maxTokens).toBeLessThanOrEqual(8000);
+      expect(result.startsWith("CLEAN(0)")).toBe(true);
+    });
+
+    it("lets a piece that is only page furniture come back empty", async () => {
+      let call = 0;
+      generateText.mockImplementation(async () => (call++ === 1 ? "" : "x".repeat(2000)));
+      const result = await tidyPastedText(large);
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("fails if a piece stays broken, keeping the original", async () => {
+      generateText.mockResolvedValue("x".repeat(400_000)); // way over the ratio every time
+      await expect(tidyPastedText(large)).rejects.toThrow(/broken result twice/);
     });
   });
 });

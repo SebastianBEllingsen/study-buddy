@@ -31,7 +31,8 @@ async function complete(
   user: string,
   maxTokens: number,
   jsonMode: boolean,
-  images?: GenerateTextImage[]
+  images?: GenerateTextImage[],
+  onTruncated?: () => void
 ): Promise<string> {
   const genAI = await client();
   const contents = images?.length
@@ -60,6 +61,7 @@ async function complete(
       }),
     (err) => err instanceof ApiError && isRetryableStatus(err.status)
   );
+  if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") onTruncated?.();
   return response.text ?? "";
 }
 
@@ -82,8 +84,8 @@ export async function generateStructured<T>(
 }
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
-  const { system, user, maxTokens = 8000, images } = params;
-  return complete(system, user, maxTokens, false, images);
+  const { system, user, maxTokens = 8000, images, onTruncated } = params;
+  return complete(system, user, maxTokens, false, images, onTruncated);
 }
 
 export async function streamText(params: GenerateTextParams, onDelta: (text: string) => void): Promise<string> {
@@ -107,6 +109,7 @@ export async function streamText(params: GenerateTextParams, onDelta: (text: str
   });
   let full = "";
   for await (const chunk of stream) {
+    if (chunk.candidates?.[0]?.finishReason === "MAX_TOKENS") params.onTruncated?.();
     const text = chunk.text;
     if (text) {
       full += text;

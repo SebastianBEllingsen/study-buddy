@@ -5,6 +5,13 @@ describe("stripCodeFences", () => {
   it("unwraps a fenced block", () => {
     expect(stripCodeFences('```json\n{"a":1}\n```')).toBe('{"a":1}');
   });
+  it("leaves JSON alone when a string value contains a code fence", () => {
+    const json = '{"markdown":"```python\\nx=1\\n```"}';
+    expect(JSON.parse(stripCodeFences(json))).toEqual({ markdown: "```python\nx=1\n```" });
+  });
+  it("unwraps a fence that follows some prose", () => {
+    expect(stripCodeFences('Here you go:\n```json\n{"a":1}\n```')).toBe('{"a":1}');
+  });
   it("leaves plain text alone", () => {
     expect(stripCodeFences('{"a":1}')).toBe('{"a":1}');
   });

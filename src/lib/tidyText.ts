@@ -1,6 +1,6 @@
 import { generateText } from "./aiClient";
 import { stripEmbeddedImages, restoreEmbeddedImages } from "./embeddedImages";
-import { estimateTokens } from "./chunking";
+import { chunkText, estimateTokens } from "./chunking";
 
 // Same ~4-chars-per-token estimate used everywhere else in this app
 // (chunking.ts) — an earlier version of this file used chars/2 instead,
@@ -13,6 +13,12 @@ import { estimateTokens } from "./chunking";
 // than degrading gracefully.
 const MIN_TIDY_TOKENS = 2000;
 const MAX_TIDY_TOKENS = 8000;
+// The cleaned text is about as long as the input, plus Markdown syntax — the
+// output limit needs room beyond the input's own size or the end gets cut off.
+const TIDY_OUTPUT_HEADROOM = 1.3;
+// A paste longer than this is cleaned in pieces: its cleaned text would not
+// fit in one reply (MAX_TIDY_TOKENS) and the end would silently be lost.
+const TIDY_CHUNK_TOKENS = 4000;
 
 const TIDY_SYSTEM_PROMPT = `You clean up messy pasted text for a student's study material — often a raw Ctrl+A dump of an entire webpage (an LMS/portal assignment page, a course site, an article), but also a lecture transcript or set of notes copied out of a PDF or slide deck.
 
@@ -56,6 +62,37 @@ const MAX_TIDY_RATIO = 3;
 
 const TIDY_ATTEMPTS = 2;
 
+// One model call over `input`, retried once when the result looks broken.
+// `allowEmpty`: a piece of a big paste can be nothing but page furniture, so
+// there an empty result is fine (the whole is checked afterwards).
+async function tidyPiece(input: string, allowEmpty: boolean): Promise<string | null> {
+  const inputLength = input.trim().length;
+  for (let attempt = 0; attempt < TIDY_ATTEMPTS; attempt++) {
+    const cleaned = await generateText({
+      system: TIDY_SYSTEM_PROMPT,
+      user: input,
+      maxTokens: Math.min(
+        MAX_TIDY_TOKENS,
+        Math.max(MIN_TIDY_TOKENS, Math.ceil(estimateTokens(input) * TIDY_OUTPUT_HEADROOM))
+      ),
+      effort: "low",
+    });
+    const trimmed = cleaned.trim();
+
+    if (
+      inputLength &&
+      ((!allowEmpty && trimmed.length < inputLength * MIN_TIDY_RATIO) || trimmed.length > inputLength * MAX_TIDY_RATIO)
+    ) {
+      continue; // Retry once, silently — see MIN/MAX_TIDY_RATIO's comment.
+    }
+    return trimmed;
+  }
+  return null;
+}
+
+const BROKEN_RESULT_MESSAGE =
+  "Tidying returned a broken result twice in a row, so your original text was left unchanged — try again, or check the AI backend in Settings.";
+
 export async function tidyPastedText(text: string): Promise<string> {
   // Embedded images (see the "Paste text" dialog's image support) are data
   // URLs — huge, and not something an AI text call needs to see — swapped
@@ -64,26 +101,17 @@ export async function tidyPastedText(text: string): Promise<string> {
   const { text: stripped, images } = stripEmbeddedImages(text);
   const inputLength = stripped.trim().length;
 
-  for (let attempt = 0; attempt < TIDY_ATTEMPTS; attempt++) {
-    const cleaned = await generateText({
-      system: TIDY_SYSTEM_PROMPT,
-      user: stripped,
-      maxTokens: Math.min(MAX_TIDY_TOKENS, Math.max(MIN_TIDY_TOKENS, estimateTokens(stripped))),
-      effort: "low",
-    });
-    const trimmed = cleaned.trim();
-
-    if (
-      inputLength &&
-      (trimmed.length < inputLength * MIN_TIDY_RATIO || trimmed.length > inputLength * MAX_TIDY_RATIO)
-    ) {
-      continue; // Retry once, silently — see MIN/MAX_TIDY_RATIO's comment.
-    }
-    return restoreEmbeddedImages(trimmed, images);
+  const pieces = estimateTokens(stripped) > TIDY_CHUNK_TOKENS ? chunkText(stripped, TIDY_CHUNK_TOKENS) : [stripped];
+  const cleaned: string[] = [];
+  for (const piece of pieces) {
+    const result = await tidyPiece(piece, pieces.length > 1);
+    if (result === null) throw new Error(BROKEN_RESULT_MESSAGE);
+    if (result) cleaned.push(result);
   }
-
-  // Every attempt came back broken.
-  throw new Error(
-    "Tidying returned a broken result twice in a row, so your original text was left unchanged — try again, or check the AI backend in Settings."
-  );
+  const joined = cleaned.join("\n\n");
+  // For a paste cleaned in pieces, the floor applies to the whole.
+  if (pieces.length > 1 && inputLength && joined.length < inputLength * MIN_TIDY_RATIO) {
+    throw new Error(BROKEN_RESULT_MESSAGE);
+  }
+  return restoreEmbeddedImages(joined, images);
 }

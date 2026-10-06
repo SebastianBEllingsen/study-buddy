@@ -1,4 +1,5 @@
 import { deleteChatConversation, getChatConversation, getCourse, setChatConversationCourse } from "@/lib/models";
+import { failInterruptedActions } from "@/lib/chat";
 import { parseId } from "@/lib/routeParams";
 
 type Params = { params: Promise<{ id: string }> };
@@ -9,7 +10,7 @@ export async function GET(_request: Request, { params }: Params) {
   if (id === null) return Response.json({ error: "Conversation not found" }, { status: 404 });
   const detail = await getChatConversation(id);
   if (!detail) return Response.json({ error: "Conversation not found" }, { status: 404 });
-  return Response.json(detail);
+  return Response.json({ ...detail, messages: await failInterruptedActions(detail.messages) });
 }
 
 // Scopes (or unscopes) a conversation to a course — see

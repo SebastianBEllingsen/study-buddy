@@ -131,6 +131,17 @@ export function textDeltaFromStreamLine(line: string): string {
   }
 }
 
+// True for the stream event that says the reply stopped at the token limit.
+export function hitMaxTokens(line: string): boolean {
+  if (!line.startsWith("{")) return false;
+  try {
+    const event = JSON.parse(line);
+    return event.type === "stream_event" && event.event?.delta?.stop_reason === "max_tokens";
+  } catch {
+    return false;
+  }
+}
+
 // The final `result` event of a stream-json run — same shape as the single
 // object --output-format json prints.
 export function lastStreamResult(stdout: string): ClaudeResult {
@@ -162,6 +173,7 @@ async function runClaude(params: {
   // Switches to --output-format stream-json and calls this with each piece
   // of the reply's text as the CLI writes it.
   onDelta?: (text: string) => void;
+  onTruncated?: () => void;
 }): Promise<ClaudeResult> {
   // Only pay for materializing a workspace when trusted mode is on AND
   // there's actually something to put in it — otherwise cwd stays
@@ -213,6 +225,7 @@ async function runClaude(params: {
       for (const line of lines) {
         const text = textDeltaFromStreamLine(line);
         if (text) params.onDelta?.(text);
+        else if (hitMaxTokens(line)) params.onTruncated?.();
       }
     }
 
@@ -321,6 +334,7 @@ export async function streamText(params: GenerateTextParams, onDelta: (text: str
     workspaceScope: params.workspaceScope,
     images: params.images,
     onDelta,
+    onTruncated: params.onTruncated,
   });
   if (result.is_error) {
     throw new Error(result.result || `claude -p failed (${result.subtype})`);

@@ -71,12 +71,17 @@ function scorePassages(passages: Passage[], queryTerms: string[]): number[] {
   const avgLength = passages.reduce((sum, p) => sum + p.length, 0) / Math.max(n, 1) || 1;
   const k1 = 1.4;
   const b = 0.75;
+  // How many passages hold each query term — counted once, not per passage.
+  const uniqueTerms = [...new Set(queryTerms)];
+  const docFrequency = new Map(
+    uniqueTerms.map((term) => [term, passages.reduce((c, q) => c + (q.terms.has(term) ? 1 : 0), 0)])
+  );
   return passages.map((p) => {
     let score = 0;
-    for (const term of new Set(queryTerms)) {
+    for (const term of uniqueTerms) {
       const tf = p.terms.get(term);
       if (!tf) continue;
-      const df = passages.reduce((c, q) => c + (q.terms.has(term) ? 1 : 0), 0);
+      const df = docFrequency.get(term) ?? 0;
       const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5));
       score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * p.length) / avgLength)));
     }

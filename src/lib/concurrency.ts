@@ -15,11 +15,19 @@ export async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
+  // Once any call fails the batch is failed anyway, so the other workers
+  // stop picking up new items instead of running (and billing) the rest.
+  let failed = false;
 
   async function worker() {
-    while (next < items.length) {
+    while (!failed && next < items.length) {
       const index = next++;
-      results[index] = await fn(items[index], index);
+      try {
+        results[index] = await fn(items[index], index);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     }
   }
 
