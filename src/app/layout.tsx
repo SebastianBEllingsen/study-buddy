@@ -40,6 +40,7 @@ import PomodoroProvider from "@/components/pomodoro/PomodoroProvider";
 import PomodoroButton from "@/components/pomodoro/PomodoroButton";
 import { TodayWatcher } from "@/components/today/TodayWatcher";
 import { SyncIndicator } from "@/components/SyncIndicator";
+import { StorageFallbackBanner } from "@/components/StorageFallbackBanner";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { getAppSettings } from "@/lib/models";
@@ -265,6 +266,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   </div>
                 </div>
               </header>
+              <StorageFallbackBanner />
               <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
                 <SWRCacheGate>{children}</SWRCacheGate>
               </main>
