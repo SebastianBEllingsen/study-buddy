@@ -143,12 +143,12 @@ export function todayUrl(courseId: number | null, minutes?: number, chapterIds: 
 // it (a chapter's quiz, say) appears without waiting for the tab to be
 // refocused. Only one mounted instance should ask for that.
 export function useTodaySync(session: TodaySession | null, options: { refreshOnProgress?: boolean } = {}) {
-  const { data, mutate } = useSWR<{ steps: TodayStep[] }>(session ? todayUrl(session.courseId, 480, session.chapterIds) : null, {
+  const { data, mutate } = useSWR<{ steps: TodayStep[]; doneSessions?: { planId: number; sessionId: number }[] }>(session ? todayUrl(session.courseId, 480, session.chapterIds) : null, {
     revalidateOnFocus: true,
   });
   useEffect(() => {
     if (!session || !data) return;
-    const merged = mergeFresh(session, data.steps);
+    const merged = mergeFresh(session, data.steps, data.doneSessions);
     if (merged !== session) saveTodaySession(merged);
   }, [session, data]);
 

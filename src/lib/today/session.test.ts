@@ -68,6 +68,25 @@ describe("mergeFresh", () => {
     expect(merged.steps[4].minutes).toBe(25);
   });
 
+  it("drops a chapter step whose plan session was ticked off in the plan, instead of marking it done", () => {
+    const sessionId = { planId: 1, sessionId: 40 };
+    const s = startSession({
+      date: "2026-01-05",
+      courseId: null,
+      minutes: 60,
+      now: 0,
+      steps: [step("chapter:5:resource:9", "chapter", { sessionId }), step("reviews", "reviews")],
+    });
+    const merged = mergeFresh(s, [step("reviews", "reviews")], [sessionId]);
+    expect(merged.steps.map((x) => x.id)).toEqual(["reviews"]);
+    expect(finishedPlanSessions(merged)).toEqual([]);
+  });
+
+  it("still ticks off a chapter step that's gone when its plan session wasn't ticked off", () => {
+    const merged = mergeFresh(start(), [step("mistakes", "mistakes")]);
+    expect(merged.steps.find((x) => x.id === "chapter:5:resource:9")?.status).toBe("done");
+  });
+
   it("doesn't re-add a step already in the session, and returns the same object when nothing changed", () => {
     const s = setStepStatus(start(), "reviews", "done");
     const merged = mergeFresh(s, base);

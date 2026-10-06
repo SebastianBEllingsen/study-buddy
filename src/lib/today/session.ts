@@ -62,13 +62,23 @@ const AUTO_COMPLETES = new Set(["reviews", "mistakes", "chapter", "exam"]);
 
 // `fresh` is the server's current plan, fetched without a time limit so
 // nothing is missing just for lack of minutes.
-export function mergeFresh(session: TodaySession, fresh: TodayStep[]): TodaySession {
+export function mergeFresh(
+  session: TodaySession,
+  fresh: TodayStep[],
+  doneSessions: { planId: number; sessionId: number }[] = []
+): TodaySession {
   const freshById = new Map(fresh.map((s) => [s.id, s]));
-  let steps: SessionStep[] = session.steps.map((step) => {
-    if (step.status !== "pending") return step;
+  // A chapter step whose plan session was ticked off in the plan itself was
+  // not done here, so it leaves the session rather than counting as today's work.
+  const ticked = new Set(doneSessions.map((d) => `${d.planId}:${d.sessionId}`));
+  const droppedExternally = (step: SessionStep) =>
+    step.kind === "chapter" && !!step.sessionId && ticked.has(`${step.sessionId.planId}:${step.sessionId.sessionId}`);
+  let steps: SessionStep[] = session.steps.flatMap((step): SessionStep[] => {
+    if (step.status !== "pending") return [step];
     const update = freshById.get(step.id);
-    if (update) return { ...update, minutes: step.minutes, status: "pending" };
-    return AUTO_COMPLETES.has(step.kind) ? { ...step, status: "done" } : step;
+    if (update) return [{ ...update, minutes: step.minutes, status: "pending" }];
+    if (droppedExternally(step)) return [];
+    return [AUTO_COMPLETES.has(step.kind) ? { ...step, status: "done" } : step];
   });
 
   const groups = new Set(session.steps.map(stepGroup));

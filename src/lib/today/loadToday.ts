@@ -173,6 +173,9 @@ export interface TodayPlan {
   // Where each course stands, for picking any subject up: every course when
   // Today covers them all, empty when narrowed to one.
   courses: CourseStudyRow[];
+  // Today's plan sessions already ticked off in their plan, so a running
+  // Today session can tell those from work it did itself.
+  doneSessions: { planId: number; sessionId: number }[];
 }
 
 export async function loadToday(options: {
@@ -267,5 +270,10 @@ export async function loadToday(options: {
     date: today,
     chapters: openChapters(plans, courseNames),
     courses: courseId === null ? buildCourseRows({ courses, readyPlans: plans, planStatuses, now }) : [],
+    doneSessions: plans.flatMap((plan) =>
+      plan.options.schedule
+        ? plan.sessions.filter((x) => x.date === today && x.done_at).map((x) => ({ planId: plan.id, sessionId: x.id }))
+        : []
+    ),
   };
 }
