@@ -6,17 +6,22 @@
 //  1. due reviews — spaced retrieval is the highest-value minute there is
 //  2. mistakes you were sure about — confident errors are the ones that stick
 //  3. a mock exam, when exam mode says one is due (lib/readiness/examMode.ts)
-//  4. the next step of up to a few plan chapters, most urgent first (nearest
-//     deadline, then weakest) and mixed across courses; they share the time
+//  4. the next step of up to a few plan chapters, most urgent first (plans
+//     set to "every day" or short of their days-a-week target first, then the
+//     nearest deadline, then weakest) and mixed across courses; they share the time
 //     left between them (none in an exam's final days). A course with nothing
 //     left to learn brings its weakest finished chapter back for revision
 //     (lib/today/revision.ts), after new learning, and exam days keep it
-//  5. one weak concept, if time is left — two in exam mode, for more
-//     mixed practice
+//  5. daily coding practice, on a programming plan: write code for the
+//     current chapter (reading about code is not writing it)
+//  6. one weak concept, if time is left — two in exam mode, for more
+//     mixed practice. A weak concept from code exercises comes back as a
+//     fresh exercise to write, not a question to answer.
 
+import { PROJECT_LANGUAGES, type CodeLanguage } from "../code/types";
 import { REVISION_FRESH_QUIZ_SCORE } from "./revision";
 
-export type TodayStepKind = "reviews" | "mistakes" | "exam" | "chapter" | "concept";
+export type TodayStepKind = "reviews" | "mistakes" | "exam" | "chapter" | "concept" | "code";
 
 // What "Done" on a step records on the server (lib/today/complete.ts).
 export type StepCompletion =
@@ -72,6 +77,14 @@ export interface ChapterCandidate {
   // A finished chapter coming back for revision (see revision.ts): a test, not
   // new material, so it still counts in an exam's final days.
   revision?: boolean;
+  // Why this plan must get a chapter step today, from its Today frequency
+  // setting (lib/today/cadence.ts): "your every-day plan", "1 of 3 study days
+  // in the last week". Such chapters come before everything else.
+  must?: string;
+  // On a programming plan: the language, and the chapter's code set with
+  // exercises still to do (null when there isn't one yet — opening the step
+  // writes one).
+  code?: { language: CodeLanguage; setId: number | null };
 }
 
 export interface WeakConcept {
@@ -79,6 +92,9 @@ export interface WeakConcept {
   courseName: string;
   name: string;
   recall: number;
+  // Set when the concept comes from code exercises: it's practised by
+  // writing code again, in this language.
+  codeLanguage?: CodeLanguage;
 }
 
 export interface MockExamDue {
@@ -102,19 +118,30 @@ export interface TodayInput {
   maxChapterSteps?: number;
 }
 
-// Rough minutes per item, for fitting steps into the budget.
-export const MINUTES_PER = { card: 0.25, newCard: 0.5, question: 1, mistake: 1.5 };
+// Rough minutes per item, for fitting steps into the budget. A quiz
+// question is a typed answer plus reading the feedback, so it takes longer
+// than flipping a card.
+export const MINUTES_PER = { card: 0.25, newCard: 0.5, question: 1.5, mistake: 1.5 };
+// A review session asks again what you miss (a few items later, until it's
+// right), so it runs longer than its item count: about one item in four.
+export const REASK_ALLOWANCE = 1.25;
 export const MAX_MISTAKE_MINUTES = 15;
 export const DEFAULT_CHAPTER_STEP_MINUTES = 25;
 export const MIN_CHAPTER_STEP_MINUTES = 10;
 export const CONCEPT_MINUTES = 10;
 export const MIN_CONCEPT_MINUTES = 5;
 export const MAX_CHAPTER_STEPS = 2;
+// Plans that must get a step today can take this many slots, even past the usual limit.
+export const MAX_MUST_STEPS = 3;
 // With this many minutes to spend, a third chapter is worth mixing in.
 export const THREE_CHAPTER_MINUTES = 90;
 // Chapters don't take the last minutes a weak concept needs, once there's
 // time for both.
 export const CONCEPT_RESERVE_FROM_MINUTES = 40;
+export const CODE_MINUTES = 20;
+export const MIN_CODE_MINUTES = 10;
+// With this many minutes to spend, coding practice keeps its slot before chapters take the rest.
+export const CODE_RESERVE_FROM_MINUTES = 40;
 export const MIN_MOCK_EXAM_MINUTES = 30;
 
 const RESOURCE_VERBS: Record<string, string> = {
@@ -140,6 +167,7 @@ function withCourse(href: string, courseId: number | null, extra: Record<string,
 // Why a chapter made today's list: what makes it the one to work on.
 export function chapterWhy(c: ChapterCandidate): string {
   const parts: string[] = [];
+  if (c.must) parts.push(c.must);
   if (c.revision) {
     const mastery = c.mastery !== null && c.mastery !== undefined ? ` (${Math.round(c.mastery * 100)}%)` : "";
     parts.push(`revision — your weakest finished chapter${mastery}`);
@@ -197,7 +225,8 @@ function chapterStep(c: ChapterCandidate, minutes: number): TodayStep {
   };
 }
 
-// Most urgent first: the nearest deadline (none last), then today's
+// Most urgent first: plans that must get a step today (their Today frequency
+// setting asks for one), then the nearest deadline (none last), then today's
 // scheduled sessions before unscheduled chapters, then new learning before
 // revision of finished chapters, then the course studied
 // least recently (never studied first), then the weakest chapter.
@@ -206,6 +235,7 @@ export function rankChapters(chapters: ChapterCandidate[]): ChapterCandidate[] {
     .map((c, i) => ({ c, i }))
     .sort(
       (a, b) =>
+        Number(!!b.c.must) - Number(!!a.c.must) ||
         (a.c.deadline ?? "9999-12-31").localeCompare(b.c.deadline ?? "9999-12-31") ||
         Number(!!b.c.session) - Number(!!a.c.session) ||
         Number(!!a.c.revision) - Number(!!b.c.revision) ||
@@ -214,6 +244,45 @@ export function rankChapters(chapters: ChapterCandidate[]): ChapterCandidate[] {
         a.i - b.i
     )
     .map(({ c }) => c);
+}
+
+// Daily coding practice for a chapter: its open code set, or a new one.
+function codeStep(c: ChapterCandidate, code: NonNullable<ChapterCandidate["code"]>, minutes: number): TodayStep {
+  const params = new URLSearchParams({ chapterId: String(c.chapterId), language: code.language, auto: "1" });
+  // A capstone is a project, built in milestones across files.
+  if (/capstone/i.test(c.chapterTitle) && PROJECT_LANGUAGES.includes(code.language)) params.set("project", "1");
+  return {
+    id: `code:chapter:${c.chapterId}`,
+    kind: "code",
+    title: `Write code: ${c.chapterTitle}`,
+    detail: code.setId !== null ? "Pick up your exercises where you left off" : "Fresh exercises for this chapter, written for you",
+    minutes,
+    href: code.setId !== null ? `/courses/${c.courseId}/code/${code.setId}` : `/courses/${c.courseId}/code?${params}`,
+    external: false,
+    courseName: c.courseName,
+    why: "daily coding practice — writing code, not just reading it",
+    completion: null,
+    sessionId: null,
+  };
+}
+
+// A weak concept from code exercises, practised by writing code again —
+// new exercises on it, so it's the skill being tested and not memory of
+// one solution.
+function rewriteStep(c: WeakConcept, language: CodeLanguage, minutes: number): TodayStep {
+  const params = new URLSearchParams({ topic: c.name, language, count: "2", auto: "1" });
+  return {
+    id: `code:concept:${c.courseId}:${c.name.toLowerCase()}`,
+    kind: "code",
+    title: `Write it again: ${c.name}`,
+    detail: `Your weakest coding concept — about ${Math.round(c.recall * 100)}% recall right now. New exercises, from a blank page.`,
+    minutes,
+    href: `/courses/${c.courseId}/code?${params}`,
+    external: false,
+    courseName: c.courseName,
+    completion: null,
+    sessionId: null,
+  };
 }
 
 export function planDay(input: TodayInput): TodayStep[] {
@@ -225,7 +294,10 @@ export function planDay(input: TodayInput): TodayStep[] {
   if (reviewCount > 0 && left > 0) {
     const estimate = Math.max(
       1,
-      Math.ceil(dueCards * MINUTES_PER.card + newCards * MINUTES_PER.newCard + dueQuestions * MINUTES_PER.question)
+      Math.ceil(
+        (dueCards * MINUTES_PER.card + newCards * MINUTES_PER.newCard + dueQuestions * MINUTES_PER.question) *
+          REASK_ALLOWANCE
+      )
     );
     const minutes = Math.min(estimate, left);
     left -= minutes;
@@ -288,11 +360,17 @@ export function planDay(input: TodayInput): TodayStep[] {
   // taking everything.
   const maxSteps =
     input.maxChapterSteps ?? (left >= THREE_CHAPTER_MINUTES ? MAX_CHAPTER_STEPS + 1 : MAX_CHAPTER_STEPS);
+  // Today's coding practice: the best-ranked chapter of a programming plan.
+  const codeChapter = rankChapters(input.chapters).find((c) => c.code);
+  const codeReserve = codeChapter && left >= CODE_RESERVE_FROM_MINUTES ? CODE_MINUTES : 0;
   const reserve =
-    input.weakConcepts.length > 0 && left >= CONCEPT_RESERVE_FROM_MINUTES ? CONCEPT_MINUTES : 0;
+    (input.weakConcepts.length > 0 && left >= CONCEPT_RESERVE_FROM_MINUTES ? CONCEPT_MINUTES : 0) + codeReserve;
   const available = left - reserve;
   const chosen: { candidate: ChapterCandidate; wanted: number }[] = [];
-  for (const candidate of rankChapters(input.chapters).slice(0, maxSteps)) {
+  const ranked = rankChapters(input.chapters);
+  // Plans that must get a step today keep their slots even past the usual limit.
+  const slots = input.maxChapterSteps === undefined ? Math.max(maxSteps, Math.min(ranked.filter((c) => c.must).length, MAX_MUST_STEPS)) : maxSteps;
+  for (const candidate of ranked.slice(0, slots)) {
     if ((chosen.length + 1) * MIN_CHAPTER_STEP_MINUTES > available) break;
     chosen.push({
       candidate,
@@ -310,10 +388,20 @@ export function planDay(input: TodayInput): TodayStep[] {
     steps.push(chapterStep(candidate, minutes));
   });
 
+  if (codeChapter?.code && left >= MIN_CODE_MINUTES) {
+    const minutes = Math.min(CODE_MINUTES, left);
+    left -= minutes;
+    steps.push(codeStep(codeChapter, codeChapter.code, minutes));
+  }
+
   for (const c of input.weakConcepts.slice(0, input.examMode ? 2 : 1)) {
     if (left < MIN_CONCEPT_MINUTES) break;
     const minutes = Math.min(CONCEPT_MINUTES, left);
     left -= minutes;
+    if (c.codeLanguage) {
+      steps.push(rewriteStep(c, c.codeLanguage, minutes));
+      continue;
+    }
     steps.push({
       id: `concept:${c.courseId}:${c.name.toLowerCase()}`,
       kind: "concept",

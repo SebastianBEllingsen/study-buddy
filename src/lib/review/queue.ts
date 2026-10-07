@@ -4,7 +4,7 @@ import { getAppSettings } from "../models";
 import type { FlashcardsContent, QuizContent } from "../types";
 import { ensureFsrsMigrated } from "./legacyMigration";
 import { countNewCardsIntroducedSince, listReviewItemsForItems, startOfUtcDay, type ReviewItemRow } from "./store";
-import { buildFocusQueue, buildQueue, conceptKeys, type QueueSource } from "./queueBuild";
+import { buildFocusQueue, buildQueue, conceptKeys, mistakesToRedo, type QueueSource } from "./queueBuild";
 import { listMistakes } from "./mistakes";
 import { conceptKey } from "../conceptName";
 import { itemContents } from "../itemContentCache";
@@ -93,6 +93,9 @@ export async function loadFocusQueue(options: {
   courseId?: number | null;
   concept?: string;
   limit?: number;
+  // The start of the learner's day (UTC text): mistakes answered since then are left for another day.
+  dayStart?: string;
+  now?: Date;
 }) {
   await ensureFsrsMigrated();
   const courseId = options.courseId ?? null;
@@ -100,7 +103,11 @@ export async function loadFocusQueue(options: {
   const sources = await loadQueueSources(courseId);
   let keys: string[];
   if (options.mode === "mistakes") {
-    const open = await listMistakes({ courseId, status: "open" });
+    const open = mistakesToRedo(
+      await listMistakes({ courseId, status: "open" }),
+      sources.flatMap((s) => s.reviews),
+      options.dayStart ?? startOfUtcDay(options.now ?? new Date())
+    );
     const rank = (c: string | null) => (c === "sure" ? 0 : c === "unsure" ? 1 : 2);
     keys = [...open]
       .sort((a, b) => rank(a.confidence) - rank(b.confidence))

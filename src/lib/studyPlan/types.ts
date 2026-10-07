@@ -2,6 +2,8 @@
 // constant lists) — no DB imports — so components can use them directly.
 
 import type { AiBackend } from "../models";
+import type { CodeLanguage } from "../code/types";
+import type { TodayCadence } from "../today/cadence";
 
 export type StudyPlanStatus = "draft_topics" | "generating" | "ready" | "failed";
 export type StudyPlanPreset = "roadmap" | "guided";
@@ -45,6 +47,15 @@ export interface StudyPlanOptions {
   // Weekdays to study on, 0 = Sunday … 6 = Saturday.
   studyDays: number[];
   minutesPerDay: number;
+  // How often this plan shows up in Today (see lib/today/cadence.ts); absent
+  // means "auto": courses rotate, the one studied longest ago first.
+  todayCadence?: TodayCadence;
+  // With "weekly": the study days a week to aim for.
+  todayPerWeek?: number;
+  // Set on a programming plan: Today adds a daily "write code" step for the
+  // current chapter, in this language, and brings weak code concepts back as
+  // fresh exercises. Absent on every other plan.
+  codeLanguage?: CodeLanguage | null;
   // Sessions are also added to the user's Google Calendar (only offered
   // when it's connected). Not a setup choice — toggled from the plan page.
   googleCalendar: boolean;

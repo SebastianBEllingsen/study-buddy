@@ -98,9 +98,10 @@ export const EXPLANATIONS = {
   "problems.studied": { text: "Marks the worked example as studied and moves on to the next problem." },
 
   // Code exercises
-  "course.code": { text: "Write code and run it against tests in your browser, from a warm-up to harder exercises." },
-  "code.write": { text: "Writes four exercises that build on each other, each with tests, hints and a reference solution.", ai: true },
-  "code.run": { text: "Runs your code against the tests in your browser (Ctrl+Enter), and shows any plots. Passing them all finishes the exercise." },
+  "course.code": { text: "Write code and run it against tests. Also find bugs, refactor, predict output and read code." },
+  "code.write": { text: "Writes exercises that build on each other: writing, bug-finding, refactoring, predicting and reading code.", ai: true },
+  "code.run": { text: "Runs your code against the tests (Ctrl+Enter). C++ is compiled here, sandboxed, with memory checks. Passing all finishes it." },
+  "code.review": { text: "An AI review of your working code: edge cases, clarity, improvements. A real problem goes into your mistakes.", ai: true },
   "code.hint": { text: "Shows the next hint. Finishing with hints counts as less secure in your reviews." },
   "code.reveal": { text: "Shows the reference solution. Before you've passed, it counts as not solved in your reviews." },
   "code.reset": { text: "Puts the starter code back. Your current code is replaced." },

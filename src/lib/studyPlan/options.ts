@@ -1,3 +1,5 @@
+import { isCodeLanguage } from "../code/types";
+import { isTodayCadence, perWeekOf } from "../today/cadence";
 import type { ResourceDensity, StudyPlanOptions, StudyPlanPreset } from "./types";
 
 // Parses the plan-setup options a request (or a stored options_json)
@@ -85,6 +87,10 @@ export function parseStudyPlanOptions(value: unknown): StudyPlanOptions {
         ? (v.minutesPerDay as number)
         : d.minutesPerDay,
     googleCalendar: bool("googleCalendar", false),
+    ...(isCodeLanguage(v.codeLanguage) && { codeLanguage: v.codeLanguage }),
+    // "auto" is the default, so it isn't stored; the weekly target only matters with "weekly".
+    ...(isTodayCadence(v.todayCadence) && v.todayCadence !== "auto" && { todayCadence: v.todayCadence }),
+    ...(v.todayCadence === "weekly" && { todayPerWeek: perWeekOf({ todayPerWeek: v.todayPerWeek as number }) }),
   };
 }
 

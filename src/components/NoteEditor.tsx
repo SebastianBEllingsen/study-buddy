@@ -189,11 +189,14 @@ class WikiNameLinkWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const resolved = resolveWikiLink(this.match, this.targets, this.linkContext?.noteId);
+    const resolved = resolveWikiLink(this.match, this.targets, this.linkContext?.noteId, this.linkContext?.courseId);
     const span = document.createElement("span");
     span.className = `cm-wikilink${resolved.missing ? " cm-wikilink-missing" : ""}`;
-    span.title = resolved.missing
+    const creatable = resolved.missing && !this.match.course;
+    span.title = creatable
       ? `"${this.match.target}" doesn't exist yet — Ctrl/Cmd-click to create it`
+      : resolved.missing
+      ? `No note "${this.match.target}" in course "${this.match.course}"`
       : "Click to edit — Ctrl/Cmd-click to open";
 
     const icon = document.createElement("span");
@@ -210,7 +213,7 @@ class WikiNameLinkWidget extends WidgetType {
       e.preventDefault();
       if (resolved.href === null) {
         const context = this.linkContext;
-        if (!context) return;
+        if (!context || this.match.course) return;
         void createNoteFromLink(this.match.target, context).then((id) => {
           if (id !== null) this.onNavigate(`/vault/${id}`);
         });

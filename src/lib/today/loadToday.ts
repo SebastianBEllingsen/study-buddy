@@ -1,3 +1,4 @@
+import { listCodeSets } from "../code/store";
 import { listCourseNames } from "../models";
 import { localToday, missedSessions } from "../studyPlan/schedule";
 import { reschedulePlan } from "../studyPlan/scheduleService";
@@ -5,12 +6,17 @@ import { getStudyPlan, listReadyStudyPlans, listPlanStatuses } from "../studyPla
 import { chapterIsComplete, chapterIsPassed, nextChapter } from "../studyPlanDisplay";
 import type { StudyPlan } from "../studyPlan/types";
 import { summarizeKnowledge } from "../review/knowledgeSummary";
+import type { CodeLanguage } from "../code/types";
 import { listMistakes } from "../review/mistakes";
 import { loadQueueSources, loadReviewQueue } from "../review/queue";
+import { mistakesToRedo } from "../review/queueBuild";
+import { startOfUtcDay } from "../review/store";
 import { ensureFsrsMigrated } from "../review/legacyMigration";
 import { getExamProfile } from "../exams/store";
 import { SKILL_CHECK_MINUTES } from "../exams/topicProfile";
 import { loadCoursesExamInfo } from "../readiness/load";
+import { activeDaysByCourse } from "./activity";
+import { cadenceStatus, type CadenceStatus } from "./cadence";
 import { buildCourseRows, lastStudiedAt, type CourseStudyRow } from "./courseOverview";
 import { revisionChapter } from "./revision";
 import {
@@ -100,11 +106,19 @@ export function chapterCandidates(
   plans: StudyPlan[],
   courseNames: Map<number, string>,
   today: string,
-  only?: ReadonlySet<number>
+  only?: ReadonlySet<number>,
+  // Per chapter, its code set with exercises left (programming plans only).
+  openCodeSets: ReadonlyMap<number, number> = new Map(),
+  // Per plan, what its Today frequency setting asks for today.
+  cadences: ReadonlyMap<number, CadenceStatus> = new Map()
 ): ChapterCandidate[] {
   const scheduled: ChapterCandidate[] = [];
   const open: ChapterCandidate[] = [];
   for (const plan of plans) {
+    const cadence = cadences.get(plan.id);
+    // A plan set to "every other day" rests the day after you studied it —
+    // unless chapters were picked by hand, which is always honoured.
+    if (cadence?.skip && !only) continue;
     const courseName = courseNames.get(plan.course_id) ?? plan.title;
     const deadline = plan.options.deadline;
     const daysLeft = deadline ? Math.round((Date.parse(deadline) - Date.parse(today)) / 86_400_000) : null;
@@ -128,6 +142,10 @@ export function chapterCandidates(
       awaitingCheck: chapterIsComplete(chapter) && !chapterIsPassed(chapter),
       session: session ? { id: session.id, minutes: session.minutes } : null,
       ...(revision ? { revision: true } : {}),
+      ...(cadence?.must ? { must: cadence.must } : {}),
+      ...(plan.options.codeLanguage
+        ? { code: { language: plan.options.codeLanguage, setId: openCodeSets.get(chapter.id) ?? null } }
+        : {}),
       next: nextChapterStep(chapter, (!!session && session.kind !== "study") || chapterIsComplete(chapter), {
         pretest: plan.options.diagnostic,
         revision,
@@ -201,6 +219,12 @@ export async function loadToday(options: {
     sourcesLoad,
     courseId === null ? listPlanStatuses() : Promise.resolve([]),
   ]);
+  // Mistakes answered today were just corrected in that session: they wait for another day.
+  const redo = mistakesToRedo(
+    mistakes,
+    sources.flatMap((s) => s.reviews),
+    options.dayStart ?? startOfUtcDay(now)
+  );
   const courseNames = new Map(courses.map((c) => [c.id, c.name]));
   const plans = await Promise.all(
     allPlans.filter((p) => courseId === null || p.course_id === courseId).map((p) => absorbMissedDays(p, today))
@@ -218,7 +242,40 @@ export async function loadToday(options: {
   );
   // A picked chapter is studied even in an exam's final days: it was asked for.
   const picked = options.chapterIds?.length ? new Set(options.chapterIds) : undefined;
-  const chapters = chapterCandidates(plans, courseNames, today, picked).filter(
+  // Programming plans: each chapter's unfinished code set, and which concept
+  // names come from code exercises (so a weak one is practised by writing).
+  const openCodeSets = new Map<number, number>();
+  const codeConcepts = new Map<number, { language: CodeLanguage; names: Set<string> }>();
+  await Promise.all(
+    plans.map(async (plan) => {
+      const language = plan.options.codeLanguage;
+      if (!language) return;
+      const names = new Set<string>();
+      for (const set of await listCodeSets(plan.course_id)) {
+        for (const e of set.exercises) if (e.concept) names.add(e.concept.toLowerCase());
+        const unfinished = set.progress.some((p) => !p.done);
+        // Newest first, so the first set seen for a chapter is the newest.
+        if (unfinished && set.chapter_id !== null && !openCodeSets.has(set.chapter_id)) {
+          openCodeSets.set(set.chapter_id, set.id);
+        }
+      }
+      codeConcepts.set(plan.course_id, { language, names });
+    })
+  );
+  // Plans with their own Today frequency: what it asks for today, from the
+  // days with activity in each plan's course. It shapes the mixed view of all
+  // courses; opening Today for one course is asking to study it, so there it
+  // never rests or jumps the queue.
+  const cadences = new Map<number, CadenceStatus>();
+  const withCadence = courseId === null ? plans.filter((p) => (p.options.todayCadence ?? "auto") !== "auto") : [];
+  // A paused plan doesn't need to know what you did lately.
+  const needsActivity = withCadence.filter((p) => p.options.todayCadence !== "off");
+  if (withCadence.length > 0) {
+    const activity = await activeDaysByCourse([...new Set(needsActivity.map((p) => p.course_id))], now);
+    for (const plan of withCadence) cadences.set(plan.id, cadenceStatus(plan.options, activity.get(plan.course_id) ?? new Set(), today));
+  }
+  const pausedCourses = new Set(withCadence.filter((p) => p.options.todayCadence === "off").map((p) => p.course_id));
+  const chapters = chapterCandidates(plans, courseNames, today, picked, openCodeSets, cadences).filter(
     (c) => picked || c.revision || !examInfo.get(c.courseId)?.mode.noNewMaterial
   );
   const mockExams: MockExamDue[] = [...examInfo]
@@ -242,9 +299,18 @@ export async function loadToday(options: {
       chapterByConcept: new Map(),
       openMistakesByConcept: new Map(),
     });
+    // A paused course gets no practice steps either (only in the mixed view).
+    if (pausedCourses.has(cid)) continue;
     for (const c of concepts) {
       if (c.reviewed < MIN_REVIEWED_FOR_WEAK || c.recall >= WEAK_RECALL) continue;
-      weak.push({ courseId: cid, courseName: courseNames.get(cid) ?? "", name: c.name, recall: c.recall });
+      const code = codeConcepts.get(cid);
+      weak.push({
+        courseId: cid,
+        courseName: courseNames.get(cid) ?? "",
+        name: c.name,
+        recall: c.recall,
+        ...(code?.names.has(c.name.toLowerCase()) ? { codeLanguage: code.language } : {}),
+      });
     }
   }
 
@@ -257,7 +323,7 @@ export async function loadToday(options: {
     minutes,
     courseId,
     reviews: queue.counts,
-    mistakes: { sure: mistakes.filter((m) => m.confidence === "sure").length, total: mistakes.length },
+    mistakes: { sure: redo.filter((m) => m.confidence === "sure").length, total: redo.length },
     mockExams,
     chapters,
     weakConcepts: weak.sort((a, b) => a.recall - b.recall),

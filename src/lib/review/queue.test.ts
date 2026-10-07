@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFocusQueue, buildQueue, conceptKeys, interleave, questionForQueue, type QueueSource } from "./queueBuild";
+import { buildFocusQueue, buildQueue, conceptKeys, interleave, mistakesToRedo, questionForQueue, type QueueSource } from "./queueBuild";
 import type { QueueReview } from "./queueBuild";
 
 const NOW = new Date("2026-03-02T10:00:00Z");
@@ -246,3 +246,41 @@ describe("buildQueue — reverse decks", () => {
     expect(buildQueue([source], opts).entries).toEqual([]);
   });
 });
+
+describe("mistakesToRedo", () => {
+  const mistake = (item: number, index: number, kind = "question") => ({ generated_item_id: item, kind, item_index: index });
+  const review = (item: number, index: number, last: string | null, kind = "question") => ({
+    generated_item_id: item,
+    kind,
+    item_index: index,
+    last_reviewed_at: last,
+  });
+  const DAY = "2026-10-07 22:00:00";
+
+  it("leaves out mistakes whose item was answered since the day began", () => {
+    const open = [mistake(1, 0), mistake(1, 1), mistake(2, 0)];
+    const reviews = [
+      review(1, 0, "2026-10-08 08:30:00"), // answered today: corrected and re-asked already
+      review(1, 1, "2026-10-07 09:00:00"), // answered yesterday
+      review(2, 0, null), // never reviewed
+    ];
+    expect(mistakesToRedo(open, reviews, DAY)).toEqual([mistake(1, 1), mistake(2, 0)]);
+  });
+
+  it("matches on the item, its kind and its index, not the index alone", () => {
+    const open = [mistake(1, 0, "question"), mistake(1, 0, "card"), mistake(2, 0, "question")];
+    const reviews = [review(1, 0, "2026-10-08 08:30:00", "card"), review(3, 0, "2026-10-08 08:30:00", "question")];
+    expect(mistakesToRedo(open, reviews, DAY)).toEqual([mistake(1, 0, "question"), mistake(2, 0, "question")]);
+  });
+
+  it("changes nothing when nothing was answered today, and keeps the order", () => {
+    const open = [mistake(3, 2), mistake(1, 0), mistake(2, 1)];
+    expect(mistakesToRedo(open, [], DAY)).toEqual(open);
+    expect(mistakesToRedo([], [review(1, 0, "2026-10-08 08:30:00")], DAY)).toEqual([]);
+  });
+
+  it("counts an answer at the very start of the day as today", () => {
+    expect(mistakesToRedo([mistake(1, 0)], [review(1, 0, DAY)], DAY)).toEqual([]);
+  });
+});
+

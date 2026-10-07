@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   try {
     const { courseId, dayStart, limit, mode, concept } = parseQueueParams(new URL(request.url));
     if (mode !== "due") {
-      return Response.json(await loadFocusQueue({ mode, courseId, concept: concept ?? undefined, limit }));
+      return Response.json(await loadFocusQueue({ mode, courseId, concept: concept ?? undefined, limit, dayStart }));
     }
     return Response.json(await loadReviewQueue({ courseId, dayStart, limit }));
   } catch (err) {

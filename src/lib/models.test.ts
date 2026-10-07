@@ -35,6 +35,7 @@ const {
   getNote,
   moveNote,
   updateNoteMarkdown,
+  renameNote,
   getNoteBacklinks,
   createGeneratedItem,
   getGeneratedItem,
@@ -546,6 +547,28 @@ describe("getNoteBacklinks", () => {
       [byName.id, "Plan → [[custom pcb]]"],
       [byName.id, "Later: [[Custom PCB#Stage|stage]]"],
     ]);
+  });
+
+  it("allows the same title in different courses but not within one", async () => {
+    const a = await createCourse("A");
+    const b = await createCourse("B");
+    await createNote("Summary", a.id);
+    await createNote("summary", b.id);
+    await expect(createNote("SUMMARY", a.id)).rejects.toThrow("already exists");
+    const other = await createNote("Other", b.id);
+    await expect(renameNote(other.id, "Summary")).rejects.toThrow("already exists");
+  });
+
+  it("resolves bare titles to the same course and Course::Title to the named one", async () => {
+    const a = await createCourse("Algebra");
+    const b = await createCourse("Physics");
+    const inA = await createNote("Summary", a.id);
+    const inB = await createNote("Summary", b.id);
+    const fromA = await createNote("From A", a.id, null, "[[Summary]] and [[Physics::Summary]]");
+    const backlinksA = await getNoteBacklinks(inA.id);
+    const backlinksB = await getNoteBacklinks(inB.id);
+    expect(backlinksA.map((x) => [x.noteId, x.context])).toEqual([[fromA.id, "[[Summary]] and [[Physics::Summary]]"]]);
+    expect(backlinksB.map((x) => x.noteId)).toEqual([fromA.id]);
   });
 
   it("doesn't count a note's own self-links", async () => {

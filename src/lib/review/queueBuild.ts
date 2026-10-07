@@ -295,3 +295,22 @@ export function conceptKeys(sources: QueueSource[], conceptKey: string): string[
   }
   return found.sort((a, b) => a.last.localeCompare(b.last)).map((f) => f.key);
 }
+
+// The open mistakes worth redoing now: not the ones answered since the
+// learner's day began. A miss from a review session or quiz today has just
+// been corrected and re-asked in that session; asking it again within the
+// same day tests short-term memory, and retesting on a later day is what
+// makes the answer stick (a mistake needs correct answers on later days to
+// resolve anyway). `dayStart` is UTC text, like the reviews' timestamps.
+export function mistakesToRedo<M extends { generated_item_id: number; kind: string; item_index: number }>(
+  open: M[],
+  reviews: { generated_item_id: number; kind: string; item_index: number; last_reviewed_at: string | null }[],
+  dayStart: string
+): M[] {
+  const answeredToday = new Set(
+    reviews
+      .filter((r) => r.last_reviewed_at !== null && r.last_reviewed_at >= dayStart)
+      .map((r) => `${r.generated_item_id}:${r.kind}:${r.item_index}`)
+  );
+  return open.filter((m) => !answeredToday.has(`${m.generated_item_id}:${m.kind}:${m.item_index}`));
+}

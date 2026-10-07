@@ -175,7 +175,8 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
 -- per-course, but linking isn't. Backlinks are computed at read time by
 -- scanning every note's markdown rather than maintained in a separate links
 -- table — cheap at personal-vault scale and never goes stale on an edit.
--- Title uniqueness (so a [[wikilink]] unambiguously resolves to one note) is
+-- Title uniqueness within a course (so [[Title]] resolves to one note per
+-- course, and [[Course::Title]] to exactly one) is
 -- enforced case-insensitively in application code (see models.ts), not by a
 -- DB constraint here — SQLite's COLLATE NOCASE and Postgres's lower()
 -- indexes aren't expressible identically across both schema files, and a

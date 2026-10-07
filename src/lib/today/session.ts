@@ -50,14 +50,14 @@ export function startSession(input: {
 // resource of a chapter brings up that chapter's next step.
 export function stepGroup(step: TodayStep): string {
   if (step.kind === "chapter") return step.id.split(":").slice(0, 2).join(":");
-  if (step.kind === "concept") return step.id;
+  if (step.kind === "concept" || step.kind === "code") return step.id;
   return step.kind;
 }
 
 // Kinds whose disappearance from a fresh plan means the work is done (no
 // reviews left, no confident mistakes left, that resource/subtopic
-// ticked off). A concept can drop out for other reasons, so it never
-// auto-completes.
+// ticked off). A concept or coding step can drop out for other reasons, so
+// it never auto-completes.
 const AUTO_COMPLETES = new Set(["reviews", "mistakes", "chapter", "exam"]);
 
 // `fresh` is the server's current plan, fetched without a time limit so

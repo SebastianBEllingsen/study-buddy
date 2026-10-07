@@ -1,4 +1,4 @@
-import type { CodeLanguage, CodeTest, RunResult, TestOutcome } from "./types";
+import { runsOnServer, type CodeLanguage, type CodeTest, type ProjectFile, type RunResult, type TestOutcome } from "./types";
 import { PYODIDE_URL, workerSource } from "./workerSource";
 
 // Runs code and tests in the browser, never on the server.
@@ -155,7 +155,28 @@ function timeOut(id: number) {
   );
 }
 
-export async function runTests(language: CodeLanguage, code: string, tests: CodeTest[]): Promise<RunResult> {
+// C++ and SQL don't run in the browser: they're compiled / run by this
+// computer's own g++ and sqlite3, in a sandbox, through the app's API.
+const SERVER_REQUEST_TIMEOUT_MS = 90_000;
+
+async function runOnServer(language: CodeLanguage, code: string, tests: CodeTest[], setup: string, files?: ProjectFile[]): Promise<RunResult> {
+  try {
+    const response = await fetch("/api/code/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language, code, setup, ...(files && { files }), tests: tests.map(({ name, code }) => ({ name, code })) }),
+      signal: AbortSignal.timeout(SERVER_REQUEST_TIMEOUT_MS),
+    });
+    const body = (await response.json().catch(() => null)) as { result?: RunResult; error?: string } | null;
+    if (!response.ok || !body?.result) return failed(body?.error ?? "The code couldn't be run.", tests);
+    return body.result;
+  } catch {
+    return failed("The code couldn't be run — is the app still running?", tests);
+  }
+}
+
+export async function runTests(language: CodeLanguage, code: string, tests: CodeTest[], setup = "", files?: ProjectFile[]): Promise<RunResult> {
+  if (runsOnServer(language)) return runOnServer(language, code, tests, setup, files);
   if (typeof window === "undefined" || typeof Worker === "undefined") return failed("Code can't run here.", tests);
   await ensureFrame();
   const id = nextId++;

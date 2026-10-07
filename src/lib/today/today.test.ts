@@ -16,6 +16,7 @@ const { localToday } = await import("../studyPlan/schedule");
 const { loadToday, chapterCandidates, openChapters } = await import("./loadToday");
 const { completeStep, parseCompletion, actualMinutes } = await import("./complete");
 const { recordQuizAnswers } = await import("../review/answers");
+const { loadFocusQueue } = await import("../review/queue");
 const { setExamDate } = await import("../readiness/load");
 const { saveExamProfile } = await import("../exams/store");
 
@@ -112,6 +113,46 @@ describe("loadToday", () => {
       title: "Watch: Intro lecture",
       completion: { type: "resource", planId: plan.id, resourceId: plan.chapters[0].resources[0].id },
     });
+  });
+
+  it("leaves a mistake made today for another day, in the plan and in the session it opens", async () => {
+    const course = await createCourse("Mistakes course");
+    await makePlan(course.id);
+    const question = { type: "mcq" as const, question: "Q", options: ["a", "b"], correctIndex: 0, explanation: "e" };
+    const quiz = await createGeneratedItem({
+      courseId: course.id,
+      folderId: null,
+      sourceFolderId: null,
+      sourceHandpicked: false,
+      mode: "quiz",
+      title: "Two questions",
+      contentJson: { questions: [question, question] },
+      sourceDocumentIds: [],
+    });
+    const miss = (index: number, now: Date) =>
+      recordQuizAnswers({
+        item: quiz,
+        source: "quiz",
+        now,
+        entries: [
+          { question, answer: 1, confidence: "sure", result: { index, type: "mcq", correct: false, feedback: "", explanation: "e", correctAnswer: "a" } },
+        ],
+      });
+    // Question 0 was missed days ago; question 1 just now, in today's review.
+    await miss(0, new Date(Date.now() - 5 * 86_400_000));
+    await miss(1, new Date());
+    const dayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString().slice(0, 19).replace("T", " ");
+
+    const today = await loadToday({ courseId: course.id, minutes: 60, dayStart });
+    const step = today.steps.find((s) => s.kind === "mistakes");
+    expect(step?.title).toBe("Redo 1 answer you were sure about");
+
+    const session = await loadFocusQueue({ mode: "mistakes", courseId: course.id, dayStart });
+    expect(session.entries.map((e) => e.index)).toEqual([0]);
+
+    // On a day when neither had been answered yet, both would be asked.
+    const unfiltered = await loadFocusQueue({ mode: "mistakes", courseId: course.id, dayStart: "2100-01-01 00:00:00" });
+    expect(unfiltered.entries.map((e) => e.index).sort()).toEqual([0, 1]);
   });
 
   it("absorbs missed scheduled days by rebuilding the schedule from today", async () => {

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { CalendarDays, FilePlus2, GraduationCap, LinkIcon, LoaderCircle, Pencil, Plus, Route } from "lucide-react";
+import { CalendarDays, FilePlus2, GraduationCap, LinkIcon, LoaderCircle, Pencil, Plus, Route, Sun } from "lucide-react";
 import type { AppSettings, Course, DocumentSummaryRow, Note } from "@/lib/models";
 import type { StudyPlan, StudyPlanChapter, StudyPlanOptions } from "@/lib/studyPlan/types";
 import { roadmapLabel } from "@/lib/studyPlan/roadmap";
@@ -21,6 +21,8 @@ import { TopicLevelStep } from "@/components/study-plan/TopicLevelStep";
 import { useAppName } from "@/lib/useAppName";
 import { ScheduleView } from "@/components/study-plan/ScheduleView";
 import { ScheduleSettingsDialog } from "@/components/study-plan/ScheduleSettingsDialog";
+import { TodayFrequencyDialog } from "@/components/study-plan/TodayFrequencyDialog";
+import { describeCadence } from "@/lib/today/cadence";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +63,7 @@ export default function StudyPlanPage() {
   const [retrying, setRetrying] = useState(false);
   const [supplementing, setSupplementing] = useState(false);
   const [scheduleSetupOpen, setScheduleSetupOpen] = useState(false);
+  const [frequencyOpen, setFrequencyOpen] = useState(false);
   const { data: settings } = useSWR<AppSettings>("/api/settings");
   // Course documents added since the plan was built — offered as "Update
   // plan" (see lib/studyPlan/supplement.ts).
@@ -318,6 +321,11 @@ export default function StudyPlanPage() {
                   ? []
                   : [{ label: "Add a schedule", icon: CalendarDays, onSelect: () => setScheduleSetupOpen(true) }]),
                 {
+                  label: `Today frequency: ${describeCadence(plan.options)}`,
+                  icon: Sun,
+                  onSelect: () => setFrequencyOpen(true),
+                },
+                {
                   label: plan.options.practice ? "Hide “Test yourself”" : "Show “Test yourself”",
                   icon: GraduationCap,
                   onSelect: () => void updateOptions({ practice: !plan.options.practice }),
@@ -453,6 +461,15 @@ export default function StudyPlanPage() {
         }}
         onSave={async (schedule) => {
           await updateOptions({ schedule: true, ...schedule });
+          return true;
+        }}
+      />
+      <TodayFrequencyDialog
+        open={frequencyOpen}
+        onOpenChange={setFrequencyOpen}
+        initial={{ todayCadence: plan.options.todayCadence, todayPerWeek: plan.options.todayPerWeek }}
+        onSave={async (frequency) => {
+          await updateOptions({ todayCadence: frequency.todayCadence ?? "auto", ...(frequency.todayPerWeek && { todayPerWeek: frequency.todayPerWeek }) });
           return true;
         }}
       />

@@ -16,7 +16,7 @@ const { createCourse, getGeneratedItem } = await import("../models");
 const { generateCodeSet, actOnCodeSet, allPassed, CodeSetError } = await import("./service");
 const { normalizeCodeExercises } = await import("./validate");
 const { parseCodeAction, parseNewCodeSet } = await import("./requests");
-const { codeExercisesSystemPrompt } = await import("../prompts/code");
+const { codeExercisesSystemPrompt, codeProjectSystemPrompt } = await import("../prompts/code");
 const reviewStore = await import("../review/store");
 
 const exercise = {
@@ -36,7 +36,7 @@ beforeEach(() => generateStructured.mockReset());
 
 describe("normalizeCodeExercises", () => {
   it("keeps complete exercises, one visible test at least, unique test names", () => {
-    const [ex] = normalizeCodeExercises({
+    const [ex] = normalizeCodeExercises("python", {
       exercises: [
         {
           ...exercise,
@@ -56,8 +56,8 @@ describe("normalizeCodeExercises", () => {
   });
 
   it("rejects output without usable exercises", () => {
-    expect(() => normalizeCodeExercises({ exercises: [] })).toThrow();
-    expect(() => normalizeCodeExercises("nope")).toThrow();
+    expect(() => normalizeCodeExercises("python", { exercises: [] })).toThrow();
+    expect(() => normalizeCodeExercises("python", "nope")).toThrow();
   });
 });
 
@@ -72,7 +72,18 @@ describe("request parsing", () => {
     });
     expect(parseCodeAction({ action: "run", exercise: 0, code: "x", tests: [{ name: "t" }] })).toBeNull();
     expect(parseCodeAction({ action: "hint", exercise: -1 })).toBeNull();
-    expect(parseNewCodeSet({ language: "python", topic: " Loops " })).toEqual({ language: "python", chapterId: null, topic: "Loops" });
+    expect(parseNewCodeSet({ language: "python", topic: " Loops " })).toEqual({ language: "python", chapterId: null, topic: "Loops", count: 4, project: false });
+    // A project only for languages that can build from several files.
+    expect(parseNewCodeSet({ language: "cpp", topic: "KV store", project: true })?.project).toBe(true);
+    expect(parseNewCodeSet({ language: "python", topic: "KV store", project: true })?.project).toBe(false);
+    // Project actions carry files in place of code.
+    expect(parseCodeAction({ action: "save", exercise: 0, files: [{ name: "a.cpp", content: "x" }] })).toEqual({ action: "save", exercise: 0, code: "", files: [{ name: "a.cpp", content: "x" }] });
+    expect(parseCodeAction({ action: "save", exercise: 0, files: [] })).toBeNull();
+    expect(parseCodeAction({ action: "save", exercise: 0, files: [{ name: "a.cpp" }] })).toBeNull();
+    expect(parseNewCodeSet({ language: "cpp", topic: "Pointers", count: 2 })?.count).toBe(2);
+    // Out of range or not a whole number: the default.
+    expect(parseNewCodeSet({ language: "cpp", topic: "Pointers", count: 99 })?.count).toBe(4);
+    expect(parseNewCodeSet({ language: "cpp", topic: "Pointers", count: 1.5 })?.count).toBe(4);
     expect(parseNewCodeSet({ language: "cobol", topic: "Loops" })).toBeNull();
     expect(parseNewCodeSet({ language: "python" })).toBeNull();
   });
@@ -151,3 +162,53 @@ describe("code sets", () => {
     await expect(actOnCodeSet(set.id, { action: "hint", exercise: 9 })).rejects.toBeInstanceOf(CodeSetError);
   });
 });
+
+describe("C++ prompt", () => {
+  const topic = { name: "Pointers", summary: "", subtopics: [] };
+  it("teaches the test macros and the sanitizers, and asks for standalone code", () => {
+    const prompt = codeExercisesSystemPrompt("Programming", topic, "cpp", "English", []);
+    for (const word of ["CHECK_EQ", "CHECK_NEAR", "run_main", "AddressSanitizer", "#include", "Core Guidelines"]) {
+      expect(prompt).toContain(word);
+    }
+    expect(prompt).not.toContain("numpy");
+  });
+
+  it("asks for the number of exercises wanted", () => {
+    expect(codeExercisesSystemPrompt("P", topic, "cpp", "English", [], 2)).toContain("Write 2 exercises");
+    expect(codeExercisesSystemPrompt("P", topic, "cpp", "English", [], 1)).toContain("Write 1 exercise");
+    expect(codeExercisesSystemPrompt("P", topic, "cpp", "English", [])).toContain("Write 4 exercises");
+  });
+});
+
+describe("each language's prompt", () => {
+  const topic = { name: "Joins", summary: "", subtopics: [] };
+  it("carries that language's own guidance and test style", () => {
+    const expected = {
+      python: ["`assert` statements", "numpy"],
+      javascript: ["assert.equal"],
+      cpp: ["CHECK_EQ", "Core Guidelines"],
+      csharp: ["CheckEqual", ".NET design guidelines", "using directives"],
+      sql: ['"setup"', "SQLite", '"expect"', "never \"predict\""],
+    } as const;
+    for (const [language, words] of Object.entries(expected)) {
+      const prompt = codeExercisesSystemPrompt("Course", topic, language as never, "English", []);
+      for (const word of words) expect(prompt, `${language}: ${word}`).toContain(word);
+    }
+  });
+
+  it("keeps one language's guidance out of another's", () => {
+    const sql = codeExercisesSystemPrompt("Course", topic, "sql", "English", []);
+    expect(sql).not.toContain("CHECK_EQ");
+    expect(sql).not.toContain("numpy");
+    expect(codeExercisesSystemPrompt("Course", topic, "cpp", "English", [])).not.toContain('"setup"');
+  });
+
+  it("asks for project milestones with files, solution files and the interface fixed up front", () => {
+    const prompt = codeProjectSystemPrompt("Course", topic, "cpp", "English", 3);
+    for (const word of ['"kind": "project"', "solutionFiles", "pragma once", "CHECK_EQ", "Milestone", "public signatures"]) {
+      expect(prompt).toContain(word);
+    }
+    expect(codeProjectSystemPrompt("Course", topic, "csharp", "English")).toContain("CheckEqual");
+  });
+});
+

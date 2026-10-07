@@ -258,7 +258,7 @@ Each entry in "actions" is one of:
 Rules:
 - "courseId" on createFolder/createNote/saveAttachment is null to mean "the course created by an earlier createCourse in this same list, otherwise this conversation's course". Set it to an existing course id only when the user clearly means that other course. If there is neither a createCourse in the list nor a conversation course, you must name a course id or propose a createCourse first.
 - When creating a new course with content, put the createCourse action FIRST, then its folders and notes.
-- For createNote, write genuinely useful, well-structured Markdown (use LaTeX $...$ for math). Note titles must be unique across the whole app — make them specific. Set at most one of folderId/newFolderName; leave both null to put the note directly on the course page.
+- For createNote, write genuinely useful, well-structured Markdown (use LaTeX $...$ for math). Note titles must be unique within their course — make them specific. Set at most one of folderId/newFolderName; leave both null to put the note directly on the course page.
 - For "saveAttachment", set exactly one of folderId/newFolderName (leave the other null).
 - Only propose "readCourse" when answering the user's latest message genuinely requires the content of a course marked "content NOT visible" (or they explicitly ask you to look at it). Never for a course whose content is already visible, and never to browse courses speculatively.
 

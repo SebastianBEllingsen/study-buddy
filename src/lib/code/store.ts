@@ -6,7 +6,10 @@ import { emptyCodeProgress, type CodeExercise, type CodeLanguage, type CodeProgr
 type Row = typeof code_sets.$inferSelect;
 
 function toSet(row: Row): CodeSet {
-  const exercises = (JSON.parse(row.content_json) as { exercises: CodeExercise[] }).exercises;
+  // Exercises saved before kinds (or SQL setup) existed have none of them.
+  const exercises = (JSON.parse(row.content_json) as { exercises: Partial<CodeExercise>[] }).exercises.map(
+    (e): CodeExercise => ({ ...(e as CodeExercise), kind: e.kind ?? "write", answer: e.answer ?? "", setup: e.setup ?? "", files: e.files ?? [], solutionFiles: e.solutionFiles ?? [] })
+  );
   const saved = JSON.parse(row.progress_json) as Partial<CodeProgress>[];
   return {
     id: row.id,
@@ -15,7 +18,7 @@ function toSet(row: Row): CodeSet {
     title: row.title,
     language: row.language,
     exercises,
-    progress: exercises.map((e, i) => ({ ...emptyCodeProgress(e.starter), ...saved[i] })),
+    progress: exercises.map((e, i) => ({ ...emptyCodeProgress(e.starter, e.files), ...saved[i] })),
     practice_item_id: row.practice_item_id,
     created_at: row.created_at,
   };
@@ -37,7 +40,7 @@ export async function createCodeSet(input: {
       title: input.title,
       language: input.language,
       content_json: JSON.stringify({ exercises: input.exercises }),
-      progress_json: JSON.stringify(input.exercises.map((e) => emptyCodeProgress(e.starter))),
+      progress_json: JSON.stringify(input.exercises.map((e) => emptyCodeProgress(e.starter, e.files))),
       created_at: now,
       updated_at: now,
     })

@@ -106,16 +106,21 @@ export function markdownForPreview(source: string, targets: LinkTargets): string
 // Second pass for Obsidian's name-based links — [[Title]] becomes a link to
 // that note (plus a #heading fragment), [[#Heading]] a same-note anchor, and
 // a title with no note behind it a "create this note" link.
-function wikiLinksForPreview(source: string, targets: LinkTargets, currentNoteId?: number): string {
+function wikiLinksForPreview(source: string, targets: LinkTargets, currentNoteId?: number, currentCourseId?: number): string {
   const matches = parseWikiLinks(source);
   if (matches.length === 0) return source;
   let out = "";
   let cursor = 0;
   for (const match of matches) {
     out += source.slice(cursor, match.start);
-    const resolved = resolveWikiLink(match, targets, currentNoteId);
-    const href = resolved.href ?? newNoteHref(match.target);
-    out += `[${escapeLinkLabel(resolved.label)}](${href})`;
+    const resolved = resolveWikiLink(match, targets, currentNoteId, currentCourseId);
+    // A missing [[Course::Title]] can't be created from here (a click makes
+    // notes in the current course only), so it stays plain text.
+    if (resolved.href === null && match.course) {
+      out += escapeLinkLabel(resolved.label);
+    } else {
+      out += `[${escapeLinkLabel(resolved.label)}](${resolved.href ?? newNoteHref(match.target)})`;
+    }
     cursor = match.end;
   }
   out += source.slice(cursor);
@@ -328,7 +333,7 @@ export default function NoteMarkdown({
   // Blanked rather than cut, so task-toggle line numbers still match the
   // source — see blankFrontmatter.
   const { properties, markdown: body } = blankFrontmatter(markdown);
-  const rendered = wikiLinksForPreview(markdownForPreview(body, targets), targets, context?.noteId);
+  const rendered = wikiLinksForPreview(markdownForPreview(body, targets), targets, context?.noteId, context?.courseId);
   return (
     <>
       {properties && <PropertiesPanel properties={properties} />}

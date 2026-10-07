@@ -36,8 +36,8 @@ describe("planDay", () => {
       weakConcepts: [{ courseId: 2, courseName: "Sample Course", name: "Recursion", recall: 0.31 }],
     });
     expect(steps.map((s) => s.kind)).toEqual(["reviews", "mistakes", "chapter", "concept"]);
-    // 20*0.25 + 10*0.5 + 4*1 = 14
-    expect(steps[0]).toMatchObject({ minutes: 14, title: "Review 34 items", href: "/review" });
+    // (20 cards * 0.25 + 10 new * 0.5 + 4 questions * 1.5) * 1.25 for re-asks = 20
+    expect(steps[0]).toMatchObject({ minutes: 20, title: "Review 34 items", href: "/review" });
     expect(steps[1]).toMatchObject({ minutes: 5, href: "/review?mode=mistakes" });
     expect(steps[2]).toMatchObject({
       title: "Watch: Intro lecture",
@@ -48,6 +48,14 @@ describe("planDay", () => {
     expect(steps[3]).toMatchObject({ minutes: 10, title: "Strengthen: Recursion" });
     expect(steps[3].href).toBe("/review?courseId=2&mode=concept&concept=Recursion");
     expect(steps.reduce((n, s) => n + s.minutes, 0)).toBeLessThanOrEqual(60);
+  });
+
+  it("budgets questions at a typed answer each, plus time for what gets asked again", () => {
+    // 21 questions, as measured: 21 * 1.5 = 31.5, * 1.25 = 39.4 → 40 (it took 34 in practice).
+    const [step] = planDay({ ...none, minutes: 90, reviews: { dueCards: 0, dueQuestions: 21, newCards: 0 } });
+    expect(step.minutes).toBe(40);
+    // Cards stay quick: 40 cards * 0.25 * 1.25 = 12.5 → 13.
+    expect(planDay({ ...none, minutes: 90, reviews: { dueCards: 40, dueQuestions: 0, newCards: 0 } })[0].minutes).toBe(13);
   });
 
   it("gives reviews the whole budget when they need it and drops the rest", () => {
@@ -282,3 +290,98 @@ describe("pre-test step", () => {
     expect(step.href).toBe("/items/7");
   });
 });
+
+describe("coding practice on a programming plan", () => {
+  const coding = (id: number, setId: number | null = null) => chapter(id, { code: { language: "cpp", setId } });
+
+  it("adds a daily write-code step after the chapter step, for the same chapter", () => {
+    const steps = planDay({ ...none, minutes: 60, chapters: [coding(5)] });
+    expect(steps.map((s) => s.kind)).toEqual(["chapter", "code"]);
+    expect(steps[1]).toMatchObject({
+      id: "code:chapter:5",
+      title: "Write code: Chapter 5",
+      minutes: 20,
+      href: "/courses/2/code?chapterId=5&language=cpp&auto=1",
+    });
+    expect(steps.reduce((n, s) => n + s.minutes, 0)).toBeLessThanOrEqual(60);
+  });
+
+  it("opens a capstone chapter as a project", () => {
+    const steps = planDay({ ...none, minutes: 60, chapters: [{ ...coding(9), chapterTitle: "Capstone projects" }] });
+    expect(steps.find((s) => s.kind === "code")?.href).toBe("/courses/2/code?chapterId=9&language=cpp&auto=1&project=1");
+  });
+
+  it("picks up the chapter's open code set instead of starting a new one", () => {
+    const steps = planDay({ ...none, minutes: 60, chapters: [coding(5, 31)] });
+    expect(steps.find((s) => s.kind === "code")?.href).toBe("/courses/2/code/31");
+  });
+
+  it("keeps the coding slot when time is short, and never adds one on other plans", () => {
+    const tight = planDay({ ...none, minutes: 45, chapters: [coding(5)] });
+    expect(tight.find((s) => s.kind === "code")?.minutes).toBeGreaterThanOrEqual(10);
+    expect(tight.reduce((n, s) => n + s.minutes, 0)).toBeLessThanOrEqual(45);
+    expect(planDay({ ...none, minutes: 60, chapters: [chapter(5)] }).some((s) => s.kind === "code")).toBe(false);
+  });
+
+  it("brings a weak code concept back as new exercises to write, not a quiz", () => {
+    const steps = planDay({
+      ...none,
+      minutes: 60,
+      weakConcepts: [{ courseId: 2, courseName: "Sample Course", name: "Move semantics", recall: 0.4, codeLanguage: "cpp" }],
+    });
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ kind: "code", title: "Write it again: Move semantics" });
+    expect(steps[0].href).toBe("/courses/2/code?topic=Move+semantics&language=cpp&count=2&auto=1");
+  });
+
+  it("leaves a weak concept from anywhere else as an ordinary review step", () => {
+    const [step] = planDay({
+      ...none,
+      weakConcepts: [{ courseId: 2, courseName: "Sample Course", name: "Entropy", recall: 0.4 }],
+    });
+    expect(step.kind).toBe("concept");
+  });
+});
+
+describe("plans with a Today frequency", () => {
+  const plain = (id: number, over: Partial<ChapterCandidate> = {}) => chapter(id, { courseId: id, courseName: `Course ${id}`, ...over });
+  const must = (id: number, reason = "your every-day plan") => plain(id, { must: reason });
+
+  it("puts a plan that must get a step ahead of an earlier deadline", () => {
+    const ranked = rankChapters([plain(1, { deadline: "2026-11-01" }), must(2)]);
+    expect(ranked.map((c) => c.chapterId)).toEqual([2, 1]);
+  });
+
+  it("orders several that must get a step the usual way among themselves", () => {
+    const ranked = rankChapters([must(1), must(2, "1 of 3 study days in the last week"), plain(3)].map((c, i) => ({ ...c, lastStudiedAt: i === 0 ? "2026-10-06 10:00:00" : null })));
+    expect(ranked.map((c) => c.chapterId)).toEqual([2, 1, 3]);
+  });
+
+  it("gives it a slot even when the usual limit is already taken", () => {
+    // Two plain chapters would fill the two slots; the third must get one too.
+    const steps = planDay({ ...none, minutes: 90, chapters: [plain(1), plain(2), must(3)] });
+    expect(steps.filter((s) => s.kind === "chapter").map((s) => s.id.split(":")[1])).toEqual(["3", "1", "2"]);
+  });
+
+  it("never gives it more than three slots, however many ask", () => {
+    const steps = planDay({ ...none, minutes: 120, chapters: [must(1), must(2), must(3), must(4), plain(5)] });
+    expect(steps.filter((s) => s.kind === "chapter")).toHaveLength(3);
+  });
+
+  it("says why it is there", () => {
+    const [step] = planDay({ ...none, chapters: [must(1, "1 of 3 study days in the last week")] });
+    expect(step.why).toBe("1 of 3 study days in the last week");
+  });
+
+  it("leaves a hand-picked set of chapters as picked", () => {
+    const steps = planDay({ ...none, minutes: 90, maxChapterSteps: 1, chapters: [plain(1), must(2)] });
+    expect(steps.filter((s) => s.kind === "chapter")).toHaveLength(1);
+  });
+
+  it("puts a programming plan's coding step with its chapter step when it must get one", () => {
+    const code = { language: "cpp" as const, setId: null };
+    const steps = planDay({ ...none, minutes: 60, chapters: [plain(1), plain(2, { code, must: "your every-day plan" })] });
+    expect(steps.find((s) => s.kind === "code")?.id).toBe("code:chapter:2");
+  });
+});
+

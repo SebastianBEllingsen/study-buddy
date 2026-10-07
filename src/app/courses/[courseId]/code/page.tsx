@@ -1,18 +1,19 @@
 "use client";
 
 import { Explain } from "@/components/Explain";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { Code2, LoaderCircle, Trash2 } from "lucide-react";
 import type { StudyPlan } from "@/lib/studyPlan/types";
-import { CODE_LANGUAGE_NAMES, CODE_LANGUAGES, type CodeLanguage } from "@/lib/code/types";
+import { CODE_LANGUAGE_NAMES, CODE_LANGUAGES, PROJECT_LANGUAGES, isCodeLanguage, type CodeLanguage } from "@/lib/code/types";
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -30,20 +31,33 @@ function CodeInner() {
   const search = useSearchParams();
   const router = useRouter();
   const aiEnabled = useAiEnabled();
-  const [language, setLanguage] = useState<CodeLanguage>("python");
+  const requestedLanguage = search.get("language");
+  const [language, setLanguage] = useState<CodeLanguage>(isCodeLanguage(requestedLanguage) ? requestedLanguage : "cpp");
   const [chapterId, setChapterId] = useState(search.get("chapterId") ?? "");
-  const [topic, setTopic] = useState("");
+  const [topic, setTopic] = useState(search.get("topic") ?? "");
+  // A multi-file project built in milestones, instead of a set of small exercises.
+  const [project, setProject] = useState(search.get("project") === "1");
   const [busy, setBusy] = useState(false);
   const { data: detail } = useSWR<{ course: { name: string }; studyPlan: StudyPlan | null }>(`/api/courses/${courseId}`);
   const { data, mutate } = useSWR<{ sets: SetSummary[] }>(`/api/courses/${courseId}/code`);
   const chapters = [...(detail?.studyPlan?.chapters ?? [])].sort((a, b) => a.position - b.position);
+  const canProject = PROJECT_LANGUAGES.includes(language);
 
-  async function create() {
+  // Opened from Today (?auto=1): write the exercises straight away, once.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (search.get("auto") !== "1" || autoStarted.current || !aiEnabled) return;
+    autoStarted.current = true;
+    void create(Number(search.get("count")) || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiEnabled]);
+
+  async function create(count?: number) {
     setBusy(true);
     const res = await fetch(`/api/courses/${courseId}/code`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ language, chapterId: chapterId ? Number(chapterId) : null, topic }),
+      body: JSON.stringify({ language, chapterId: chapterId ? Number(chapterId) : null, topic, count, project: project && canProject }),
     }).catch(() => null);
     const body = await res?.json().catch(() => ({}));
     setBusy(false);
@@ -71,8 +85,8 @@ function CodeInner() {
           Code exercises
         </h1>
         <p className="text-sm text-muted-foreground">
-          Write real code and run it against tests, right here in the browser. Each set builds from a warm-up to a
-          harder exercise, with hints when you&apos;re stuck. Finished exercises join your reviews.
+          Write real code and run it against tests. Each set builds from a warm-up to a harder exercise, with hints
+          when you&apos;re stuck. Finished exercises join your reviews.
         </p>
       </div>
 
@@ -122,15 +136,28 @@ function CodeInner() {
               )}
             </div>
           </div>
+          {canProject && (
+            <div className="flex items-start gap-2">
+              <Checkbox id="code-project" checked={project} onCheckedChange={(v) => setProject(v === true)} className="mt-0.5" />
+              <Label htmlFor="code-project" className="block font-normal">
+                Build it as a project
+                <span className="block text-xs text-muted-foreground">
+                  A small program across several files, in milestones — design and structure, not just functions.
+                </span>
+              </Label>
+            </div>
+          )}
           <Explain id="code.write">
             <Button disabled={!aiEnabled || busy || (!chapterId && !topic.trim())} onClick={() => void create()}>
               {busy && <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />}
-              {busy ? "Writing exercises…" : "Write exercises"}
+              {busy ? "Writing exercises…" : project && canProject ? "Write the project" : "Write exercises"}
             </Button>
           </Explain>
           {!aiEnabled && <p className="text-xs text-muted-foreground">This needs AI — turn it on in Settings.</p>}
           <p className="text-xs text-muted-foreground">
-            Code runs only in your browser, cut off from the internet. Python downloads once, the first time you run it.
+            Python and JavaScript run in your browser, cut off from the internet (Python downloads once, the first time
+            you run it). C++, C# and SQL run on this computer (g++, the .NET SDK, SQLite) in a sandbox with no network or access to
+            your files; they need those tools and bubblewrap installed.
           </p>
         </CardContent>
       </Card>

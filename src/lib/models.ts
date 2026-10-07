@@ -54,7 +54,7 @@ import { isValidIconImage } from "./dataUrlImage";
 import { clampBackdropBlur } from "./backdropBlur";
 import { omitEmbeddedImages } from "./embeddedImages";
 import { parseNoteLinks, stripNoteLinkSyntax } from "./noteLinks";
-import { wikiLinksToTitle } from "./obsidianLinks";
+import { findNoteByTitle, parseWikiLinks } from "./obsidianLinks";
 import { canvasReferencesTarget, emptyCanvas, parseCanvasJson, type CanvasData } from "./canvas";
 import { parseAudioAutoplayMode, type AudioAutoplayMode } from "./audioAutoplay";
 import { parseCardStyle, type CardStyle } from "./cardStyle";
@@ -1296,12 +1296,14 @@ function folderPredicate(column: AnySQLiteColumn, folderId: number | null) {
   return folderId === null ? isNull(column) : eq(column, folderId);
 }
 
-async function assertTitleAvailable(title: string, excludeId?: number): Promise<void> {
-  const existing = await db.select().from(notes);
+// Unique per course, not across the app: [[Title]] prefers the current
+// course's note and [[Course::Title]] names the course (see obsidianLinks.ts).
+async function assertTitleAvailable(title: string, courseId: number, excludeId?: number): Promise<void> {
+  const existing = await db.select().from(notes).where(eq(notes.course_id, courseId));
   const collision = existing.find(
     (n) => n.id !== excludeId && n.title.toLowerCase() === title.toLowerCase()
   );
-  if (collision) throw new Error(`A note titled "${title}" already exists`);
+  if (collision) throw new Error(`A note titled "${title}" already exists in this course`);
 }
 
 // Same pattern as nextDocumentPosition — a newly created (or moved) note
@@ -1321,7 +1323,7 @@ export async function createNote(
   folderId?: number | null,
   markdown = ""
 ): Promise<Note> {
-  await assertTitleAvailable(title);
+  await assertTitleAvailable(title, courseId);
   // moveNote validates this same invariant on the move path (see its own
   // comment) — createNote let an explicit folderId through unchecked, so a
   // crafted request could create a note whose course_id disagrees with its
@@ -1354,7 +1356,9 @@ export async function createNote(
 }
 
 export async function renameNote(id: number, title: string): Promise<void> {
-  await assertTitleAvailable(title, id);
+  const [note] = await db.select({ course_id: notes.course_id }).from(notes).where(eq(notes.id, id));
+  if (!note) return;
+  await assertTitleAvailable(title, note.course_id!, id);
   await db.update(notes).set({ title, updated_at: nowUtc() }).where(eq(notes.id, id));
 }
 
@@ -1458,16 +1462,34 @@ function backlinkContext(markdown: string, matchStart: number): string {
 
 export async function getNoteBacklinks(id: number): Promise<NoteBacklink[]> {
   const all = await db.select().from(notes);
-  const title = all.find((n) => n.id === id)?.title;
+  const courseNames = new Map((await db.select().from(courses)).map((c) => [c.id, c.name]));
+  const targets: LinkTargets = {
+    notes: all.map((n) => ({
+      id: n.id,
+      title: n.title,
+      courseId: n.course_id!,
+      courseName: courseNames.get(n.course_id!) ?? "",
+    })),
+    documents: [],
+    items: [],
+  };
   const backlinks: NoteBacklink[] = [];
   for (const other of all) {
     if (other.id === id) continue;
     // Both link syntaxes count: the app's own [[note:ID]] and an Obsidian-
-    // style [[Title]] naming this note (see lib/obsidianLinks.ts).
+    // style [[Title]] / [[Course::Title]] resolving to this note (see
+    // lib/obsidianLinks.ts — a bare title can match several courses).
     const starts = parseNoteLinks(other.markdown)
       .filter((link) => link.type === "note" && link.id === id)
       .map((link) => link.start);
-    if (title) starts.push(...wikiLinksToTitle(other.markdown, title).map((link) => link.start));
+    for (const link of parseWikiLinks(other.markdown)) {
+      if (!link.target) continue;
+      const resolved = findNoteByTitle(link.target, targets, {
+        course: link.course,
+        currentCourseId: other.course_id ?? undefined,
+      });
+      if (resolved?.id === id) starts.push(link.start);
+    }
     for (const start of starts.sort((a, b) => a - b)) {
       backlinks.push({
         noteId: other.id,

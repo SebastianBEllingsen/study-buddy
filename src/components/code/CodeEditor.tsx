@@ -5,7 +5,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import { defaultHighlightStyle, LanguageDescription, syntaxHighlighting, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { CODE_LANGUAGE_NAMES, type CodeLanguage } from "@/lib/code/types";
+import { CODE_LANGUAGE_NAMES, EDITOR_LANGUAGE_NAMES, type CodeLanguage } from "@/lib/code/types";
 
 // Follows the app's own colours (like NoteEditor's theme), so it fits every
 // app theme instead of CodeMirror's built-in light one.
@@ -40,7 +40,7 @@ export function CodeEditor({
 
   useEffect(() => {
     if (loaded.has(language)) return;
-    const description = LanguageDescription.matchLanguageName(languages, CODE_LANGUAGE_NAMES[language]);
+    const description = LanguageDescription.matchLanguageName(languages, EDITOR_LANGUAGE_NAMES[language]);
     void description?.load().then((s) => {
       loaded.set(language, s);
       setSupport(s);

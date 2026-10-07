@@ -57,3 +57,34 @@ describe("resourceTarget", () => {
     expect(parseStudyPlanOptions({ preset: "guided", diagnostic: true }).diagnostic).toBe(true);
   });
 });
+
+describe("Today frequency", () => {
+  it("is absent by default and for 'auto', and kept for the others", () => {
+    expect(parseStudyPlanOptions({})).not.toHaveProperty("todayCadence");
+    expect(parseStudyPlanOptions({ todayCadence: "auto" })).not.toHaveProperty("todayCadence");
+    expect(parseStudyPlanOptions({ todayCadence: "daily" })).toMatchObject({ todayCadence: "daily" });
+    expect(parseStudyPlanOptions({ todayCadence: "every_other_day" })).toMatchObject({ todayCadence: "every_other_day" });
+    expect(parseStudyPlanOptions({ todayCadence: "off" })).toMatchObject({ todayCadence: "off" });
+  });
+
+  it("keeps the weekly target only for 'weekly', within 1 to 6, else 3", () => {
+    expect(parseStudyPlanOptions({ todayCadence: "weekly", todayPerWeek: 4 })).toMatchObject({ todayCadence: "weekly", todayPerWeek: 4 });
+    expect(parseStudyPlanOptions({ todayCadence: "weekly", todayPerWeek: 9 }).todayPerWeek).toBe(3);
+    expect(parseStudyPlanOptions({ todayCadence: "weekly" }).todayPerWeek).toBe(3);
+    expect(parseStudyPlanOptions({ todayCadence: "daily", todayPerWeek: 4 })).not.toHaveProperty("todayPerWeek");
+  });
+
+  it("ignores anything that isn't a known setting", () => {
+    expect(parseStudyPlanOptions({ todayCadence: "hourly" })).not.toHaveProperty("todayCadence");
+    expect(parseStudyPlanOptions({ todayCadence: 3 })).not.toHaveProperty("todayCadence");
+  });
+
+  it("survives being stored and read back, and switching back to automatic clears it", () => {
+    const stored = JSON.stringify(parseStudyPlanOptions({ todayCadence: "weekly", todayPerWeek: 2 }));
+    expect(parseStudyPlanOptions(stored)).toMatchObject({ todayCadence: "weekly", todayPerWeek: 2 });
+    const cleared = parseStudyPlanOptions({ ...parseStudyPlanOptions(stored), todayCadence: "auto" });
+    expect(cleared).not.toHaveProperty("todayCadence");
+    expect(cleared).not.toHaveProperty("todayPerWeek");
+  });
+});
+

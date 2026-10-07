@@ -5,9 +5,10 @@ import type { LinkTargets } from "@/lib/models";
 // as opposed to this app's id-based [[note:12]] syntax in lib/noteLinks.ts.
 // Those id links are what the editor's "[[" completion inserts, but notes
 // pasted or imported from an Obsidian vault are written by name, so both
-// have to render as links. Note titles are unique (case-insensitively, see
-// assertTitleAvailable in models.ts), so a name always resolves to at most
-// one note.
+// have to render as links. Note titles are unique per course
+// (case-insensitively, see assertTitleAvailable in models.ts), so a bare
+// [[Title]] can match several courses' notes — it prefers the current
+// course's — and [[Course::Title]] names the course explicitly.
 
 export interface WikiLinkMatch {
   raw: string;
@@ -15,6 +16,8 @@ export interface WikiLinkMatch {
   end: number;
   // Note title as written; "" for a same-note [[#Heading]] link.
   target: string;
+  // The course named by a [[Course::Title]] link, if any.
+  course?: string;
   heading?: string;
   alias?: string;
 }
@@ -51,6 +54,8 @@ function codeRanges(markdown: string): [number, number][] {
   return ranges;
 }
 
+const COURSE_SEPARATOR = "::";
+
 export function parseWikiLinks(markdown: string): WikiLinkMatch[] {
   const code = codeRanges(markdown);
   const matches: WikiLinkMatch[] = [];
@@ -64,10 +69,13 @@ export function parseWikiLinks(markdown: string): WikiLinkMatch[] {
     const linkPart = pipe === -1 ? inner : inner.slice(0, pipe);
     const alias = pipe === -1 ? undefined : inner.slice(pipe).replace(/^\\?\|/, "").trim() || undefined;
     const hash = linkPart.indexOf("#");
-    const target = (hash === -1 ? linkPart : linkPart.slice(0, hash)).trim();
+    const named = (hash === -1 ? linkPart : linkPart.slice(0, hash)).trim();
+    const sep = named.indexOf(COURSE_SEPARATOR);
+    const course = sep === -1 ? undefined : named.slice(0, sep).trim() || undefined;
+    const target = sep === -1 ? named : named.slice(sep + COURSE_SEPARATOR.length).trim();
     const heading = hash === -1 ? undefined : linkPart.slice(hash + 1).trim() || undefined;
     if (!target && !heading) continue;
-    matches.push({ raw: m[0], start, end: start + m[0].length, target, heading, alias });
+    matches.push({ raw: m[0], start, end: start + m[0].length, target, course, heading, alias });
   }
   return matches;
 }
@@ -84,9 +92,21 @@ export function headingSlug(text: string): string {
     .replace(/\s+/g, "-");
 }
 
-export function findNoteByTitle(title: string, targets: LinkTargets): LinkTargets["notes"][number] | undefined {
+// Titles are only unique within a course. With `course` (a [[Course::Title]]
+// link) only that course's note counts; without it, a note in
+// `currentCourseId` wins over the same title in another course.
+export function findNoteByTitle(
+  title: string,
+  targets: LinkTargets,
+  { course, currentCourseId }: { course?: string; currentCourseId?: number } = {}
+): LinkTargets["notes"][number] | undefined {
   const needle = title.trim().toLowerCase();
-  return targets.notes.find((n) => n.title.toLowerCase() === needle);
+  const courseNeedle = course?.trim().toLowerCase();
+  const matches = targets.notes.filter(
+    (n) =>
+      n.title.toLowerCase() === needle && (courseNeedle === undefined || n.courseName.toLowerCase() === courseNeedle)
+  );
+  return matches.find((n) => n.courseId === currentCourseId) ?? matches[0];
 }
 
 export interface ResolvedWikiLink {
@@ -98,9 +118,10 @@ export interface ResolvedWikiLink {
 }
 
 export function resolveWikiLink(
-  match: Pick<WikiLinkMatch, "target" | "heading" | "alias">,
+  match: Pick<WikiLinkMatch, "target" | "course" | "heading" | "alias">,
   targets: LinkTargets,
-  currentNoteId?: number
+  currentNoteId?: number,
+  currentCourseId?: number
 ): ResolvedWikiLink {
   const fragment = match.heading ? `#${headingSlug(match.heading)}` : "";
   const defaultLabel = match.target
@@ -111,7 +132,7 @@ export function resolveWikiLink(
   const label = match.alias ?? defaultLabel;
 
   if (!match.target) return { href: fragment, label, missing: false };
-  const note = findNoteByTitle(match.target, targets);
+  const note = findNoteByTitle(match.target, targets, { course: match.course, currentCourseId });
   if (!note) return { href: null, label, missing: true };
   if (note.id === currentNoteId) return { href: fragment || `/vault/${note.id}`, label, missing: false };
   return { href: `/vault/${note.id}${fragment}`, label, missing: false };
@@ -133,12 +154,4 @@ export function titleFromNewNoteHref(href: string): string | null {
   } catch {
     return null;
   }
-}
-
-// Whether `markdown` links by name to the note titled `title` — backs
-// getNoteBacklinks' name-based half. Returns each match so the caller can
-// build context snippets from their offsets.
-export function wikiLinksToTitle(markdown: string, title: string): WikiLinkMatch[] {
-  const needle = title.trim().toLowerCase();
-  return parseWikiLinks(markdown).filter((m) => m.target.toLowerCase() === needle);
 }

@@ -6,7 +6,6 @@ import {
   parseWikiLinks,
   resolveWikiLink,
   titleFromNewNoteHref,
-  wikiLinksToTitle,
 } from "./obsidianLinks";
 
 const targets: LinkTargets = {
@@ -52,6 +51,39 @@ describe("parseWikiLinks", () => {
 
   it("ignores empty brackets", () => {
     expect(parseWikiLinks("[[ ]] [[#]]")).toEqual([]);
+  });
+});
+
+describe("course-qualified links", () => {
+  const two: LinkTargets = {
+    notes: [
+      { id: 1, title: "Summary", courseId: 1, courseName: "Algebra" },
+      { id: 2, title: "Summary", courseId: 2, courseName: "Physics" },
+    ],
+    documents: [],
+    items: [],
+  };
+
+  it("parses a Course::Title prefix", () => {
+    expect(parseWikiLinks("[[Physics::Summary#Intro|p]]")[0]).toMatchObject({
+      course: "Physics",
+      target: "Summary",
+      heading: "Intro",
+      alias: "p",
+    });
+  });
+
+  it("resolves the named course's note", () => {
+    expect(resolveWikiLink({ course: "physics", target: "Summary" }, two, undefined, 1).href).toBe("/vault/2");
+  });
+
+  it("prefers the current course for a bare title, else the first match", () => {
+    expect(resolveWikiLink({ target: "Summary" }, two, undefined, 2).href).toBe("/vault/2");
+    expect(resolveWikiLink({ target: "Summary" }, two).href).toBe("/vault/1");
+  });
+
+  it("is missing when the named course has no such note", () => {
+    expect(resolveWikiLink({ course: "Chemistry", target: "Summary" }, two).missing).toBe(true);
   });
 });
 
@@ -117,12 +149,5 @@ describe("new-note hrefs", () => {
   it("ignores other hrefs", () => {
     expect(titleFromNewNoteHref("#parts-list")).toBeNull();
     expect(titleFromNewNoteHref("#wikilink-new:%E0%A4%A")).toBeNull();
-  });
-});
-
-describe("wikiLinksToTitle", () => {
-  it("finds every name link to a title, case-insensitively", () => {
-    const md = "[[Custom PCB]] and [[custom pcb#Stage|x]] but not [[Custom PCBs]] or [[note:5]]";
-    expect(wikiLinksToTitle(md, "Custom PCB")).toHaveLength(2);
   });
 });
