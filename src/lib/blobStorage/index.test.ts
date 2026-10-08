@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// resolveStorageConfig reads data/storage-config.json off disk (in this
-// repo, currently a real Supabase project's credentials) — mocked so these
+// resolveStorageConfig reads data/storage-config.json off disk (which can hold real
+// cloud credentials) — mocked so these
 // tests are deterministic and never read that file or depend on its
 // contents. blobKeyFromUrl calls it fresh on every call, so the mock is
 // reconfigured per test rather than fixed once at import time.

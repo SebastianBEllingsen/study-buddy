@@ -13,10 +13,11 @@ import {
 import { buildPlanMaterialDigests, noteFingerprint } from "./planMaterial";
 import { resolveStages } from "./roadmap";
 import { findChapterResources, StudyPlanNotFoundError } from "./resources";
-import { rescheduleQuietly } from "./scheduleService";
+import { removePlanFromGoogle, rescheduleQuietly } from "./scheduleService";
 import { makeDiagnosticQuizzes } from "./diagnostic";
 import {
   getStudyPlan,
+  getStudyPlanForCourse,
   replaceAiResources,
   replaceStudyPlan,
   setChapterLevels,
@@ -151,6 +152,10 @@ export async function createStudyPlanForCourse(
   }));
 
   const model = await getModelInfo(efficient);
+  // Replacing the plan deletes its sessions, and with them the ids of their
+  // Google Calendar events: take the events out first.
+  const previous = await getStudyPlanForCourse(courseId);
+  if (previous) await removePlanFromGoogle(previous.id);
   const plan = await replaceStudyPlan({
     courseId,
     title: outline.title,

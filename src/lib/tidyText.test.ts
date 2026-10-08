@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // tidyText.ts imports generateText from ./aiClient, which imports ./models
 // -> ./db, whose module load connects to whatever backend
-// data/storage-config.json currently points at (a real Supabase project in
-// this repo). Mocked so that never happens — see grading.test.ts for the
+// data/storage-config.json currently points at (possibly a real cloud
+// database). Mocked so that never happens — see grading.test.ts for the
 // same concern in more detail.
 const generateText = vi.fn();
 vi.mock("./aiClient", () => ({ generateText }));

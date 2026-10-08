@@ -34,6 +34,10 @@ export async function PATCH(request: Request, { params }: Params) {
   const id = parseId(noteId);
   if (id === null) return Response.json({ error: "Note not found" }, { status: 404 });
   const body = await parseJsonObjectBody(request);
+  // The updates below silently match no row for a deleted note and would
+  // still answer ok, so an editor open on a note deleted elsewhere kept
+  // "saving" into nothing.
+  if (!(await getNote(id))) return Response.json({ error: "Note not found" }, { status: 404 });
 
   try {
     if (typeof body.title === "string") {

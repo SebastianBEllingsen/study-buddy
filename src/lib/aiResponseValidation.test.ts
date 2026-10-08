@@ -258,3 +258,23 @@ describe("normalizeStudyPlanReplan", () => {
     expect(() => normalizeStudyPlanReplan("nope")).toThrow(InvalidAiResponseError);
   });
 });
+
+describe("assertQuizContentShape — unusable questions", () => {
+  const base = { question: "Q", explanation: "E" };
+  const bad = (q: Record<string, unknown>) => () => assertQuizContentShape({ questions: [{ ...base, ...q }] });
+
+  it("rejects an unknown type, too few options, and a multi-select with no correct answers", () => {
+    expect(bad({ type: "essay", modelAnswer: "A" })).toThrow(InvalidAiResponseError);
+    expect(bad({ type: "mcq", options: ["only one"], correctIndex: 0 })).toThrow(InvalidAiResponseError);
+    expect(bad({ type: "mcq", options: ["a", 2], correctIndex: 0 })).toThrow(InvalidAiResponseError);
+    expect(bad({ type: "multi_select", options: ["a", "b"], correctIndices: [] })).toThrow(InvalidAiResponseError);
+  });
+
+  it("accepts well-formed questions of each type", () => {
+    expect(
+      bad({ type: "multi_select", options: ["a", "b", "c"], correctIndices: [0, 2] })
+    ).not.toThrow();
+    expect(bad({ type: "mcq", options: ["a", "b"], correctIndex: 1 })).not.toThrow();
+    expect(bad({ type: "short_answer", modelAnswer: "A" })).not.toThrow();
+  });
+});

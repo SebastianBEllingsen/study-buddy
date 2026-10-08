@@ -233,7 +233,7 @@ export default function ChatContent({
     loadConversations();
     fetch("/api/courses")
       .then((r) => r.json())
-      .then(setCourses)
+      .then((list) => Array.isArray(list) && setCourses(list))
       .catch(() => {});
   }
 
@@ -265,10 +265,12 @@ export default function ChatContent({
     setActiveId(id);
     setLoadingConversation(true);
     try {
-      const detail: { messages: ChatMessage[] } = await fetch(`/api/chat/conversations/${id}`).then((r) =>
+      const detail: { messages?: ChatMessage[] } = await fetch(`/api/chat/conversations/${id}`).then((r) =>
         r.json()
       );
       if (requestId !== selectRequestId.current) return; // a newer selectConversation call has since started
+      // An error body (say, a conversation deleted from another window) has no messages.
+      if (!Array.isArray(detail.messages)) throw new Error("No messages");
       setMessages(detail.messages);
     } catch {
       if (requestId !== selectRequestId.current) return;
@@ -439,6 +441,7 @@ export default function ChatContent({
         const created: ChatConversation = await fetch("/api/chat/conversations", {
           method: "POST",
         }).then((r) => r.json());
+        if (typeof created?.id !== "number") throw new Error("Couldn't start a conversation");
         conversationId = created.id;
         setActiveId(created.id);
         setSendingConversationId(created.id);
@@ -481,9 +484,16 @@ export default function ChatContent({
       // Only where the user still is: if they've opened another conversation
       // meanwhile, this one's reply is already saved and shows when they go back.
       if (activeIdRef.current === conversationId) setMessages((prev) => [...prev, reply]);
-      // Refreshes title (set from the first message) and reordering.
-      const list: ChatConversation[] = await fetch("/api/chat/conversations").then((r) => r.json());
-      setConversations(list);
+      // Refreshes title (set from the first message) and reordering. The
+      // message is already sent and answered by now, so a failure here must
+      // not be reported as a failed send (which would restore the draft and
+      // invite sending it again).
+      try {
+        const list: ChatConversation[] = await fetch("/api/chat/conversations").then((r) => r.json());
+        if (Array.isArray(list)) setConversations(list);
+      } catch {
+        // The list catches up the next time it loads.
+      }
     } catch {
       toast.error("Couldn't get a reply");
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));

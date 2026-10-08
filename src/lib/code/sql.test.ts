@@ -73,6 +73,7 @@ describe("buildSqlScript", () => {
   it("runs the setup, then each statement with its marker, then the test's query", () => {
     const script = buildSqlScript("CREATE TABLE a(x)", ["INSERT INTO a VALUES (1)", "SELECT * FROM a"], "SELECT count(*) FROM a;");
     expect(script.split("\n").filter(Boolean)).toEqual([
+      "PRAGMA hard_heap_limit = 268435456;",
       "PRAGMA foreign_keys = ON;",
       "CREATE TABLE a(x);",
       ".print @@SB:setup@@",

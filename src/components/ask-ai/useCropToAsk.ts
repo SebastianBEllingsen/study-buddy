@@ -58,6 +58,9 @@ export function useCropToAsk(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
+  // Tags each request, so a reply to a thread that has since been dismissed
+  // (or replaced by a new crop) is dropped instead of landing in the next one.
+  const requestIdRef = useRef(0);
 
   function toggleCropMode() {
     setCropMode((prev) => !prev);
@@ -104,6 +107,7 @@ export function useCropToAsk(
   // set just before calling this wouldn't be visible yet within the same
   // event handler.
   async function send(forImage: string, q: string, priorTurns: AskTurn[]) {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -118,6 +122,7 @@ export function useCropToAsk(
         }),
       });
       const body = await res.json();
+      if (requestId !== requestIdRef.current) return;
       if (!res.ok) {
         setError(body.error ?? "Something went wrong");
         return;
@@ -127,9 +132,10 @@ export function useCropToAsk(
         { question: q || "Explain what's shown in this image.", answer: body.answer },
       ]);
     } catch {
+      if (requestId !== requestIdRef.current) return;
       setError("Network error — check your connection and try again.");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }
 
@@ -138,6 +144,8 @@ export function useCropToAsk(
     const forImage = pending;
     const q = question.trim();
     setImage(forImage);
+    setTurns([]);
+    setError(null);
     setPending(null);
     setQuestion("");
     send(forImage, q, []);
@@ -156,6 +164,8 @@ export function useCropToAsk(
   }
 
   function dismiss() {
+    requestIdRef.current++;
+    setLoading(false);
     setImage(null);
     setTurns([]);
     setError(null);

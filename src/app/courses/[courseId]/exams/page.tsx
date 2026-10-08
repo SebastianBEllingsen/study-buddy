@@ -4,6 +4,8 @@ import { Explain } from "@/components/Explain";
 import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { FileSearch, GraduationCap, LoaderCircle, Play, Trash2 } from "lucide-react";
@@ -120,6 +122,7 @@ export default function ExamPrepPage() {
   const { courseId } = useParams<{ courseId: string }>();
   const router = useRouter();
   const aiEnabled = useAiEnabled();
+  const fmt = useDateFormatter();
   const { data, error, mutate } = useSWR<ExamPrep>(`/api/courses/${courseId}/exams`);
   const [repicking, setRepicking] = useState(false);
   const [duration, setDuration] = useState("");
@@ -307,7 +310,7 @@ export default function ExamPrepPage() {
                             {graded.map((a) => (
                               <Link key={a.id} href={`/courses/${courseId}/exams/attempts/${a.id}`}>
                                 <Badge variant="outline" className="hover:bg-muted">
-                                  {formatPoints(a.score as number)} pts · {a.started_at.slice(0, 10)}
+                                  {formatPoints(a.score as number)} pts · {fmt.numericDate(fromUtcTimestamp(a.started_at))}
                                 </Badge>
                               </Link>
                             ))}

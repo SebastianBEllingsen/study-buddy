@@ -14,6 +14,7 @@ vi.mock("../aiClient", () => ({
 }));
 
 const buildCourseContext = vi.fn();
+vi.mock("../readiness/load", () => ({ getExamDate: async () => null }));
 vi.mock("../context", () => ({ buildCourseContext: (...a: unknown[]) => buildCourseContext(...a) }));
 
 const getDocument = vi.fn();
@@ -89,6 +90,7 @@ vi.mock("./store", () => ({
     return current;
   },
   getStudyPlan: async () => current,
+  getStudyPlanForCourse: async () => undefined,
   getChapter: vi.fn(),
   setChapterLevels: async (_planId: number, levels: Map<number, ChapterLevel>) => {
     if (failLevels) throw new Error("database unavailable");

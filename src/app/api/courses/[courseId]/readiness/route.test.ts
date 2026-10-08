@@ -9,6 +9,11 @@ vi.mock("@/lib/readiness/load", () => ({
   loadReadiness: (...a: unknown[]) => loadReadiness(...a),
 }));
 
+const getStudyPlanForCourse = vi.fn();
+vi.mock("@/lib/studyPlan/store", () => ({ getStudyPlanForCourse: (...a: unknown[]) => getStudyPlanForCourse(...a) }));
+const rescheduleQuietly = vi.fn();
+vi.mock("@/lib/studyPlan/scheduleService", () => ({ rescheduleQuietly: (...a: unknown[]) => rescheduleQuietly(...a) }));
+
 const route = await import("./route");
 const explain = await import("../explain/route");
 const params = Promise.resolve({ courseId: "4" });
@@ -23,6 +28,8 @@ vi.mock("@/lib/explain/store", () => ({ listExplainSessions: vi.fn().mockResolve
 beforeEach(() => {
   getCourse.mockReset().mockResolvedValue({ id: 4, name: "Sample Course" });
   setExamDate.mockReset();
+  getStudyPlanForCourse.mockReset().mockResolvedValue(undefined);
+  rescheduleQuietly.mockReset();
   loadReadiness.mockReset().mockResolvedValue({ examDate: null });
 });
 
@@ -32,6 +39,16 @@ describe("PUT /api/courses/[courseId]/readiness", () => {
     expect(setExamDate).toHaveBeenCalledWith(4, "2026-06-01");
     expect((await put({ examDate: null })).status).toBe(200);
     expect(setExamDate).toHaveBeenLastCalledWith(4, null);
+  });
+
+  it("rebuilds a scheduled plan's sessions toward the new date", async () => {
+    getStudyPlanForCourse.mockResolvedValue({ id: 9, options: { schedule: true } });
+    await put({ examDate: "2026-06-01" });
+    expect(rescheduleQuietly).toHaveBeenCalledWith(9);
+    rescheduleQuietly.mockClear();
+    getStudyPlanForCourse.mockResolvedValue({ id: 9, options: { schedule: false } });
+    await put({ examDate: "2026-06-01" });
+    expect(rescheduleQuietly).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed date and an unknown course", async () => {

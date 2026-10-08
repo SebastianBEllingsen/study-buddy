@@ -159,7 +159,7 @@ export function MonthGrid({
               <div className="mt-1 space-y-0.5">
                 {/* Feed-sourced events (see lib/calendarFeeds.ts) are
                     someone else's calendar mirrored in read-only — editing
-                    a Mine Studier lecture or a Canvas assignment through
+                    a timetable lecture or an assignment deadline through
                     this app makes no sense the way editing your own Google
                     event does, so these render inert, with a muted tint
                     instead of the focus color that signals "yours, click

@@ -58,8 +58,12 @@ export function ResourceEditDialog({
   async function handleSave() {
     if (!urlValid) return;
     setSaving(true);
-    const ok = await onSave({ url: url.trim(), title: title.trim(), kind, note: note.trim() });
-    setSaving(false);
+    let ok = false;
+    try {
+      ok = await onSave({ url: url.trim(), title: title.trim(), kind, note: note.trim() });
+    } finally {
+      setSaving(false);
+    }
     if (ok) onOpenChange(false);
   }
 

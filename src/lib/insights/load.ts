@@ -15,7 +15,7 @@ import { localToday } from "../studyPlan/schedule";
 import { listReviewLogsSince } from "../review/store";
 import { listMistakes } from "../review/mistakes";
 import { calibrationTable, calibrationVerdict, topMisconceptions, type CalibrationRow, type WeekSummary } from "./summary";
-import { toUtcText } from "../time";
+import { localDayOfUtc, toUtcText } from "../time";
 
 // The insights page: calibration over the last 30 days and a review of the
 // last 7, across every course or one.
@@ -90,7 +90,8 @@ export async function loadInsights(courseId: number | null, now = new Date()): P
       resolvedMistakes: inCourse(resolved).length,
       plannedMinutes: scopedSessions.reduce((n, s) => n + s.minutes, 0),
       doneMinutes: scopedSessions.filter((s) => s.done_at).reduce((n, s) => n + s.minutes, 0),
-      activeDays: new Set(weekLogs.map((l) => l.reviewed_at.slice(0, 10))).size,
+      // The learner's own days, like the streak and heatmap — not UTC days.
+      activeDays: new Set(weekLogs.map((l) => localDayOfUtc(l.reviewed_at))).size,
     },
     misconceptions: topMisconceptions(open),
     mistakeTypes: summarizeMistakeTypes(open),

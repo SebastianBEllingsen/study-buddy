@@ -125,3 +125,25 @@ describe("renderTemplate for display as HTML", () => {
     expect(htmlToCardFace('<div>Hello</div><span style="display:none">Deck::Name</span>').text).toBe("Hello");
   });
 });
+
+describe("stripTags", () => {
+  const reference = (html: string) => html.replace(/<[^>]*>/g, "");
+
+  it("matches the plain regex on messy input", async () => {
+    const { stripTags } = await import("./ankiHtml");
+    const pieces = ["<", ">", "a", " ", "<b>", "</i>", "<br/>", "x<y", "z>w", "\n", "<<", ">>", '"'];
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let i = 0; i < 3000; i++) {
+      const html = Array.from({ length: Math.floor(rnd() * 14) }, () => pieces[Math.floor(rnd() * pieces.length)]).join("");
+      expect(stripTags(html)).toBe(reference(html));
+    }
+  });
+
+  it("stays fast on text full of stray angle brackets", async () => {
+    const { stripTags } = await import("./ankiHtml");
+    const started = performance.now();
+    expect(stripTags("<".repeat(200_000))).toBe("<".repeat(200_000));
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});

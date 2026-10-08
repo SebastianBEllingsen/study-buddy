@@ -6,6 +6,7 @@ vi.mock("@/lib/review/queue", () => ({ DEFAULT_QUEUE_LIMIT: 100 }));
 const completeStep = vi.fn();
 vi.mock("@/lib/studyPlan/ownership", () => ({}));
 vi.mock("@/lib/studyPlan/store", () => ({}));
+vi.mock("@/lib/studyPlan/scheduleService", () => ({}));
 vi.mock("@/lib/today/complete", async () => {
   const actual = await vi.importActual<typeof import("@/lib/today/complete")>("@/lib/today/complete");
   return { parseCompletion: actual.parseCompletion, completeStep: (...a: unknown[]) => completeStep(...a) };

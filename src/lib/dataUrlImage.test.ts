@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // dataUrlImage.ts imports blobKeyFromUrl from ./blobStorage, which reads
-// data/storage-config.json (in this repo, a real Supabase project's
+// data/storage-config.json (which can hold real cloud
 // credentials) via resolveStorageConfig — mocked so these tests never
 // touch that file. Needs a default return value before the dynamic
 // import below, since blobStorage/index.ts calls it at module load too.

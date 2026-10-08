@@ -11,6 +11,7 @@ import {
 import type { GenerationMode, GeneratedItem } from "./models";
 import { estimateTokens, CHUNK_THRESHOLD_TOKENS, chunkText } from "./chunking";
 import { mapWithConcurrency } from "./concurrency";
+import { InvalidAiResponseError } from "./aiResponseValidation";
 import type {
   QuizContent,
   FlashcardsContent,
@@ -334,6 +335,15 @@ export async function generateForCourse(
         ? await generateNotesChunked(context.courseName, chunks, efficient, context.documentIds)
         : await generateNotes(context.courseName, context.combinedText, undefined, efficient, context.documentIds);
       break;
+  }
+
+  // A reply that parses but holds nothing would be saved as an empty set the
+  // learner can't use — better a clear "try again" than that.
+  if (
+    (mode === "quiz" && (content as QuizContent).questions.length === 0) ||
+    (mode === "flashcards" && (content as FlashcardsContent).cards.length === 0)
+  ) {
+    throw new InvalidAiResponseError(mode === "quiz" ? "it wrote no questions" : "it wrote no cards");
   }
 
   const title = chapter

@@ -16,6 +16,7 @@ async function backend() {
     model: MODEL,
     providerLabel: "OpenAI",
     keyHelpText: "Get one at platform.openai.com/api-keys.",
+    maxTokensField: "max_completion_tokens",
   });
 }
 

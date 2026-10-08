@@ -10,8 +10,11 @@
 //   off              — paused: no chapter or practice steps from this plan in the
 //                      mixed view (reviews and mistakes still come)
 //
-// A "study day" is a day with any activity in the course (reviewed cards or
-// questions, a finished resource, a quiz, a code exercise), in Today or not.
+// A "study day" is a day with work on the plan itself (a finished resource, a
+// ticked subtopic, a finished plan session, a chapter quiz or flashcards, a
+// code exercise), in Today or not. Reviewing the course's other cards doesn't
+// count: that step comes first in Today, so it would mark the plan as done
+// before its chapter step.
 
 export const TODAY_CADENCES = ["auto", "daily", "every_other_day", "weekly", "off"] as const;
 export type TodayCadence = (typeof TODAY_CADENCES)[number];
@@ -42,6 +45,10 @@ export interface CadenceStatus {
   must: string | null;
   // The plan gets no chapter step today: it rests (studied yesterday, every other day) or is off.
   skip: boolean;
+  // Weekly plans only: false when the plan's coding practice isn't due today.
+  // Unlike `must` it ignores today's own activity, so the step doesn't vanish
+  // mid-day once you've started studying. Undefined means due.
+  codeDue?: boolean;
 }
 
 export const NO_CADENCE: CadenceStatus = { must: null, skip: false };
@@ -75,8 +82,12 @@ export function cadenceStatus(setting: CadenceSetting, activeDays: ReadonlySet<s
       const target = perWeekOf(setting);
       let days = 0;
       for (let back = 0; back < 7; back++) if (activeDays.has(shiftDay(today, -back))) days++;
-      if (studiedToday || days >= target) return NO_CADENCE;
-      return { must: `${days} of ${target} study days in the last week`, skip: false };
+      // Study days in the six days before today: today still counts toward the
+      // target until it ends, so coding practice is due while that's short.
+      const before = days - (studiedToday ? 1 : 0);
+      const codeDue = before < target;
+      if (studiedToday || days >= target) return { must: null, skip: false, codeDue };
+      return { must: `${days} of ${target} study days in the last week`, skip: false, codeDue };
     }
     default:
       return NO_CADENCE;

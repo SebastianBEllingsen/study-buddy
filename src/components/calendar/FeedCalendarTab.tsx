@@ -99,7 +99,16 @@ export function FeedCalendarTab({ feed }: { feed: CalendarFeed }) {
               <button
                 key={v}
                 type="button"
-                onClick={() => setView(v)}
+                onClick={() => {
+                  // Each view keeps its own position, so carry the one being
+                  // left over — otherwise switching shows a stale period.
+                  if (v === "month" && view === "week") setMonth(startOfMonth(weekStart));
+                  if (v === "week" && view === "month") {
+                    const now = new Date();
+                    setWeekStart(startOfWeek(now.getFullYear() === month.getFullYear() && now.getMonth() === month.getMonth() ? now : month));
+                  }
+                  setView(v);
+                }}
                 aria-pressed={view === v}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors",

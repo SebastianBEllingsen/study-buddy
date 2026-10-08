@@ -27,7 +27,7 @@ const question = { type: "mcq" as const, question: "Q", options: ["a", "b"], cor
 
 async function courseWithPlan(name: string, options: Partial<Options> = {}) {
   const course = await createCourse(name);
-  await store.replaceStudyPlan({
+  const plan = await store.replaceStudyPlan({
     courseId: course.id,
     title: `${name} plan`,
     status: "ready",
@@ -55,20 +55,25 @@ async function courseWithPlan(name: string, options: Partial<Options> = {}) {
       },
     ],
   });
-  const quiz = await createGeneratedItem({
-    courseId: course.id,
-    folderId: null,
-    sourceFolderId: null,
-    sourceHandpicked: false,
-    mode: "quiz",
-    title: `${name} quiz`,
-    contentJson: { questions: [question] },
-    sourceDocumentIds: [],
-  });
-  // The course gets activity `daysAgo` days ago (a couple of hours earlier, to stay clear of midnight).
-  const studyDaysAgo = (daysAgo: number) =>
+  // `studyPlanChapterId` set: the plan's own chapter quiz; unset: a quiz made for the course.
+  const makeQuiz = (chapterId?: number) =>
+    createGeneratedItem({
+      courseId: course.id,
+      folderId: null,
+      sourceFolderId: null,
+      sourceHandpicked: false,
+      mode: "quiz",
+      title: `${name} quiz`,
+      contentJson: { questions: [question] },
+      sourceDocumentIds: [],
+      ...(chapterId !== undefined && { studyPlanChapterId: chapterId }),
+    });
+  const quiz = await makeQuiz(plan.chapters[0].id);
+  const courseQuiz = await makeQuiz();
+  // The plan gets work `daysAgo` days ago (a couple of hours earlier, to stay clear of midnight).
+  const answer = (item: typeof quiz) => (daysAgo: number) =>
     recordQuizAnswers({
-      item: quiz,
+      item,
       source: "quiz",
       now: new Date(Date.now() - daysAgo * 86_400_000 - 2 * 3_600_000),
       entries: [
@@ -80,7 +85,7 @@ async function courseWithPlan(name: string, options: Partial<Options> = {}) {
         },
       ],
     });
-  return { course, studyDaysAgo };
+  return { course, plan, studyDaysAgo: answer(quiz), courseReviewDaysAgo: answer(courseQuiz) };
 }
 
 async function chapterSteps(courseId: number | null = null) {
@@ -98,6 +103,48 @@ describe("activeDaysByCourse", () => {
     expect(days.get(busy.course.id)?.size).toBe(2);
     expect(days.get(quiet.course.id)?.size).toBe(0);
     expect(await activeDaysByCourse([], new Date())).toEqual(new Map());
+  });
+});
+
+describe("what counts as working on a plan", () => {
+  const dayOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  it("doesn't count reviewing the course's other cards", async () => {
+    const { course, courseReviewDaysAgo } = await courseWithPlan("Reviewed course");
+    await courseReviewDaysAgo(1);
+    expect((await activeDaysByCourse([course.id], new Date())).get(course.id)?.size).toBe(0);
+  });
+
+  it("counts a finished plan session, whether scheduled or recorded from Today", async () => {
+    const { course, plan } = await courseWithPlan("Session course");
+    await store.addDoneSession(plan.id, plan.chapters[0].id, dayOf(new Date()), 25);
+    const days = (await activeDaysByCourse([course.id], new Date())).get(course.id);
+    expect([...(days ?? [])]).toEqual([dayOf(new Date())]);
+  });
+
+  it("counts a ticked subtopic, but not a chapter nobody has ticked anything in", async () => {
+    const { course, plan } = await courseWithPlan("Subtopic course");
+    await store.updateChapter(plan.chapters[0].id, { title: "Renamed" });
+    expect((await activeDaysByCourse([course.id], new Date())).get(course.id)?.size).toBe(0);
+    await store.updateChapter(plan.chapters[0].id, { subtopics: [{ text: "First idea", done: true }] });
+    expect((await activeDaysByCourse([course.id], new Date())).get(course.id)?.size).toBe(1);
+  });
+
+  it("keeps an every-day plan from being cleared by reviews, but clears it once Today records the work", async () => {
+    const { course, plan, courseReviewDaysAgo } = await courseWithPlan("Daily and reviewed", { todayCadence: "daily" });
+    await courseReviewDaysAgo(0);
+    expect((await chapterSteps())[0].why).toBe("your every-day plan");
+    await store.addDoneSession(plan.id, plan.chapters[0].id, dayOf(new Date()), 20);
+    expect((await chapterSteps())[0].why).not.toBe("your every-day plan");
+    expect(course.id).toBeGreaterThan(0);
+  });
+});
+
+describe("a plan's Today frequency on a scheduled plan", () => {
+  it("still gets its chapter on a day with no session, when it's set to every day", async () => {
+    await courseWithPlan("Scheduled auto", { schedule: true });
+    await courseWithPlan("Scheduled daily", { schedule: true, todayCadence: "daily" });
+    expect((await chapterSteps()).map((s) => s.courseName)).toEqual(["Scheduled daily"]);
   });
 });
 

@@ -311,6 +311,12 @@ describe("coding practice on a programming plan", () => {
     expect(steps.find((s) => s.kind === "code")?.href).toBe("/courses/2/code?chapterId=9&language=cpp&auto=1&project=1");
   });
 
+  it("skips coding practice for a plan that has met its weekly target", () => {
+    const code = { language: "cpp" as const, setId: null };
+    expect(planDay({ ...none, minutes: 60, chapters: [chapter(5, { code, skipCode: true })] }).some((s) => s.kind === "code")).toBe(false);
+    expect(planDay({ ...none, minutes: 60, chapters: [chapter(5, { code })] }).some((s) => s.kind === "code")).toBe(true);
+  });
+
   it("picks up the chapter's open code set instead of starting a new one", () => {
     const steps = planDay({ ...none, minutes: 60, chapters: [coding(5, 31)] });
     expect(steps.find((s) => s.kind === "code")?.href).toBe("/courses/2/code/31");

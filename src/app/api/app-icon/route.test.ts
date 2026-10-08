@@ -21,6 +21,20 @@ describe("GET /api/app-icon", () => {
     expect(res.headers.get("Content-Type")).toBe("image/png");
   });
 
+  it("never serves a stored SVG data URL as a document of this origin", async () => {
+    getAppSettings.mockResolvedValue({ appIconImage: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", appIcon: null });
+    const res = await GET(req());
+    expect(res.status).toBe(307);
+    expect(res.headers.get("Location")).toBe("http://localhost:3000/favicon.ico");
+  });
+
+  it("serves raster icons sandboxed and unsniffable", async () => {
+    getAppSettings.mockResolvedValue({ appIconImage: "data:image/png;base64,AAAA", appIcon: null });
+    const res = await GET(req());
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Security-Policy")).toContain("sandbox");
+  });
+
   // Regression coverage: local blob storage hands back a relative URL
   // (/api/blobs/...) and Response.redirect() throws a TypeError on a
   // relative URL — every page load hit this whenever a custom app icon was

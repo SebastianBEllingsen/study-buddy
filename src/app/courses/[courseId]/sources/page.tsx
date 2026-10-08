@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { FileText, GitCompareArrows, LoaderCircle, NotebookPen, ShieldCheck } from "lucide-react";
@@ -64,6 +66,7 @@ export default function SourcesPage() {
   const key = `/api/courses/${courseId}/sources`;
   const { data, error, mutate } = useSWR<SourcesResponse>(key);
   const aiEnabled = useAiEnabled();
+  const fmt = useDateFormatter();
   const [checking, setChecking] = useState(false);
 
   async function patch(url: string, body: Record<string, unknown>, optimistic: SourcesResponse) {
@@ -205,7 +208,7 @@ export default function SourcesPage() {
               </h2>
               <p className="text-sm text-muted-foreground">
                 {check
-                  ? `Last compared ${check.createdAt.slice(0, 10)} · ${check.sourceCount} sources${
+                  ? `Last compared ${fmt.numericDate(fromUtcTimestamp(check.createdAt))} · ${check.sourceCount} sources${
                       check.newSources > 0 ? ` · ${check.newSources} new since` : ""
                     }`
                   : "Compares your documents and notes used for generation, and lists contradictions."}

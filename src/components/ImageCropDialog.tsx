@@ -107,14 +107,15 @@ export function ImageCropDialog({
     if (!open || !file) return;
     const url = URL.createObjectURL(file);
     const img = new Image();
+    let cancelled = false;
     img.onload = () => {
+      if (cancelled) return;
       setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
       setImgEl(img);
       setZoom(1);
       setOffset({ x: 0, y: 0 });
     };
     img.src = url;
-    let cancelled = false;
     file
       .arrayBuffer()
       .then((buffer) => {
@@ -203,9 +204,11 @@ export function ImageCropDialog({
     function onUp() {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
     }
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
   }
 
   // Multiplicative (not additive) so the step feels the same at any zoom

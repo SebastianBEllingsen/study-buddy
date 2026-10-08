@@ -40,16 +40,17 @@ export function autoCourseColor(code: string | null): PaletteKey {
   return AUTO_KEYS[Math.abs(hash) % AUTO_KEYS.length];
 }
 
-// "IKT300 Forelesning" → { code: "IKT300", type: "Forelesning" };
-// "MA-224 Lecture 2" → { code: "MA-224", type: "Lecture 2" }. Mine
-// Studier titles its Canvas deadlines the other way round ("Assignment -
-// MA-224"), so a trailing " - CODE" is recognized too. A title without a
-// course code (e.g. "Bookings Booking") comes back whole as the type with a
-// null code. An optional "-1"-style group suffix on the code is dropped so
-// every group of one course shares a colour.
-const CODE = "[A-ZÆØÅ]{2,6}-?\\d{2,4}[A-Z]?";
-const LEADING_CODE_RE = new RegExp(`^(${CODE})(?:-\\d{1,2})?(?:\\s*[-–:]\\s*|\\s+|$)(.*)$`);
-const TRAILING_CODE_RE = new RegExp(`^(.+?)\\s+[-–]\\s+(${CODE})$`);
+// "ABC300 Lecture" → { code: "ABC300", type: "Lecture" };
+// "MA-224 Lecture 2" → { code: "MA-224", type: "Lecture 2" }. Some portals
+// title their deadlines the other way round ("Assignment - MA-224"), so a
+// trailing " - CODE" is recognized too. A title without a course code (e.g.
+// "Room booking") comes back whole as the type with a null code. An
+// optional "-1"-style group suffix on the code is dropped so every group of
+// one course shares a colour. Letters are any uppercase letters, accented
+// ones included.
+const CODE = "\\p{Lu}{2,6}-?\\d{2,4}\\p{Lu}?";
+const LEADING_CODE_RE = new RegExp(`^(${CODE})(?:-\\d{1,2})?(?:\\s*[-–:]\\s*|\\s+|$)(.*)$`, "u");
+const TRAILING_CODE_RE = new RegExp(`^(.+?)\\s+[-–]\\s+(${CODE})$`, "u");
 
 export function parseCourseEvent(title: string): { code: string | null; type: string } {
   const trimmed = title.trim();
@@ -61,20 +62,19 @@ export function parseCourseEvent(title: string): { code: string | null; type: st
 }
 
 // A deadline rather than a scheduled session — gets a check icon on its
-// block. Zero-length events are deadlines by shape; Mine Studier gives its
-// Canvas assignments a nominal hour, so those are recognized by type.
+// block. Zero-length events are deadlines by shape; some portals give their
+// assignments a nominal hour, so those are recognized by type.
 export function isDeadlineEvent(type: string, start: string, end: string): boolean {
   return start === end || /^assignment\b/i.test(type);
 }
 
-// "C-bygget Grimstad C2 041 https://link.mazemap.com/…" → "C C2 041", the
-// compact form the student portal shows on a timetable block. The map link
-// is returned separately so the details popover can still offer it.
+// "Hall C2 041 https://maps.example/abc" → "Hall C2 041", the room text without
+// the map link a feed often appends. The link is returned separately so the
+// details popover can still offer it.
 export function shortLocation(location: string): { text: string; mapUrl: string | null } {
   const mapUrl = location.match(/https?:\/\/\S+/)?.[0] ?? null;
   const text = location
     .replace(/https?:\/\/\S+/g, "")
-    .replace(/\b([A-Z])-bygget(?: Grimstad| Kristiansand)?\b/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/\s+,/g, ",")
     .trim();

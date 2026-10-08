@@ -1,6 +1,7 @@
 import path from "node:path";
 import { getGeneratedItem } from "@/lib/models";
 import { parseId } from "@/lib/routeParams";
+import { contentDisposition } from "@/lib/contentDisposition";
 import { blobKeyFromUrl, readBlob } from "@/lib/blobStorage";
 import { flashcardsToApkg, type LoadLocalMedia } from "@/lib/anki/exportDeck";
 import { MEDIA_MIME_BY_EXTENSION } from "@/lib/anki/importDeck";
@@ -55,7 +56,7 @@ export async function GET(_request: Request, { params }: Params) {
     return new Response(new Uint8Array(apkg), {
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${filename.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        "Content-Disposition": contentDisposition("attachment", filename),
       },
     });
   } catch (err) {

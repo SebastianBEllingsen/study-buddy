@@ -5,6 +5,7 @@ const completeStep = vi.fn();
 // reaches the database through these two modules.
 vi.mock("@/lib/studyPlan/store", () => ({}));
 vi.mock("@/lib/studyPlan/ownership", () => ({}));
+vi.mock("@/lib/studyPlan/scheduleService", () => ({}));
 vi.mock("@/lib/today/complete", async () => {
   const actual = await vi.importActual<typeof import("@/lib/today/complete")>("@/lib/today/complete");
   return { ...actual, completeStep: (...a: unknown[]) => completeStep(...a) };
@@ -36,6 +37,17 @@ describe("POST /api/today/complete", () => {
   it("ignores a minutes value that isn't a whole number", async () => {
     await POST(post({ type: "session", planId: 2, sessionId: 9, minutes: "30" }));
     expect(completeStep).toHaveBeenCalledWith({ type: "session", planId: 2, sessionId: 9 });
+  });
+
+  it("passes the chapter along with a session, so it can be found again after a reschedule", async () => {
+    await POST(post({ type: "session", planId: 2, sessionId: 9, chapterId: 4 }));
+    expect(completeStep).toHaveBeenCalledWith({ type: "session", planId: 2, sessionId: 9, chapterId: 4 });
+  });
+
+  it("takes a resource's progress for today, with the step's planned minutes", async () => {
+    await POST(post({ type: "progress", planId: 2, resourceId: 7, minutes: 23 }));
+    expect(completeStep).toHaveBeenCalledWith({ type: "progress", planId: 2, resourceId: 7, minutes: 23 });
+    expect((await POST(post({ type: "progress", planId: 2 }))).status).toBe(400);
   });
 
   it("says when the step isn't in that plan, and when saving fails", async () => {

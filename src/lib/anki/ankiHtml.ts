@@ -102,8 +102,19 @@ function renderFurigana(text: string, mode: "furigana" | "kanji" | "kana"): stri
   });
 }
 
-function stripTags(html: string): string {
-  return html.replace(/<[^>]*>/g, "");
+// Same result as html.replace(/<[^>]*>/g, ""), but linear: the regex rescans to
+// the end of the text from every stray "<" that has no ">" after it, which
+// made a card of tens of thousands of them take seconds.
+export function stripTags(html: string): string {
+  const lastClose = html.lastIndexOf(">");
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const open = html.indexOf("<", from);
+    if (open === -1 || open > lastClose) return out + html.slice(from);
+    out += html.slice(from, open);
+    from = html.indexOf(">", open) + 1;
+  }
 }
 
 // Anki template syntax: {{Field}}, {{filter:Field}}, {{#Field}}…{{/Field}},

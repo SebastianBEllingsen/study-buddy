@@ -14,6 +14,19 @@ import { convertToPdf, LibreOfficeUnavailableError } from "./libreoffice";
 import { extensionOf, isSupportedExtension, isImageExtension, needsLibreOfficeConversion } from "./documentFormats";
 import { blobStore } from "./blobStorage";
 
+// The name a file is stored under on disk: its own name, cut down so that
+// with the unique prefix added in front it stays well inside the 255-byte
+// limit most file systems put on a name (a long lecture title as a file name
+// would otherwise fail the upload). The extension is kept.
+export function onDiskName(filename: string, maxBytes = 120): string {
+  const base = path.basename(filename);
+  if (Buffer.byteLength(base) <= maxBytes) return base;
+  const ext = path.extname(base);
+  let stem = base.slice(0, base.length - ext.length);
+  while (stem && Buffer.byteLength(stem) + Buffer.byteLength(ext) > maxBytes) stem = stem.slice(0, -1);
+  return `${stem}${ext}`;
+}
+
 export class UnsupportedDocumentTypeError extends Error {
   constructor() {
     super("Only PDF, DOCX, ODT, PPTX, and image files are supported");
@@ -45,7 +58,7 @@ export async function ingestDocumentBytes(params: {
   // See the matching comment this was extracted from (courses/[courseId]/
   // documents/route.ts, pre-refactor) — the on-disk name must never collide
   // across documents, and must never let a crafted filename escape `dir`.
-  const safeName = path.basename(params.filename);
+  const safeName = onDiskName(params.filename);
   const filePath = path.join(dir, `${crypto.randomUUID()}-${safeName}`);
   if (!filePath.startsWith(dir + path.sep)) {
     throw new Error("Invalid filename");

@@ -62,6 +62,7 @@ export default function SaveAttachmentToCourseDialog({
     fetch("/api/courses")
       .then((r) => r.json())
       .then((list: CourseSummary[]) => {
+        if (!Array.isArray(list)) throw new Error("Not a list of courses");
         setCourses(list);
         setCourseId(list[0]?.id ?? null);
       })
@@ -72,7 +73,8 @@ export default function SaveAttachmentToCourseDialog({
     if (courseId === null) return;
     fetch(`/api/courses/${courseId}`)
       .then((r) => r.json())
-      .then((detail: { folders: Folder[] }) => {
+      .then((detail: { folders?: Folder[] }) => {
+        if (!Array.isArray(detail.folders)) throw new Error("No folders");
         setFolders(detail.folders);
         setFolderId(null);
       })

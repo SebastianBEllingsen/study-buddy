@@ -12,7 +12,7 @@ import { bootstrapSqliteDatabase } from "./sqliteBootstrap";
 // Supabase mode). A test file that transitively pulls in db/index.ts
 // without mocking it — one stray non-`import type` reference away, as
 // happened once already this session — would otherwise silently start
-// mutating the developer's real local database, or (worse, in Supabase
+// mutating a real local database, or (worse, in Supabase
 // mode) reach the credentialed production connection in
 // data/storage-config.json through here. Vitest sets process.env.VITEST for
 // every test run, so this fails loudly and immediately at import time

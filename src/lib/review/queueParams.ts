@@ -16,8 +16,9 @@ export function parseQueueParams(url: URL, now = new Date()) {
   if (rawDay) {
     const date = new Date(rawDay);
     const text = Number.isNaN(date.getTime()) ? "" : toUtcText(date);
-    // A day start in the future or more than a day ago can't be "today".
-    if (UTC_TEXT.test(text) && date <= now && now.getTime() - date.getTime() <= 86_400_000) dayStart = text;
+    // A day start in the future or more than a day ago can't be "today". A local
+    // day can run 25 hours (the night clocks go back), so that much is allowed.
+    if (UTC_TEXT.test(text) && date <= now && now.getTime() - date.getTime() <= 25 * 3_600_000) dayStart = text;
   }
 
   const rawLimit = Number(url.searchParams.get("limit"));

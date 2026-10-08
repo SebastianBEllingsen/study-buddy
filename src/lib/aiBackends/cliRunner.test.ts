@@ -6,6 +6,7 @@ class FakeChildProcess extends EventEmitter {
   stderr = new EventEmitter();
   stdin = Object.assign(new EventEmitter(), { write: vi.fn(), end: vi.fn() });
   kill = vi.fn();
+  pid = 4242;
 }
 
 let fakeChild: FakeChildProcess;
@@ -75,5 +76,40 @@ describe("runCli", () => {
     // not itself resolve/reject the call.
     fakeChild.emit("close", 0);
     await expect(promise).resolves.toEqual({ stdout: "", stderr: "" });
+  });
+
+  it("takes the whole process group down on a timeout, not just the CLI", async () => {
+    if (process.platform === "win32") return;
+    const killGroup = vi.spyOn(process, "kill").mockImplementation(() => true);
+    vi.useFakeTimers();
+    try {
+      const promise = runCli(baseParams({ timeoutMs: 100 }));
+      const settled = expect(promise).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(150);
+      await settled;
+      expect(spawn.mock.calls[0][2]).toMatchObject({ detached: true });
+      expect(killGroup).toHaveBeenCalledWith(-4242, "SIGKILL");
+    } finally {
+      vi.useRealTimers();
+      killGroup.mockRestore();
+    }
+  });
+
+  it("falls back to killing just the CLI when there's no group to signal", async () => {
+    if (process.platform === "win32") return;
+    const killGroup = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("ESRCH");
+    });
+    vi.useFakeTimers();
+    try {
+      const promise = runCli(baseParams({ timeoutMs: 100 }));
+      const settled = expect(promise).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(150);
+      await settled;
+      expect(fakeChild.kill).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      killGroup.mockRestore();
+    }
   });
 });

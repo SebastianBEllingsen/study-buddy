@@ -117,6 +117,11 @@ export function useTodayFinished(): DayTotals | null {
   return totals && totals.date === localToday() ? totals : null;
 }
 
+// The running session as it is right now, outside of rendering.
+export function currentTodaySession(): TodaySession | null {
+  return read();
+}
+
 export function updateTodaySession(fn: (s: TodaySession) => TodaySession) {
   const current = read();
   if (current) saveTodaySession(fn(current));

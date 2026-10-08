@@ -4,6 +4,8 @@ import { Explain } from "@/components/Explain";
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { LoaderCircle, MessageCircleQuestion, NotebookPen } from "lucide-react";
@@ -34,6 +36,7 @@ function ExplainStart() {
   const search = useSearchParams();
   const router = useRouter();
   const aiEnabled = useAiEnabled();
+  const fmt = useDateFormatter();
   const [kind, setKind] = useState<ExplainKind>(search.get("kind") === "feynman" ? "feynman" : "blurt");
   const [chapterId, setChapterId] = useState<string>(search.get("chapterId") ?? "");
   const [topic, setTopic] = useState(search.get("topic") ?? "");
@@ -142,7 +145,7 @@ function ExplainStart() {
                       {KIND_TEXT[s.kind].title} · {s.topic}
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">
-                      {s.status === "open" ? "Not finished" : `${missing} gap${missing === 1 ? "" : "s"}`} · {s.created_at.slice(0, 10)}
+                      {s.status === "open" ? "Not finished" : `${missing} gap${missing === 1 ? "" : "s"}`} · {fmt.numericDate(fromUtcTimestamp(s.created_at))}
                     </span>
                   </Link>
                   <DeleteExplainSession session={s} />

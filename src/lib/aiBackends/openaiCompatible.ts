@@ -17,6 +17,13 @@ export interface OpenAiCompatibleConfig {
   providerLabel: string;
   /** Where to point someone whose key is missing/invalid. */
   keyHelpText: string;
+  /**
+   * The request field that caps the reply length. OpenAI deprecated
+   * `max_tokens` for `max_completion_tokens` and rejects the old one on its
+   * reasoning models; OpenRouter-style endpoints still expect `max_tokens`
+   * (the default).
+   */
+  maxTokensField?: "max_tokens" | "max_completion_tokens";
 }
 
 // Shared by both the OpenAI backend and the free-tier (OpenRouter) backend —
@@ -36,6 +43,8 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
     }
     return new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL });
   }
+
+  const lengthLimit = (maxTokens: number) => ({ [config.maxTokensField ?? "max_tokens"]: maxTokens });
 
   async function complete(
     system: string,
@@ -57,7 +66,7 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
 
     const response = await client().chat.completions.create({
       model: config.model,
-      max_tokens: maxTokens,
+      ...lengthLimit(maxTokens),
       messages: [
         { role: "system", content: system },
         { role: "user", content: images?.length ? userContent : user },
@@ -103,7 +112,7 @@ export function createOpenAiCompatibleBackend(config: OpenAiCompatibleConfig) {
       ];
       const stream = await client().chat.completions.create({
         model: config.model,
-        max_tokens: maxTokens,
+        ...lengthLimit(maxTokens),
         stream: true,
         messages: [
           { role: "system", content: system },

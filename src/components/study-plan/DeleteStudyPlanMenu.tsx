@@ -24,8 +24,10 @@ export function DeleteStudyPlanMenu({
   const itemCount = plan.chapters.reduce((n, c) => n + c.items.length, 0);
 
   async function handleDelete() {
-    const res = await fetch(`/api/study-plans/${plan.id}${deleteItems ? "?deleteItems=1" : ""}`, { method: "DELETE" });
-    if (!res.ok) {
+    const res = await fetch(`/api/study-plans/${plan.id}${deleteItems ? "?deleteItems=1" : ""}`, { method: "DELETE" }).catch(
+      () => null
+    );
+    if (!res?.ok) {
       toast.error("Couldn't delete the plan");
       return;
     }

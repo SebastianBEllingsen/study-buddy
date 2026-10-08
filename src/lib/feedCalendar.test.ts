@@ -11,63 +11,66 @@ import {
 
 describe("parseCourseEvent", () => {
   it("splits a leading course code off the type", () => {
-    expect(parseCourseEvent("IKT300 Forelesning")).toEqual({ code: "IKT300", type: "Forelesning" });
-    expect(parseCourseEvent("MA-224 Lecture 2")).toEqual({ code: "MA-224", type: "Lecture 2" });
-    expect(parseCourseEvent("IKT211 Lab.-undervisning")).toEqual({ code: "IKT211", type: "Lab.-undervisning" });
+    expect(parseCourseEvent("ABC300 Lecture")).toEqual({ code: "ABC300", type: "Lecture" });
+    expect(parseCourseEvent("AB-224 Lecture 2")).toEqual({ code: "AB-224", type: "Lecture 2" });
+    expect(parseCourseEvent("DEF211 Lab.-session")).toEqual({ code: "DEF211", type: "Lab.-session" });
   });
 
   it("drops a group suffix and accepts a separator after the code", () => {
-    expect(parseCourseEvent("FYS129-1 Øving")).toEqual({ code: "FYS129", type: "Øving" });
-    expect(parseCourseEvent("MA-224: Quiz")).toEqual({ code: "MA-224", type: "Quiz" });
+    expect(parseCourseEvent("XYZ129-1 Exercise")).toEqual({ code: "XYZ129", type: "Exercise" });
+    expect(parseCourseEvent("AB-224: Quiz")).toEqual({ code: "AB-224", type: "Quiz" });
   });
 
   it("handles a bare code", () => {
-    expect(parseCourseEvent("IKT213")).toEqual({ code: "IKT213", type: "" });
+    expect(parseCourseEvent("ABC213")).toEqual({ code: "ABC213", type: "" });
   });
 
-  it("recognizes Mine Studier's trailing-code assignment titles", () => {
-    expect(parseCourseEvent("Assignment - MA-224")).toEqual({ code: "MA-224", type: "Assignment" });
-    expect(parseCourseEvent("Assignment - ING101")).toEqual({ code: "ING101", type: "Assignment" });
+  it("recognizes trailing-code assignment titles", () => {
+    expect(parseCourseEvent("Assignment - AB-224")).toEqual({ code: "AB-224", type: "Assignment" });
+    expect(parseCourseEvent("Assignment - GHI101")).toEqual({ code: "GHI101", type: "Assignment" });
+  });
+
+  it("accepts accented uppercase letters in a code", () => {
+    expect(parseCourseEvent("ÉCO101 Seminar")).toEqual({ code: "ÉCO101", type: "Seminar" });
   });
 
   it("collapses the double space some titles have", () => {
-    expect(parseCourseEvent("IKT300  Øving")).toEqual({ code: "IKT300", type: "Øving" });
+    expect(parseCourseEvent("ABC300  Exercise")).toEqual({ code: "ABC300", type: "Exercise" });
   });
 
   it("falls back to the whole title when there is no code", () => {
     expect(parseCourseEvent("Booking")).toEqual({ code: null, type: "Booking" });
-    expect(parseCourseEvent("Lunch with IKT300 group")).toEqual({ code: null, type: "Lunch with IKT300 group" });
+    expect(parseCourseEvent("Lunch with ABC300 group")).toEqual({ code: null, type: "Lunch with ABC300 group" });
   });
 });
 
 describe("isDeadlineEvent", () => {
   it("treats assignments and zero-length events as deadlines", () => {
     expect(isDeadlineEvent("Assignment", "2026-09-25T15:00:00Z", "2026-09-25T16:00:00Z")).toBe(true);
-    expect(isDeadlineEvent("Forelesning", "2026-09-25T15:00:00Z", "2026-09-25T15:00:00Z")).toBe(true);
-    expect(isDeadlineEvent("Forelesning", "2026-09-25T15:00:00Z", "2026-09-25T16:00:00Z")).toBe(false);
+    expect(isDeadlineEvent("Lecture", "2026-09-25T15:00:00Z", "2026-09-25T15:00:00Z")).toBe(true);
+    expect(isDeadlineEvent("Lecture", "2026-09-25T15:00:00Z", "2026-09-25T16:00:00Z")).toBe(false);
   });
 });
 
 describe("shortLocation", () => {
-  it("shortens building names and splits off the map link", () => {
-    expect(shortLocation("C-bygget Grimstad C2 041 https://link.mazemap.com/abc")).toEqual({
-      text: "C C2 041",
-      mapUrl: "https://link.mazemap.com/abc",
+  it("splits off the map link and tidies the room text", () => {
+    expect(shortLocation("Hall C2 041 https://maps.example/abc")).toEqual({
+      text: "Hall C2 041",
+      mapUrl: "https://maps.example/abc",
     });
   });
 
-  it("handles multiple rooms and leaves other building names alone", () => {
-    expect(shortLocation("A-bygget Grimstad A3 023, A-bygget Grimstad A3 027 https://x.y/z").text).toBe("A A3 023, A A3 027");
-    expect(shortLocation("FoU-bygget F1 Aud https://x.y/z").text).toBe("FoU-bygget F1 Aud");
-    expect(shortLocation("C-bygget Grimstad C4 090/91  https://x.y/z").text).toBe("C C4 090/91");
+  it("handles multiple rooms and doubled spaces, and keeps a location with no link whole", () => {
+    expect(shortLocation("Hall A3 023 , Hall A3 027  https://x.y/z").text).toBe("Hall A3 023, Hall A3 027");
+    expect(shortLocation("Main building F1")).toEqual({ text: "Main building F1", mapUrl: null });
   });
 });
 
 describe("autoCourseColor", () => {
   it("is stable per code and grey for no code", () => {
-    expect(autoCourseColor("IKT300")).toBe(autoCourseColor("IKT300"));
+    expect(autoCourseColor("ABC300")).toBe(autoCourseColor("ABC300"));
     expect(autoCourseColor(null)).toBe("grey");
-    expect(autoCourseColor("IKT300")).not.toBe("grey");
+    expect(autoCourseColor("ABC300")).not.toBe("grey");
   });
 });
 
@@ -85,7 +88,7 @@ describe("parseFeedCalendarConfig", () => {
         hourEnd: 18,
         showWeekends: false,
         defaultView: "month",
-        courses: { IKT300: { color: "pink", alias: "  Nettverk  " } },
+        courses: { ABC300: { color: "pink", alias: "  Networks  " } },
       })
     );
     expect(config).toEqual({
@@ -93,7 +96,7 @@ describe("parseFeedCalendarConfig", () => {
       hourEnd: 18,
       showWeekends: false,
       defaultView: "month",
-      courses: { IKT300: { color: "pink", alias: "Nettverk" } },
+      courses: { ABC300: { color: "pink", alias: "Networks" } },
     });
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPastDue, keepUnlessCompletedAndPast } from "./overdueAssignments";
+import { isPastDue, keepUnlessCompletedAndPast, withCompletion } from "./overdueAssignments";
 
 const now = new Date("2026-03-10T12:00:00Z");
 const ev = (id: string, end: string) => ({ id, start: end, end, allDay: false });
@@ -23,5 +23,14 @@ describe("isPastDue", () => {
     const today = { start: "2026-03-10", end: "2026-03-10", allDay: true };
     expect(isPastDue(today, new Date(2026, 2, 10, 15))).toBe(false);
     expect(isPastDue(today, new Date(2026, 2, 11, 0, 1))).toBe(true);
+  });
+});
+
+describe("withCompletion", () => {
+  it("adds an id once and removes it again", () => {
+    expect(withCompletion(["a"], "b", true)).toEqual(["a", "b"]);
+    expect(withCompletion(["a", "b"], "b", true)).toEqual(["a", "b"]);
+    expect(withCompletion(["a", "b"], "b", false)).toEqual(["a"]);
+    expect(withCompletion([], "b", false)).toEqual([]);
   });
 });

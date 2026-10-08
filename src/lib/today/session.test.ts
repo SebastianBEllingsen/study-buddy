@@ -17,6 +17,7 @@ import {
   startSession,
   stepForLocation,
   stepGroup,
+  studiedMinutes,
 } from "./session";
 
 function step(id: string, kind: TodayStep["kind"], extra: Partial<TodayStep> = {}): TodayStep {
@@ -92,6 +93,43 @@ describe("mergeFresh", () => {
     const merged = mergeFresh(s, base);
     expect(merged.steps.filter((x) => x.id === "reviews")).toHaveLength(1);
     expect(mergeFresh(merged, base)).toBe(merged);
+  });
+});
+
+describe("finished plan sessions", () => {
+  it("carry the chapter, so a session replaced by a reschedule can still be found", () => {
+    const s = setStepStatus(
+      startSession({
+        date: "2026-03-02",
+        courseId: null,
+        minutes: 30,
+        steps: [step("c", "chapter", { sessionId: { planId: 1, sessionId: 40, chapterId: 5 } })],
+        now: 0,
+      }),
+      "c",
+      "done"
+    );
+    expect(finishedPlanSessions(s)).toMatchObject([{ planId: 1, sessionId: 40, chapterId: 5 }]);
+  });
+});
+
+describe("studiedMinutes", () => {
+  const MIN = 60_000;
+  const session = (steps: TodayStep[]) => startSession({ date: "2026-03-02", courseId: null, minutes: 60, steps, now: 0 });
+
+  it("credits the time since the session started, up to what the step was planned for", () => {
+    const s = session([step("a", "chapter", { minutes: 25 })]);
+    expect(studiedMinutes(s, { minutes: 25 }, 12 * MIN)).toBe(12);
+    expect(studiedMinutes(s, { minutes: 25 }, 90 * MIN)).toBe(25);
+  });
+
+  it("measures from the previous step being ticked off", () => {
+    const s = setStepStatus(session([step("a", "chapter"), step("b", "chapter")]), "a", "done", 20 * MIN);
+    expect(studiedMinutes(s, { minutes: 25 }, 38 * MIN)).toBe(18);
+  });
+
+  it("gives the planned time when ticked within moments (studied before opening Today)", () => {
+    expect(studiedMinutes(session([step("a", "chapter")]), { minutes: 25 }, 2 * MIN)).toBe(25);
   });
 });
 

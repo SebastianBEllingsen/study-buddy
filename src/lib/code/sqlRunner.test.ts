@@ -27,6 +27,16 @@ describe.skipIf(!available)("runSqlTests", () => {
     expect(result.stdout).toContain("Ada   | 15");
   }, TIMEOUT);
 
+  it("stops a statement that tries to fill memory, and the learner can't lift the limit", async () => {
+    const result = await runSqlTests(
+      "PRAGMA hard_heap_limit = 0; PRAGMA hard_heap_limit = 99999999999; CREATE TABLE big (x); INSERT INTO big VALUES (zeroblob(300000000));",
+      [test("never", { expect: [] })],
+      SETUP
+    );
+    expect(result.error).toMatch(/memory/i);
+    expect(result.tests[0].passed).toBe(false);
+  }, TIMEOUT);
+
   it("treats an empty last result as zero rows rather than the one before it", async () => {
     const result = await runSqlTests("SELECT 1; SELECT name FROM customers WHERE id = 99;", [test("none", { expect: [] })], SETUP);
     expect(result.tests[0]).toEqual({ name: "none", passed: true, message: null });

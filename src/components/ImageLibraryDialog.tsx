@@ -58,7 +58,7 @@ export function ImageLibraryDialog({
     if (!open) return;
     fetch(`/api/uploaded-images?kind=${kind}`)
       .then((r) => r.json())
-      .then((body: { images: UploadedImage[] }) => setImages(body.images))
+      .then((body: { images?: UploadedImage[] }) => setImages(Array.isArray(body.images) ? body.images : []))
       .catch(() => setImages([]));
   }, [open, kind]);
 

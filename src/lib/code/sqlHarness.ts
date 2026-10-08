@@ -125,13 +125,18 @@ export function parseSqlTest(code: string): SqlTest | string {
   };
 }
 
+export const SQL_HEAP_LIMIT_BYTES = 256 * 1024 * 1024;
+
 export const marker = (name: string) => `${SQL_MARKER}${name}@@`;
 
 // One test's script. After the exercise's setup, each of the learner's
 // statements is followed by a marker (so an empty result is told apart from
 // a statement that returns nothing), then the test's own query, if any.
 export function buildSqlScript(setup: string, statements: string[], testQuery: string | null): string {
-  const lines = ["PRAGMA foreign_keys = ON;", setup.trim() ? `${setup.trim()}${setup.trim().endsWith(";") ? "" : ";"}` : "", `.print ${marker("setup")}`];
+  // The heap limit can only be lowered from SQL, never raised, so the learner's
+  // own statements can't undo it: a runaway INSERT or zeroblob() fails with
+  // "out of memory" instead of filling this computer's RAM.
+  const lines = [`PRAGMA hard_heap_limit = ${SQL_HEAP_LIMIT_BYTES};`, "PRAGMA foreign_keys = ON;", setup.trim() ? `${setup.trim()}${setup.trim().endsWith(";") ? "" : ";"}` : "", `.print ${marker("setup")}`];
   statements.forEach((s, i) => lines.push(`${s};`, `.print ${marker(`stmt:${i}`)}`));
   if (testQuery !== null) lines.push(`${testQuery.trim().replace(/;\s*$/, "")};`, `.print ${marker("query")}`);
   return lines.filter((l) => l !== "").join("\n") + "\n";

@@ -30,6 +30,9 @@ describe("parseQueueParams", () => {
       concept: null,
     });
     expect(parseQueueParams(url("?dayStart=2026-03-03T00:00:00Z"), NOW).dayStart).toBeUndefined();
+    // The night clocks go back, a local day is 25 hours long: its midnight can be 24.5 hours ago.
+    expect(parseQueueParams(url("?dayStart=2026-03-01T09:30:00Z"), NOW).dayStart).toBe("2026-03-01 09:30:00");
+    expect(parseQueueParams(url("?dayStart=2026-03-01T08:30:00Z"), NOW).dayStart).toBeUndefined();
     expect(parseQueueParams(url("?dayStart=2026-02-20T00:00:00Z"), NOW).dayStart).toBeUndefined();
   });
 

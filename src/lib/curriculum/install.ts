@@ -31,7 +31,7 @@ export async function installCurriculum(id: string): Promise<InstalledCurriculum
     // practice on and no schedule — Today only offers a scheduled plan's
     // chapters from its dated sessions, so a schedule that doesn't exist yet
     // would show nothing; unscheduled, Today picks the next chapter itself.
-    // codeLanguage adds daily coding practice to Today.
+    // codeLanguage adds coding practice to Today.
     options: { ...PRESET_DEFAULTS.roadmap, practice: true, codeLanguage: curriculum.language },
     syllabusDocumentId: null,
     syllabusText: null,

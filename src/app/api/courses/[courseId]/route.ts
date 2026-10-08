@@ -19,6 +19,8 @@ import { courseUploadsDirPath } from "@/lib/uploads";
 import { isValidIcon, isValidColor } from "@/lib/fieldValidation";
 import { parseJsonObjectBody } from "@/lib/requestBody";
 import { getStudyPlanForCourse } from "@/lib/studyPlan/store";
+import { getExamDate } from "@/lib/readiness/load";
+import { removePlanFromGoogle } from "@/lib/studyPlan/scheduleService";
 
 type Params = { params: Promise<{ courseId: string }> };
 
@@ -30,15 +32,16 @@ export async function GET(_request: Request, { params }: Params) {
   if (!course) {
     return Response.json({ error: "Course not found" }, { status: 404 });
   }
-  const [folders, documents, items, notes, canvases, studyPlan] = await Promise.all([
+  const [folders, documents, items, notes, canvases, studyPlan, examDate] = await Promise.all([
     listFoldersForCourse(id),
     listDocumentSummariesForCourse(id),
     listGeneratedItemSummariesForCourse(id),
     listNotesForCourse(id),
     listCanvasesForCourse(id),
     getStudyPlanForCourse(id),
+    getExamDate(id),
   ]);
-  return Response.json({ course, folders, documents, items, notes, canvases, studyPlan: studyPlan ?? null });
+  return Response.json({ course, folders, documents, items, notes, canvases, studyPlan: studyPlan ?? null, examDate });
 }
 
 export async function PATCH(request: Request, { params }: Params) {
@@ -51,6 +54,7 @@ export async function PATCH(request: Request, { params }: Params) {
   // undefined if the course doesn't exist, in which case there's nothing to
   // clean up either.
   const existing = await getCourse(id);
+  if (!existing) return Response.json({ error: "Course not found" }, { status: 404 });
 
   if (typeof body.name === "string") {
     const name = body.name.trim();
@@ -172,7 +176,14 @@ export async function DELETE(_request: Request, { params }: Params) {
   const { courseId } = await params;
   const id = parseId(courseId);
   if (id === null) return Response.json({ error: "Course not found" }, { status: 404 });
-  const [existing, mediaText] = await Promise.all([getCourse(id), listCourseMediaText(id)]);
+  const [existing, mediaText, plan] = await Promise.all([
+    getCourse(id),
+    listCourseMediaText(id),
+    getStudyPlanForCourse(id),
+  ]);
+  // The plan's sessions go with the course, and with them the only record of
+  // which Google Calendar events they made — take those events off first.
+  if (plan) await removePlanFromGoogle(plan.id).catch((err) => console.error("Removing a plan from Google failed:", err));
   await deleteCourse(id);
   if (existing) {
     await Promise.all([

@@ -120,6 +120,16 @@ export function markDoneForToday(session: TodaySession, id: string, now = Date.n
   };
 }
 
+// How long a step's work took, for crediting the time to the plan: the time
+// since the previous step was ticked off (or the session started), at most
+// what the step was planned for. Ticked within moments, the planned time
+// stands — it was studied before Today was opened.
+export function studiedMinutes(session: TodaySession, step: { minutes: number }, now: number): number {
+  const since = session.steps.reduce((t, s) => (s.status === "done" && s.doneAt !== undefined ? Math.max(t, s.doneAt) : t), session.startedAt);
+  const elapsed = Math.round((now - since) / 60_000);
+  return elapsed >= 5 ? Math.min(elapsed, step.minutes) : step.minutes;
+}
+
 // Focus time of the session: finished stretches plus the one running now.
 export function sessionFocusMs(session: TodaySession, pomodoro: PomodoroState, now: number): number {
   return session.focusMs + runningFocusMs(pomodoro, now, session.startedAt);
@@ -160,8 +170,8 @@ export function sessionProgress(session: TodaySession) {
 // done, when every one of its steps has a timestamp. Given the session's
 // focus time, those durations are scaled down to the share that was really
 // focus (breaks, pauses and idle time excluded) — never scaled up.
-export function finishedPlanSessions(session: TodaySession, focusMs?: number): { planId: number; sessionId: number; minutes?: number }[] {
-  const seen = new Map<number, { planId: number; sessionId: number; minutes?: number }>();
+export function finishedPlanSessions(session: TodaySession, focusMs?: number): { planId: number; sessionId: number; chapterId?: number; minutes?: number }[] {
+  const seen = new Map<number, { planId: number; sessionId: number; chapterId?: number; minutes?: number }>();
   const timed = new Map<number, number | null>();
   let boundary = session.startedAt;
   let wallMs = 0;
@@ -174,7 +184,11 @@ export function finishedPlanSessions(session: TodaySession, focusMs?: number): {
     if (elapsed !== null) wallMs += elapsed;
     if (!step.sessionId) continue;
     const id = step.sessionId.sessionId;
-    seen.set(id, { planId: step.sessionId.planId, sessionId: id });
+    seen.set(id, {
+      planId: step.sessionId.planId,
+      sessionId: id,
+      ...(step.sessionId.chapterId !== undefined ? { chapterId: step.sessionId.chapterId } : {}),
+    });
     const so_far = timed.get(id);
     timed.set(id, elapsed === null || so_far === null ? null : (so_far ?? 0) + elapsed);
   }

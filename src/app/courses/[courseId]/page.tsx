@@ -204,6 +204,44 @@ const COURSE_PAGE_SENTINEL = "__course__";
 // page, or "+ Create new folder" below overrides it.
 const AUTO_DESTINATION_SENTINEL = "__auto__";
 
+// Sends a change and says so when it didn't go through (the server's own
+// message when it gave one), instead of the page carrying on as if it had.
+async function requestOk(url: string, init: RequestInit, failMessage: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, init);
+    if (res.ok) return true;
+    const body = await res.json().catch(() => ({}));
+    toast.error(body.error ?? failMessage);
+  } catch {
+    toast.error(failMessage);
+  }
+  return false;
+}
+
+// Like requestOk, without a toast of its own: one request in a bulk action,
+// which is reported once, together (see reportBulk).
+async function quietOk(url: string, init: RequestInit): Promise<boolean> {
+  try {
+    return (await fetch(url, init)).ok;
+  } catch {
+    return false;
+  }
+}
+
+// "Moved 3 items" for what worked, and how many didn't for what didn't.
+function reportBulk(outcomes: boolean[], past: string, verb: string) {
+  const done = outcomes.filter(Boolean).length;
+  const failed = outcomes.length - done;
+  if (done > 0) toast.success(`${past} ${done} item${done === 1 ? "" : "s"}`);
+  if (failed > 0) toast.error(`Couldn't ${verb} ${failed} item${failed === 1 ? "" : "s"}`);
+}
+
+const jsonRequest = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 // Pops a note into its own browser window — e.g. so it can sit next to this
 // course page while browsing other material. Reuses the same window name
 // per note rather than a fresh one each click, so clicking twice focuses the
@@ -1583,7 +1621,7 @@ export default function CoursePage() {
   // load). Same endpoint the detached document view
   // (app/documents/[documentId]/view) already uses for exactly this. Must
   // stay above the !detail early returns below (Rules of Hooks).
-  const { data: viewingDocumentData } = useSWR<{ document: ViewedDocument }>(
+  const { data: viewingDocumentData, mutate: mutateViewingDocument } = useSWR<{ document: ViewedDocument }>(
     viewingDocumentId !== null ? `/api/documents/${viewingDocumentId}` : null
   );
 
@@ -1696,7 +1734,7 @@ export default function CoursePage() {
           ...(newFolderParentId != null ? { parentFolderId: newFolderParentId } : {}),
         }),
       });
-      const folder = await res.json();
+      const folder = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(folder.error ?? "Couldn't create folder");
         return;
@@ -1705,6 +1743,8 @@ export default function CoursePage() {
       setNewFolderName("");
       setNewFolderOpen(false);
       refresh();
+    } catch {
+      toast.error("Couldn't create folder");
     } finally {
       setCreatingFolder(false);
     }
@@ -1874,11 +1914,7 @@ export default function CoursePage() {
   }
 
   async function handleRenameFolder(folderId: number, name: string) {
-    await fetch(`/api/courses/${courseId}/folders/${folderId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
+    await requestOk(`/api/courses/${courseId}/folders/${folderId}`, jsonRequest("PATCH", { name }), "Couldn't rename that folder");
     refresh();
   }
 
@@ -1886,25 +1922,17 @@ export default function CoursePage() {
     folderId: number,
     fields: { icon?: string | null; color?: string | null }
   ) {
-    await fetch(`/api/courses/${courseId}/folders/${folderId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
-    });
+    await requestOk(`/api/courses/${courseId}/folders/${folderId}`, jsonRequest("PATCH", fields), "Couldn't change that folder");
     refresh();
   }
 
   async function handleDeleteDocument(documentId: number) {
-    await fetch(`/api/courses/${courseId}/documents/${documentId}`, { method: "DELETE" });
+    await requestOk(`/api/courses/${courseId}/documents/${documentId}`, { method: "DELETE" }, "Couldn't delete that document");
     refresh();
   }
 
   async function handleMoveDocument(documentId: number, folderId: number | null) {
-    await fetch(`/api/courses/${courseId}/documents/${documentId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId }),
-    });
+    await requestOk(`/api/courses/${courseId}/documents/${documentId}`, jsonRequest("PATCH", { folderId }), "Couldn't move that document");
     refresh();
   }
 
@@ -1922,39 +1950,27 @@ export default function CoursePage() {
   }
 
   async function handleMoveItem(itemId: number, folderId: number | null) {
-    await fetch(`/api/items/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId }),
-    });
+    await requestOk(`/api/items/${itemId}`, jsonRequest("PATCH", { folderId }), "Couldn't move that item");
     refresh();
   }
 
   async function handleDeleteItem(itemId: number) {
-    await fetch(`/api/items/${itemId}`, { method: "DELETE" });
+    await requestOk(`/api/items/${itemId}`, { method: "DELETE" }, "Couldn't delete that item");
     refresh();
   }
 
   async function handleMoveNote(noteId: number, folderId: number | null) {
-    await fetch(`/api/notes/${noteId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId }),
-    });
+    await requestOk(`/api/notes/${noteId}`, jsonRequest("PATCH", { folderId }), "Couldn't move that note");
     refresh();
   }
 
   async function handleDeleteNote(noteId: number) {
-    await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
+    await requestOk(`/api/notes/${noteId}`, { method: "DELETE" }, "Couldn't delete that note");
     refresh();
   }
 
   async function handleReorderNotes(folderId: number | null, orderedIds: number[]) {
-    await fetch(`/api/courses/${courseId}/notes/reorder`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId, orderedIds }),
-    });
+    await requestOk(`/api/courses/${courseId}/notes/reorder`, jsonRequest("PATCH", { folderId, orderedIds }), "Couldn't save the new order");
     refresh();
   }
 
@@ -1993,25 +2009,12 @@ export default function CoursePage() {
   }
 
   async function handleBulkMove(folderId: number | null) {
-    await Promise.all([
-      ...Array.from(selectedDocs).map((id) =>
-        fetch(`/api/courses/${courseId}/documents/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ folderId }),
-        })
-      ),
-      ...Array.from(selectedItems).map((id) =>
-        fetch(`/api/items/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ folderId }),
-        })
-      ),
+    const outcomes = await Promise.all([
+      ...Array.from(selectedDocs).map((id) => quietOk(`/api/courses/${courseId}/documents/${id}`, jsonRequest("PATCH", { folderId }))),
+      ...Array.from(selectedItems).map((id) => quietOk(`/api/items/${id}`, jsonRequest("PATCH", { folderId }))),
     ]);
-    const count = selectedDocs.size + selectedItems.size;
     clearSelection();
-    toast.success(`Moved ${count} item${count === 1 ? "" : "s"}`);
+    reportBulk(outcomes, "Moved", "move");
     refresh();
   }
 
@@ -2021,14 +2024,10 @@ export default function CoursePage() {
     const sets = (detail?.items ?? []).filter((i) => selectedItems.has(i.id) && i.mode === "flashcards");
     const results = await Promise.all(
       sets.map((i) =>
-        fetch(`/api/items/${i.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reminders: enabled }),
-        })
+        quietOk(`/api/items/${i.id}`, jsonRequest("PATCH", { reminders: enabled }))
       )
     );
-    const failed = results.filter((r) => !r.ok).length;
+    const failed = results.filter((ok) => !ok).length;
     const done = sets.length - failed;
     if (done > 0) {
       toast.success(
@@ -2042,15 +2041,12 @@ export default function CoursePage() {
   }
 
   async function handleBulkDelete() {
-    const count = selectedDocs.size + selectedItems.size;
-    await Promise.all([
-      ...Array.from(selectedDocs).map((id) =>
-        fetch(`/api/courses/${courseId}/documents/${id}`, { method: "DELETE" })
-      ),
-      ...Array.from(selectedItems).map((id) => fetch(`/api/items/${id}`, { method: "DELETE" })),
+    const outcomes = await Promise.all([
+      ...Array.from(selectedDocs).map((id) => quietOk(`/api/courses/${courseId}/documents/${id}`, { method: "DELETE" })),
+      ...Array.from(selectedItems).map((id) => quietOk(`/api/items/${id}`, { method: "DELETE" })),
     ]);
     clearSelection();
-    toast.success(`Deleted ${count} item${count === 1 ? "" : "s"}`);
+    reportBulk(outcomes, "Deleted", "delete");
     refresh();
   }
 
@@ -2064,11 +2060,7 @@ export default function CoursePage() {
     next.splice(from, 1);
     next.splice(to, 0, draggedFolderId);
 
-    await fetch(`/api/courses/${courseId}/folders/reorder`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderedIds: next }),
-    });
+    await requestOk(`/api/courses/${courseId}/folders/reorder`, jsonRequest("PATCH", { orderedIds: next }), "Couldn't save the new order");
     refresh();
   }
 
@@ -2076,20 +2068,12 @@ export default function CoursePage() {
   // compute the full new order themselves (dragging one row onto another
   // within an already-known, already-ordered array) — these just persist it.
   async function handleReorderDocuments(folderId: number | null, orderedIds: number[]) {
-    await fetch(`/api/courses/${courseId}/documents/reorder`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId, orderedIds }),
-    });
+    await requestOk(`/api/courses/${courseId}/documents/reorder`, jsonRequest("PATCH", { folderId, orderedIds }), "Couldn't save the new order");
     refresh();
   }
 
   async function handleReorderItems(folderId: number | null, orderedIds: number[]) {
-    await fetch(`/api/courses/${courseId}/generated/reorder`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId, orderedIds }),
-    });
+    await requestOk(`/api/courses/${courseId}/generated/reorder`, jsonRequest("PATCH", { folderId, orderedIds }), "Couldn't save the new order");
     refresh();
   }
 
@@ -2197,7 +2181,8 @@ export default function CoursePage() {
           ...(generatingFromTopic ? { topic: generationTopic.trim() } : {}),
         }),
       });
-      const body = await res.json();
+      // A proxy timeout or crash answers with something that isn't JSON.
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.error ?? "Generation failed");
         return;
@@ -2240,6 +2225,8 @@ export default function CoursePage() {
         action: { label: "View", onClick: () => router.push(`/items/${body.id}`) },
         onDismiss: () => dismissNotification(body.id),
       });
+    } catch {
+      setError("Couldn't reach the server — check your connection and try again.");
     } finally {
       setGenerating(null);
     }
@@ -2578,7 +2565,7 @@ export default function CoursePage() {
 
       {error && (
         <Alert variant="destructive">
-          <AlertTitle>Generation failed</AlertTitle>
+          <AlertTitle>Something went wrong</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
@@ -3431,7 +3418,11 @@ export default function CoursePage() {
         onOpenChange={(open) => {
           if (!open) closeDocumentViewer();
         }}
-        onTidied={refresh}
+        onTidied={() => {
+          // The open viewer shows its own copy of the text, not the course list.
+          void mutateViewingDocument();
+          void refresh();
+        }}
       />
     </div>
     </>

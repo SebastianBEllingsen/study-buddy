@@ -107,7 +107,12 @@ export default function ProblemSetPage() {
       }).catch(() => null);
       const modelExpr: unknown = (await res?.json().catch(() => null))?.modelExpr;
       if (typeof modelExpr === "string" && modelExpr) {
-        final = { text: finalText, match: (await compareFinalAnswers(finalText, modelExpr)).match };
+        try {
+          final = { text: finalText, match: (await compareFinalAnswers(finalText, modelExpr)).match };
+        } catch {
+          // The comparison is only a bonus fact; check the working without it
+          // rather than leave the page busy.
+        }
       }
     }
     await act({ action: "check", problem: problemIndex, text: working, ...(final ? { final } : {}) }, "solve");

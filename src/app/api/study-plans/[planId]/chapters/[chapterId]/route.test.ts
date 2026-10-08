@@ -17,7 +17,14 @@ vi.mock("@/lib/models", () => ({
 }));
 
 const rescheduleQuietly = vi.fn();
-vi.mock("@/lib/studyPlan/scheduleService", () => ({ rescheduleQuietly: (...a: unknown[]) => rescheduleQuietly(...a) }));
+const rescheduleIfFinishedChanged = vi.fn();
+const removeChapterFromGoogle = vi.fn();
+vi.mock("@/lib/studyPlan/scheduleService", () => ({
+  rescheduleQuietly: (...a: unknown[]) => rescheduleQuietly(...a),
+  chapterWasComplete: async () => false,
+  removeChapterFromGoogle: (...a: unknown[]) => removeChapterFromGoogle(...a),
+  rescheduleIfFinishedChanged: (...a: unknown[]) => rescheduleIfFinishedChanged(...a),
+}));
 
 const { PATCH, DELETE } = await import("./route");
 
@@ -66,11 +73,32 @@ describe("DELETE /api/study-plans/[planId]/chapters/[chapterId]", () => {
   });
 });
 
+describe("deleting a chapter that has calendar events", () => {
+  it("takes its events out of Google Calendar before the chapter (and so their ids) is gone", async () => {
+    const order: string[] = [];
+    removeChapterFromGoogle.mockImplementation(async () => void order.push("calendar"));
+    deleteChapter.mockImplementation(async () => void order.push("chapter"));
+    await DELETE(new Request("http://localhost/x"), params());
+    expect(removeChapterFromGoogle).toHaveBeenCalledWith(1, 5);
+    expect(order).toEqual(["calendar", "chapter"]);
+  });
+});
+
 describe("rescheduling after chapter changes", () => {
-  it("reschedules a scheduled plan when a chapter is finished or deleted, not on a checklist tick", async () => {
+  it("doesn't reschedule when an edit sends the stage back unchanged", async () => {
+    getChapterRow.mockResolvedValue({ id: 5, plan_id: 1, stage: 2, current_level: null, completed_at: null });
+    getStudyPlan.mockResolvedValue({ id: 1, course_id: 3, options: { schedule: true } });
+    await PATCH(patch({ title: "Renamed", stage: 2 }), params());
+    expect(rescheduleQuietly).not.toHaveBeenCalled();
+    await PATCH(patch({ stage: 3 }), params());
+    expect(rescheduleQuietly).toHaveBeenCalledWith(1);
+  });
+
+  it("reschedules a scheduled plan when a chapter is finished or deleted, and checks a checklist tick for finishing it", async () => {
     getStudyPlan.mockResolvedValue({ id: 1, course_id: 3, options: { schedule: true } });
     await PATCH(patch({ subtopics: [{ text: "a", done: true }] }), params());
     expect(rescheduleQuietly).not.toHaveBeenCalled();
+    expect(rescheduleIfFinishedChanged).toHaveBeenCalledWith(1, 5, false);
     await PATCH(patch({ completed: true }), params());
     expect(rescheduleQuietly).toHaveBeenCalledWith(1);
     await DELETE(new Request("http://localhost/x"), params());

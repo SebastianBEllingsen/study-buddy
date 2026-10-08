@@ -81,8 +81,10 @@ export default function SearchDialog() {
       const requestId = ++requestIdRef.current;
       fetch(`/api/search?q=${encodeURIComponent(query.trim())}`)
         .then((r) => r.json())
-        .then((body: { results: SearchResult[] }) => {
+        .then((body: { results?: SearchResult[] }) => {
           if (requestId !== requestIdRef.current) return;
+          // An error body has no results — say so instead of rendering one.
+          if (!Array.isArray(body.results)) throw new Error("Search failed");
           setResults(body.results);
         })
         .catch(() => {

@@ -17,12 +17,25 @@ import { safeFetch } from "./urlSafety";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const cache = new Map<string, { fetchedAt: number; parsed: ical.CalendarResponse }>();
 
-async function getParsedFeed(url: string): Promise<ical.CalendarResponse> {
+// A fetch already under way for a feed. The dashboard asks for events from
+// several widgets at once, and each would otherwise download and parse the
+// same (possibly large) file at the same moment.
+const inFlight = new Map<string, Promise<ical.CalendarResponse>>();
+
+function getParsedFeed(url: string): Promise<ical.CalendarResponse> {
   const cached = cache.get(url);
   if (cached) {
-    if (Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.parsed;
+    if (Date.now() - cached.fetchedAt < CACHE_TTL_MS) return Promise.resolve(cached.parsed);
     cache.delete(url);
   }
+  const running = inFlight.get(url);
+  if (running) return running;
+  const started = loadFeed(url).finally(() => inFlight.delete(url));
+  inFlight.set(url, started);
+  return started;
+}
+
+async function loadFeed(url: string): Promise<ical.CalendarResponse> {
 
   // safeFetch re-validates the URL immediately before fetching (not just at
   // save time in the calendar-feeds POST route — a hostname that resolved

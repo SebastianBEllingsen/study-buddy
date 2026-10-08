@@ -120,7 +120,7 @@ export function FeedEventPopover({
           )}
           {event.description && (
             <p className="max-h-40 overflow-y-auto whitespace-pre-line text-foreground/80">
-              {/* Mine Studier escapes quotes as \" (not valid ICS escaping,
+              {/* Some portals escape quotes as \" (not valid ICS escaping,
                   so node-ical leaves the backslash in). */}
               {event.description.replace(/\\"/g, '"')}
             </p>

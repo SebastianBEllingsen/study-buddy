@@ -88,7 +88,10 @@ function AnswerEditor({
   task: PublicTask;
   index: number;
   answer: TaskAnswer;
-  onChange: (answer: TaskAnswer) => void;
+  // Takes a function of the answer as it is when applied, not a copy captured
+  // earlier: a photo upload finishes seconds after it started, and by then
+  // the text may have changed.
+  onChange: (update: (answer: TaskAnswer) => TaskAnswer) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -105,7 +108,7 @@ function AnswerEditor({
       }
     }
     setUploading(false);
-    if (urls.length) onChange({ ...answer, images: [...answer.images, ...urls] });
+    if (urls.length) onChange((current) => ({ ...current, images: [...current.images, ...urls].slice(0, MAX_PHOTOS) }));
   }
 
   return (
@@ -123,7 +126,10 @@ function AnswerEditor({
         rows={6}
         placeholder="Your answer — math like $x^2$ works. Or photograph your written work below."
         value={answer.text}
-        onChange={(e) => onChange({ ...answer, text: e.target.value })}
+        onChange={(e) => {
+          const text = e.target.value;
+          onChange((current) => ({ ...current, text }));
+        }}
       />
       <div className="flex flex-wrap items-center gap-2">
         {answer.images.map((url, i) => (
@@ -133,7 +139,7 @@ function AnswerEditor({
             <button
               type="button"
               aria-label={`Remove photo ${i + 1}`}
-              onClick={() => onChange({ ...answer, images: answer.images.filter((u) => u !== url) })}
+              onClick={() => onChange((current) => ({ ...current, images: current.images.filter((u) => u !== url) }))}
               className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5"
             >
               <X className="size-3" />
@@ -253,9 +259,19 @@ export default function AttemptPage() {
     setAnswers(data.attempt.answers);
   }
 
-  function change(index: number, answer: TaskAnswer) {
-    if (!answers) return;
-    const next = answers.map((a, i) => (i === index ? answer : a));
+  // The latest answers, kept current as they change (not just per render), so
+  // an edit applied after an await — a finished photo upload — builds on what
+  // is there now instead of on the render that started it.
+  const latestAnswers = useRef<TaskAnswer[] | null>(null);
+  useEffect(() => {
+    latestAnswers.current = answers;
+  }, [answers]);
+
+  function change(index: number, update: (answer: TaskAnswer) => TaskAnswer) {
+    const base = latestAnswers.current ?? answers;
+    if (!base) return;
+    const next = base.map((a, i) => (i === index ? update(a) : a));
+    latestAnswers.current = next;
     setAnswers(next);
     saveAnswers({ answers: next });
   }
@@ -293,6 +309,9 @@ export default function AttemptPage() {
     setConfirmOpen(false);
     if (!res?.ok) {
       toast.error((await res?.json().catch(() => ({})))?.error ?? "Couldn't hand in the exam");
+      // The hand-in carried the answers and the pending save was dropped, so
+      // queue them again rather than leave the last edits unsaved.
+      if (data?.attempt.status === "in_progress" && answers) saveAnswers({ answers });
       return;
     }
     void mutate();

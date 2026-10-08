@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, it, expect, vi } from "vitest";
 import OpenAI from "openai";
 import { createOpenAiCompatibleBackend } from "./openaiCompatible";
@@ -90,5 +92,49 @@ describe("createOpenAiCompatibleBackend generateTextWithWebSearch", () => {
       searched: true,
     });
     create.mockRestore();
+  });
+});
+
+describe("createOpenAiCompatibleBackend reply length limit", () => {
+  // A throwaway local server stands in for the provider, so the real request body can be read.
+  async function sentBody(maxTokensField?: "max_tokens" | "max_completion_tokens") {
+    let body: Record<string, unknown> = {};
+    const server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        body = JSON.parse(raw);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ id: "x", object: "chat.completion", created: 0, model: "m", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "hi" } }] }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const b = createOpenAiCompatibleBackend({
+        apiKey: "k",
+        baseURL: `http://127.0.0.1:${port}/v1`,
+        model: "m",
+        providerLabel: "Local",
+        keyHelpText: "",
+        ...(maxTokensField && { maxTokensField }),
+      });
+      await b.generateText({ system: "s", user: "u", maxTokens: 321 });
+      return body;
+    } finally {
+      server.close();
+    }
+  }
+
+  it("sends max_tokens by default, as OpenRouter-style endpoints expect", async () => {
+    const body = await sentBody();
+    expect(body.max_tokens).toBe(321);
+    expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("sends max_completion_tokens when configured, which OpenAI's reasoning models require", async () => {
+    const body = await sentBody("max_completion_tokens");
+    expect(body.max_completion_tokens).toBe(321);
+    expect(body).not.toHaveProperty("max_tokens");
   });
 });

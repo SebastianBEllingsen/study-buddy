@@ -67,9 +67,9 @@ export async function createNoteFromLink(title: string, context: NoteLinkContext
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title, folderId: context.folderId ?? undefined }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  }).catch(() => null);
+  const body = (await res?.json().catch(() => ({}))) ?? {};
+  if (!res?.ok) {
     toast.error(body?.error ?? `Couldn't create "${title}"`);
     return null;
   }
@@ -231,7 +231,13 @@ function NoteLinkAnchor({
         className="wikilink"
         onClick={(e: MouseEvent<HTMLAnchorElement>) => {
           e.preventDefault();
-          scrollToAnchor(e.currentTarget, decodeURIComponent(href.slice(1)));
+          let id = href.slice(1);
+          try {
+            id = decodeURIComponent(id);
+          } catch {
+            // Not valid percent-encoding — use the fragment as written.
+          }
+          scrollToAnchor(e.currentTarget, id);
         }}
       >
         {children}

@@ -55,7 +55,9 @@ export function QuizGenerationDialog({
     setLoadedForOpen(true);
     fetch("/api/quiz-presets")
       .then((r) => r.json())
-      .then(setPresets);
+      // An error body isn't a list of presets.
+      .then((body) => setPresets(Array.isArray(body) ? body : []))
+      .catch(() => setPresets([]));
   } else if (!open && loadedForOpen) {
     setLoadedForOpen(false);
     setSettings(DEFAULT_QUIZ_SETTINGS);

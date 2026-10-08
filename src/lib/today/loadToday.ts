@@ -144,7 +144,11 @@ export function chapterCandidates(
       ...(revision ? { revision: true } : {}),
       ...(cadence?.must ? { must: cadence.must } : {}),
       ...(plan.options.codeLanguage
-        ? { code: { language: plan.options.codeLanguage, setId: openCodeSets.get(chapter.id) ?? null } }
+        ? {
+            code: { language: plan.options.codeLanguage, setId: openCodeSets.get(chapter.id) ?? null },
+            // A chapter the learner picked keeps its coding practice.
+            ...(cadence?.codeDue === false && !only ? { skipCode: true } : {}),
+          }
         : {}),
       next: nextChapterStep(chapter, (!!session && session.kind !== "study") || chapterIsComplete(chapter), {
         pretest: plan.options.diagnostic,
@@ -167,6 +171,13 @@ export function chapterCandidates(
       for (const session of todaysSessions) {
         const chapter = plan.chapters.find((c) => c.id === session.chapter_id);
         if (chapter) scheduled.push(candidate(chapter, session));
+      }
+      // The plan's own Today frequency says it's due even on a day its
+      // schedule has no session: the learner asked for it, so it comes as
+      // an unscheduled plan's next chapter does.
+      if (!todaysSessions.length && cadence?.must) {
+        const chapter = nextChapter(plan, plan.options.practice);
+        if (chapter) open.push(candidate(chapter, null));
       }
     } else {
       const chapter = nextChapter(plan, plan.options.practice);

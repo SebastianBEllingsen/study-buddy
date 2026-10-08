@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { MoreHorizontal, Trash2, type LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -81,6 +82,10 @@ export function RowActionsMenu({
     try {
       await onDelete();
       setConfirmOpen(false);
+    } catch {
+      // A handler that throws (a dropped connection, say) has told the user
+      // nothing; the dialog stays open so deleting can be tried again.
+      toast.error("Couldn't delete that");
     } finally {
       setDeleting(false);
     }

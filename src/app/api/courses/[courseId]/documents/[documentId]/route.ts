@@ -15,6 +15,7 @@ import { previewPdfPath } from "@/lib/uploads";
 import { CONTENT_TYPES, extensionOf, isSupportedExtension, needsLibreOfficeConversion } from "@/lib/documentFormats";
 import { convertToPdf } from "@/lib/libreoffice";
 import { removeUnreferencedBlobs } from "@/lib/blobStorage/cleanup";
+import { contentDisposition } from "@/lib/contentDisposition";
 
 type Params = { params: Promise<{ courseId: string; documentId: string }> };
 
@@ -45,7 +46,7 @@ export async function GET(_request: Request, { params }: Params) {
 
   const headers = {
     "Content-Type": needsLibreOfficeConversion(ext) ? CONTENT_TYPES.pdf : CONTENT_TYPES[ext],
-    "Content-Disposition": `inline; filename="${doc.filename.replace(/"/g, "")}"`,
+    "Content-Disposition": contentDisposition("inline", doc.filename),
   };
 
   if (needsLibreOfficeConversion(ext)) {
@@ -82,8 +83,12 @@ export async function DELETE(_request: Request, { params }: Params) {
   if (id === null) return new Response(null, { status: 204 });
   const doc = await getDocument(id);
   if (doc) {
-    await fs.rm(doc.file_path, { force: true });
-    await fs.rm(previewPdfPath(doc.file_path), { force: true });
+    // Pasted text has no file (an empty path), and an empty path would point
+    // the second removal at a stray ".preview.pdf" in the working directory.
+    if (doc.file_path) {
+      await fs.rm(doc.file_path, { force: true });
+      await fs.rm(previewPdfPath(doc.file_path), { force: true });
+    }
     await deleteDocument(id);
     if (doc.file_url) await removeUnreferencedBlobs([doc.file_url]);
   }

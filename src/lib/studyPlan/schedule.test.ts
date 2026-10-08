@@ -5,6 +5,7 @@ import {
   carriedExtraReview,
   learnedPace,
   chapterMinutesNeeded,
+  effectiveDeadline,
   localToday,
   missedSessions,
   scheduleInputFromPlan,
@@ -375,5 +376,68 @@ describe("chapters the student knows", () => {
     const review = sessions.filter((s) => s.kind === "review");
     expect(review.length).toBeGreaterThan(0);
     expect(review.some((s) => s.chapterId === 1)).toBe(true);
+  });
+});
+
+describe("scheduling edge cases", () => {
+  const total = (sessions: { minutes: number }[]) => sessions.reduce((n, s) => n + s.minutes, 0);
+
+  it("doesn't deadlock when a stage edit contradicts a prerequisite", () => {
+    // Chapter 1 moved to stage 3, after chapter 2, which still builds on it.
+    const { sessions, warnings } = buildSchedule(
+      input({ chapters: [ch(1, { stage: 3 }), ch(2, { stage: 2, prerequisites: [1] })] })
+    );
+    expect(new Set(sessions.filter((s) => s.kind === "study").map((s) => s.chapterId))).toEqual(new Set([1, 2]));
+    expect(warnings).toContainEqual({ type: "order_conflict" });
+    expect(warnings).not.toContainEqual({ type: "too_long" });
+  });
+
+  it("says so when a deadline can't fit every chapter, even shortened", () => {
+    const chapters = Array.from({ length: 20 }, (_, i) => ch(i + 1, { stage: i + 1, estimatedMinutes: 30 }));
+    const { sessions, warnings } = buildSchedule(
+      input({ chapters, deadline: "2026-01-07", studyDays: [0, 1, 2, 3, 4, 5, 6] })
+    );
+    expect(total(sessions)).toBe(180);
+    expect(warnings).toContainEqual(expect.objectContaining({ type: "unscheduled_chapters" }));
+  });
+
+  it("doesn't offer a second full day after today's study is done", () => {
+    const { sessions } = buildSchedule(input({ chapters: [ch(1, { estimatedMinutes: 300 })], doneTodayMinutes: 45 }));
+    expect(sessions.filter((s) => s.date === MONDAY).reduce((n, s) => n + s.minutes, 0)).toBe(15);
+  });
+
+  it("counts only study sessions as time spent on a chapter", () => {
+    const plan = (kind: "study" | "review") => ({
+      options: { deadline: null, studyDays: [1, 2, 3, 4, 5], minutesPerDay: 60 },
+      chapters: [
+        { id: 1, position: 1, stage: 1, estimated_minutes: 120, current_level: null, completed_at: null, subtopics: [{ done: false }], mastery: null },
+      ],
+      sessions: [{ chapter_id: 1, minutes: 90, done_at: "2026-01-04 09:00:00", date: "2026-01-04", kind }],
+    });
+    expect(scheduleInputFromPlan(plan("study"), MONDAY).chapters[0].doneMinutes).toBe(90);
+    expect(scheduleInputFromPlan(plan("review"), MONDAY).chapters[0].doneMinutes).toBe(0);
+  });
+
+  it("takes minutes done today off the day, whatever their kind", () => {
+    const plan = {
+      options: { deadline: null, studyDays: [1, 2, 3, 4, 5], minutesPerDay: 60 },
+      chapters: [],
+      sessions: [{ chapter_id: 1, minutes: 20, done_at: "2026-01-05 08:00:00", date: MONDAY, kind: "review" as const }],
+    };
+    expect(scheduleInputFromPlan(plan, MONDAY).doneTodayMinutes).toBe(20);
+  });
+});
+
+describe("effectiveDeadline", () => {
+  it("uses the earlier of the finish date and a coming exam, and ignores a passed exam", () => {
+    expect(effectiveDeadline("2026-03-31", "2026-03-10", "2026-03-01")).toBe("2026-03-10");
+    expect(effectiveDeadline("2026-03-05", "2026-03-10", "2026-03-01")).toBe("2026-03-05");
+    expect(effectiveDeadline(null, "2026-03-10", "2026-03-01")).toBe("2026-03-10");
+    expect(effectiveDeadline("2026-03-31", null, "2026-03-01")).toBe("2026-03-31");
+    expect(effectiveDeadline("2026-03-31", "2026-02-01", "2026-03-01")).toBe("2026-03-31");
+  });
+
+  it("works toward a coming exam when the finish date has already passed", () => {
+    expect(effectiveDeadline("2026-02-01", "2026-03-10", "2026-03-01")).toBe("2026-03-10");
   });
 });

@@ -22,6 +22,8 @@ vi.mock("./db", async () => {
 });
 
 const {
+  setGoogleClientCredentials,
+  getGoogleClientCredentials,
   createCourse,
   deleteCourse,
   createFolder,
@@ -1036,5 +1038,21 @@ describe("getNewDocumentsForItem with nested folders", () => {
     const fresh = await getNewDocumentsForItem(item);
 
     expect(fresh.map((d) => d.id)).toEqual([deepNew.id]);
+  });
+});
+
+describe("setGoogleClientCredentials", () => {
+  it("leaves a credential alone when its field is left blank", async () => {
+    await setGoogleClientCredentials("client-id-1", "secret-1");
+    expect(await getGoogleClientCredentials()).toEqual({ clientId: "client-id-1", clientSecret: "secret-1" });
+
+    await setGoogleClientCredentials("client-id-2", "");
+    expect(await getGoogleClientCredentials()).toEqual({ clientId: "client-id-2", clientSecret: "secret-1" });
+
+    await setGoogleClientCredentials("  ", "secret-2");
+    expect(await getGoogleClientCredentials()).toEqual({ clientId: "client-id-2", clientSecret: "secret-2" });
+
+    await setGoogleClientCredentials("", "");
+    expect(await getGoogleClientCredentials()).toEqual({ clientId: "client-id-2", clientSecret: "secret-2" });
   });
 });

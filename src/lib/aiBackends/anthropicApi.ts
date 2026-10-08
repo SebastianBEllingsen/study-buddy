@@ -21,6 +21,13 @@ function modelFor(efficient?: boolean): string {
   return efficient ? EFFICIENT_MODEL : MODEL;
 }
 
+// `output_config.effort` tunes how hard the main model thinks. Haiku 4.5, the
+// efficiency-mode model, doesn't take it (the API rejects the request), so
+// it's left out there — Haiku has no thinking depth to tune.
+export function effortConfig(efficient: boolean | undefined, effort: "low" | "medium" | "high"): { output_config?: { effort: "low" | "medium" | "high" } } {
+  return efficient ? {} : { output_config: { effort } };
+}
+
 // Rebuilt on every call (not cached) since the key is user-editable at
 // runtime via Settings, unlike an env var fixed for the process lifetime.
 async function client(): Promise<Anthropic> {
@@ -96,7 +103,7 @@ export async function generateStructured<T>(
     max_tokens: maxTokens,
     system,
     messages,
-    output_config: { effort },
+    ...effortConfig(efficient, effort),
   });
 
   // Cut off by the length limit: the JSON is incomplete, and asking again
@@ -119,7 +126,7 @@ export async function generateStructured<T>(
       max_tokens: maxTokens,
       system,
       messages,
-      output_config: { effort },
+      ...effortConfig(efficient, effort),
     });
 
     if (retry.stop_reason === "max_tokens") throw new ResponseTruncatedError();
@@ -161,7 +168,7 @@ function textRequest(params: GenerateTextParams): Anthropic.MessageCreateParamsN
     max_tokens: maxTokens,
     system,
     messages: [{ role: "user", content }],
-    output_config: { effort },
+    ...effortConfig(efficient, effort),
   };
 }
 

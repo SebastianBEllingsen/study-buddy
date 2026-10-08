@@ -31,3 +31,11 @@ export function keepUnlessCompletedAndPast<T extends Pick<CalendarEvent, "id" | 
 ): T[] {
   return events.filter((e) => !isPastDue(e, now) || !completedIds.has(e.id));
 }
+
+// The completed-assignment ids after one is checked off or unchecked. Works
+// from whatever list it's handed (not a captured copy), so a toast's Undo
+// acts on the current state rather than the render it was created in.
+export function withCompletion(ids: readonly string[], eventId: string, completed: boolean): string[] {
+  const rest = ids.filter((id) => id !== eventId);
+  return completed ? [...rest, eventId] : rest;
+}

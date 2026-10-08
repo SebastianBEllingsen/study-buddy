@@ -197,9 +197,6 @@ export default function ItemPage() {
     return true;
   }
 
-  // The deck's due-date reminders on/off (see FlashcardsContent.reminders) —
-  // its own PATCH + message rather than saveContent()'s generic "Saved".
-  // Stored only as `false`; turning them back on drops the key.
   async function handleDeleteItem() {
     if (!detail) return;
     discardNoteSaves();
@@ -211,6 +208,9 @@ export default function ItemPage() {
     router.push(`/courses/${detail.item.course_id}`);
   }
 
+  // The deck's due-date reminders on/off (see FlashcardsContent.reminders) —
+  // its own PATCH + message rather than saveContent()'s generic "Saved".
+  // Stored only as `false`; turning them back on drops the key.
   async function toggleDeckReminders() {
     if (!detail) return;
     const current = JSON.parse(detail.item.content_json) as FlashcardsContent;
@@ -502,6 +502,10 @@ export default function ItemPage() {
             onChanged={() => void mutateItem()}
           />
           <QuizRunner
+            // New questions added to the set (the supplement alert above)
+            // start a fresh run: the answers held so far were sized for the
+            // old list, and a submit with too few would be refused.
+            key={`${item.id}:${(content as QuizContent).questions.length}`}
             itemId={item.id}
             questions={(content as QuizContent).questions}
             onSubmitted={() => mutateItem()}

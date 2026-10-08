@@ -75,7 +75,9 @@ function PdfPage({
     registerPageEl(page.pageNumber, el);
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setInView(true);
+        // The latest entry is the page's current state — leaving the margin
+        // matters as much as entering it (see the release effect below).
+        setInView(entries[entries.length - 1].isIntersecting);
       },
       { rootMargin: "600px 0px" }
     );
@@ -86,6 +88,22 @@ function PdfPage({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  // A page scrolled well out of view gives its pixels and text back: left
+  // alone, every page ever rendered keeps a full-size canvas, which for a long
+  // PDF at a high zoom adds up to gigabytes (and browsers start refusing
+  // canvases). Scrolling back re-renders it, like any PDF viewer.
+  useEffect(() => {
+    if (inView) return;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    textLayerRef.current?.replaceChildren();
+    onRenderStateChange(page.pageNumber, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inView]);
 
   useEffect(() => {
     if (!inView) return;

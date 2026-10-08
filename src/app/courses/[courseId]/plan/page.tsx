@@ -43,6 +43,8 @@ interface CourseDetail {
   documents: DocumentSummaryRow[];
   notes: Pick<Note, "id" | "title">[];
   studyPlan: StudyPlan | null;
+  // The course's exam date, which the schedule ends at when it comes first.
+  examDate?: string | null;
 }
 
 export default function StudyPlanPage() {
@@ -422,6 +424,7 @@ export default function StudyPlanPage() {
           plan={plan}
           chapterNumbers={numbers}
           googleConnected={!!settings?.googleCalendarConnected}
+          examDate={detail?.examDate ?? null}
           onChanged={() => void mutate()}
         />
       )}

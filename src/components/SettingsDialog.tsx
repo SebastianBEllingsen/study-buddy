@@ -598,7 +598,7 @@ function CalendarSection() {
           credentials (rather than its own section below a divider) makes
           that relationship visually obvious. */}
       <div className="flex items-center justify-between gap-2">
-        <Button size="sm" onClick={handleSaveCredentials} disabled={saving}>
+        <Button size="sm" onClick={handleSaveCredentials} disabled={saving || (!clientId.trim() && !clientSecret.trim())}>
           {saving ? "Saving…" : "Save credentials"}
         </Button>
         {settings.googleCalendarConnected ? (
@@ -660,7 +660,8 @@ function CalendarFeedsSection() {
   function loadFeeds() {
     fetch("/api/calendar-feeds")
       .then((r) => r.json())
-      .then((body: { feeds: CalendarFeed[] }) => setFeeds(body.feeds));
+      .then((body: { feeds: CalendarFeed[] }) => setFeeds(body.feeds))
+      .catch(() => toast.error("Couldn't load your calendar feeds"));
   }
 
   useEffect(loadFeeds, []);
@@ -692,8 +693,8 @@ function CalendarFeedsSection() {
 
   async function handleDelete(id: number) {
     setFeeds((prev) => prev?.filter((f) => f.id !== id) ?? null);
-    const res = await fetch(`/api/calendar-feeds/${id}`, { method: "DELETE" });
-    if (!res.ok) {
+    const res = await fetch(`/api/calendar-feeds/${id}`, { method: "DELETE" }).catch(() => null);
+    if (!res?.ok) {
       toast.error("Couldn't remove that feed");
       loadFeeds();
     }
@@ -709,8 +710,8 @@ function CalendarFeedsSection() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: next }),
-    });
-    if (!res.ok) {
+    }).catch(() => null);
+    if (!res?.ok) {
       toast.error("Couldn't update that feed");
       loadFeeds();
       return;
@@ -1566,8 +1567,8 @@ function FontPicker() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ appFont }),
-    });
-    if (!res.ok) toast.error("Couldn't save font");
+    }).catch(() => null);
+    if (!res?.ok) toast.error("Couldn't save font");
   }
 
   if (!settings) return null;
@@ -1624,17 +1625,21 @@ type BrandingFields = {
 function useSaveBranding() {
   const { data: settings, mutate } = useSWR<AppSettings>("/api/settings");
   async function saveBranding(fields: BrandingFields) {
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
-    });
-    if (!res.ok) {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!res.ok) {
+        toast.error("Couldn't save that setting");
+        return;
+      }
+      const body: AppSettings = await res.json();
+      mutate(body, { revalidate: false });
+    } catch {
       toast.error("Couldn't save that setting");
-      return;
     }
-    const body: AppSettings = await res.json();
-    mutate(body, { revalidate: false });
   }
   return { settings, saveBranding };
 }
@@ -1642,6 +1647,10 @@ function useSaveBranding() {
 function IdentitySection() {
   const { settings, saveBranding } = useSaveBranding();
   const [nameDraft, setNameDraft] = useState("");
+  // The emoji is a draft too, saved when the field is left: saving on every
+  // keystroke while the field shows the last saved value drops characters
+  // typed before the save comes back (and breaks composing input).
+  const [iconDraft, setIconDraft] = useState("");
   const [seededFor, setSeededFor] = useState<string | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [cropOpen, setCropOpen] = useState(false);
@@ -1652,6 +1661,7 @@ function IdentitySection() {
   // key here since this section only cares whether it's arrived yet.
   if (settings && seededFor !== "settings") {
     setNameDraft(settings.appName ?? "");
+    setIconDraft(settings.appIcon ?? "");
     setSeededFor("settings");
   }
 
@@ -1660,6 +1670,13 @@ function IdentitySection() {
     const trimmed = nameDraft.trim();
     if (trimmed === (settings.appName ?? "")) return;
     saveBranding({ appName: trimmed || null });
+  }
+
+  function commitIcon() {
+    if (!settings) return;
+    const trimmed = iconDraft.trim();
+    if (trimmed === (settings.appIcon ?? "")) return;
+    saveBranding({ appIcon: trimmed || null });
   }
 
   if (!settings) return null;
@@ -1722,8 +1739,12 @@ function IdentitySection() {
             </Button>
           )}
           <Input
-            value={settings.appIcon ?? ""}
-            onChange={(e) => saveBranding({ appIcon: e.target.value.trim() || null })}
+            value={iconDraft}
+            onChange={(e) => setIconDraft(e.target.value)}
+            onBlur={commitIcon}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
             placeholder="📚"
             maxLength={8}
             className="h-9 w-16 text-center text-lg"

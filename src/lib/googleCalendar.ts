@@ -179,12 +179,16 @@ export interface EventInput {
   allDay: boolean;
 }
 
-function toGoogleEventBody(input: EventInput) {
+export function toGoogleEventBody(input: EventInput, patch = false) {
+  // For a patch the other form is nulled out explicitly: an update merges into
+  // the stored event, so turning an all-day event into a timed one (or back)
+  // would otherwise leave both a date and a dateTime on it.
+  const none = patch ? { dateTime: null, date: null } : {};
   return {
     summary: input.title,
     description: input.description,
-    start: input.allDay ? { date: input.start } : { dateTime: input.start },
-    end: input.allDay ? { date: input.end } : { dateTime: input.end },
+    start: input.allDay ? { ...none, date: input.start } : { ...none, dateTime: input.start },
+    end: input.allDay ? { ...none, date: input.end } : { ...none, dateTime: input.end },
   };
 }
 
@@ -204,7 +208,7 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<C
   const res = await calendar.events.patch({
     calendarId: "primary",
     eventId,
-    requestBody: toGoogleEventBody(input),
+    requestBody: toGoogleEventBody(input, true),
   });
   const event = fromGoogleEvent(res.data);
   if (!event) throw new Error("Google returned an unexpected event shape");

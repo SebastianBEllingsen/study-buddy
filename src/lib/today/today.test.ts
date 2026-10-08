@@ -297,6 +297,31 @@ describe("chapterCandidates", () => {
   });
 });
 
+describe("a plan's Today frequency on a scheduled plan", () => {
+  it("brings its next chapter on a day with no session when the plan is due, and not otherwise", async () => {
+    const plan = await makePlan((await createCourse("A")).id, { ...DEFAULT_STUDY_PLAN_OPTIONS, schedule: true });
+    const names = new Map([[plan.course_id, "A"]]);
+    const noSessions = { ...plan, sessions: [] };
+    const due = new Map([[plan.id, { must: "your every-day plan", skip: false }]]);
+    expect(chapterCandidates([noSessions], names, "2026-03-02", undefined, new Map(), due).map((c) => [c.chapterTitle, c.must])).toEqual([
+      ["Foundations", "your every-day plan"],
+    ]);
+    expect(chapterCandidates([noSessions], names, "2026-03-02", undefined, new Map(), new Map())).toEqual([]);
+  });
+
+  it("doesn't add a second chapter on a day the schedule already has a session", async () => {
+    const plan = await makePlan((await createCourse("A")).id, { ...DEFAULT_STUDY_PLAN_OPTIONS, schedule: true });
+    const names = new Map([[plan.course_id, "A"]]);
+    const withSession = {
+      ...plan,
+      sessions: [{ id: 1, plan_id: plan.id, chapter_id: plan.chapters[1].id, date: "2026-03-02", minutes: 30, kind: "study" as const, done_at: null, google_event_id: null }],
+    };
+    const due = new Map([[plan.id, { must: "your every-day plan", skip: false }]]);
+    const candidates = chapterCandidates([withSession], names, "2026-03-02", undefined, new Map(), due);
+    expect(candidates.map((c) => c.chapterId)).toEqual([plan.chapters[1].id]);
+  });
+});
+
 describe("picking chapters", () => {
   it("offers exactly the picked chapters, scheduled today or not, and lists the open ones", async () => {
     const plan = await makePlan((await createCourse("A")).id, { ...DEFAULT_STUDY_PLAN_OPTIONS, schedule: true });

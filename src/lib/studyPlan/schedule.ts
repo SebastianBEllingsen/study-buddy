@@ -77,6 +77,9 @@ export interface ScheduleInput {
   minutesPerDay: number;
   // Chapter id → extra review minutes to fit in first.
   extraReview?: Map<number, number>;
+  // Minutes already studied on startDate (finished sessions), taken off that
+  // day's capacity so a rebuild doesn't offer a second full day.
+  doneTodayMinutes?: number;
 }
 
 export interface PlannedSession {
@@ -90,7 +93,12 @@ export type ScheduleWarning =
   | { type: "no_study_days" }
   | { type: "deadline_passed" }
   | { type: "not_enough_time"; neededMinutes: number; availableMinutes: number }
-  | { type: "too_long" };
+  | { type: "too_long" }
+  // Chapters that got no study time because the deadline can't fit them all.
+  | { type: "unscheduled_chapters"; count: number }
+  // Stage or prerequisite settings that contradict each other (a chapter and
+  // one it builds on each waiting for the other), so one wait was ignored.
+  | { type: "order_conflict" };
 
 export interface ScheduleResult {
   sessions: PlannedSession[];
@@ -193,6 +201,22 @@ function waitsFor(chapter: ScheduleChapter, all: ScheduleChapter[]): number[] {
   return all.filter((c) => c.stage < chapter.stage).map((c) => c.id);
 }
 
+// Stages and prerequisites can be edited into a contradiction (a chapter
+// moved to a later stage than one that builds on it), which would leave both
+// waiting for each other forever. Waits are only kept on chapters earlier in
+// roadmap order (stage, then position); returns whether any was dropped.
+function breakOrderConflicts(works: Work[], ordered: ScheduleChapter[]): boolean {
+  const rank = new Map(ordered.map((c, i) => [c.id, i]));
+  let dropped = false;
+  for (const work of works) {
+    const mine = rank.get(work.chapterId) ?? 0;
+    const kept = work.waitsFor.filter((id) => (rank.get(id) ?? Infinity) < mine);
+    if (kept.length !== work.waitsFor.length) dropped = true;
+    work.waitsFor = kept;
+  }
+  return dropped;
+}
+
 export function buildSchedule(input: ScheduleInput): ScheduleResult {
   const warnings: ScheduleWarning[] = [];
   if (input.studyDays.length === 0) return { sessions: [], warnings: [{ type: "no_study_days" }] };
@@ -220,7 +244,8 @@ export function buildSchedule(input: ScheduleInput): ScheduleResult {
     if (totalStudy <= (dates.length - candidate) * perDay) reviewDays = candidate;
   }
   const studyDateList = dates.slice(0, dates.length - reviewDays);
-  const capacity = studyDateList.length * perDay;
+  const doneToday = studyDateList[0] === input.startDate ? Math.min(perDay, Math.max(0, input.doneTodayMinutes ?? 0)) : 0;
+  const capacity = studyDateList.length * perDay - doneToday;
 
   let scale = 1;
   if (deadline && totalStudy > capacity) {
@@ -248,6 +273,7 @@ export function buildSchedule(input: ScheduleInput): ScheduleResult {
       waitsFor: chapter.complete ? [] : waitsFor(chapter, ordered),
     });
   }
+  if (breakOrderConflicts(studyWork, ordered)) warnings.push({ type: "order_conflict" });
   const works = [...extraWork, ...studyWork];
   const studyOf = new Map(studyWork.map((w) => [w.chapterId, w]));
   const finished = (chapterId: number) => (studyOf.get(chapterId)?.remaining ?? 0) <= 0;
@@ -270,7 +296,7 @@ export function buildSchedule(input: ScheduleInput): ScheduleResult {
 
   for (let dayIndex = 0; dayIndex < studyDateList.length && works.some((w) => w.remaining > 0); dayIndex++) {
     const date = studyDateList[dayIndex];
-    let left = perDay;
+    let left = date === input.startDate ? perDay - doneToday : perDay;
     // Parallel chapters take turns: each day starts one further along.
     let offset = dayIndex;
     let seen = new Set<Work>();
@@ -291,6 +317,10 @@ export function buildSchedule(input: ScheduleInput): ScheduleResult {
   }
   const unfinished = works.some((w) => w.remaining > 0);
   if (!deadline && unfinished) warnings.push({ type: "too_long" });
+  // With a deadline, chapters the squeezed time couldn't fully fit (every
+  // chapter keeps a minimum session, so many small ones can still overflow).
+  const unfitted = studyWork.filter((w) => w.remaining > 0).length;
+  if (deadline && unfitted > 0) warnings.push({ type: "unscheduled_chapters", count: unfitted });
 
   // Review days: short sessions on the chapters least well known, round-robin
   // (chapters the student said they know included — this is their revision).
@@ -323,6 +353,15 @@ export function localToday(now: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+// The date the schedule works toward: the plan's finish date, or the
+// course's exam date when that comes first (nothing is worth scheduling
+// after the exam). An exam date that has already passed is ignored.
+export function effectiveDeadline(deadline: string | null, examDate: string | null | undefined, today: string): string | null {
+  if (!examDate || examDate < today) return deadline;
+  // A finish date that has passed doesn't stand in the way of the exam.
+  return deadline && deadline >= today && deadline <= examDate ? deadline : examDate;
+}
+
 // The scheduler's input for a saved plan, as of `today` — shared by the
 // server (to build sessions) and the plan page (to show the same warnings
 // the server would, without storing them).
@@ -342,14 +381,23 @@ export function scheduleInputFromPlan(
       items?: { mode: string; best_score: number | null }[];
       mastery: number | null;
     }[];
-    sessions: { chapter_id: number; minutes: number; done_at: string | null }[];
+    sessions: { chapter_id: number; minutes: number; done_at: string | null; date?: string; kind?: SessionKind }[];
   },
   today: string,
-  extraReview?: Map<number, number>
+  extraReview?: Map<number, number>,
+  // The course's exam date, when it has one: the schedule ends there if that
+  // comes before the plan's finish date.
+  examDate?: string | null
 ): ScheduleInput {
+  // Only study sessions count as time spent learning a chapter: a review or
+  // check isn't progress through its material (and would skew the learned pace).
   const doneMinutes = new Map<number, number>();
+  let doneTodayMinutes = 0;
   for (const s of plan.sessions) {
-    if (s.done_at) doneMinutes.set(s.chapter_id, (doneMinutes.get(s.chapter_id) ?? 0) + s.minutes);
+    if (!s.done_at) continue;
+    if (s.date === today) doneTodayMinutes += s.minutes;
+    if (s.kind && s.kind !== "study") continue;
+    doneMinutes.set(s.chapter_id, (doneMinutes.get(s.chapter_id) ?? 0) + s.minutes);
   }
   return {
     chapters: plan.chapters.map((c) => {
@@ -383,10 +431,11 @@ export function scheduleInputFromPlan(
       };
     }),
     startDate: today,
-    deadline: plan.options.deadline,
+    deadline: effectiveDeadline(plan.options.deadline, examDate, today),
     studyDays: plan.options.studyDays,
     minutesPerDay: plan.options.minutesPerDay,
     extraReview,
+    doneTodayMinutes,
   };
 }
 

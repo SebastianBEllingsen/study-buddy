@@ -19,6 +19,8 @@ import {
   mock_exam_attempts,
   mock_exams,
   notes,
+  code_sets,
+  problem_sets,
   quiz_attempts,
   quiz_generation_presets,
   recent_views,
@@ -827,15 +829,20 @@ export async function getGoogleClientCredentials(): Promise<GoogleClientCredenti
   return { clientId: row.google_client_id, clientSecret: row.google_client_secret };
 }
 
+// A blank value leaves that credential as it is — the Settings fields show
+// "configured" and stay empty, so changing one must not wipe the other.
 export async function setGoogleClientCredentials(
   clientId: string,
   clientSecret: string
 ): Promise<void> {
+  const id = clientId.trim();
+  const secret = clientSecret.trim();
+  if (!id && !secret) return;
   await db
     .update(app_settings)
     .set({
-      google_client_id: clientId.trim() || null,
-      google_client_secret: clientSecret.trim() || null,
+      ...(id && { google_client_id: id }),
+      ...(secret && { google_client_secret: secret }),
       updated_at: nowUtc(),
     })
     .where(eq(app_settings.id, 1));
@@ -3104,7 +3111,15 @@ export interface StudyActivity {
 // date set and the activity heatmap's per-day counts.
 export async function listStudyActivity(): Promise<StudyActivity> {
   const cutoff = oneYearAgoUtc();
-  const [quizRows, reviewRows, questionRows] = await Promise.all([
+  // Code and problem exercises are answered through a practice quiz of their own
+  // (no quiz attempt is made), and mock exams record their answers as "exam"
+  // reviews; both are study just like a quiz is.
+  const [codePractice, problemPractice] = await Promise.all([
+    db.select({ id: code_sets.practice_item_id }).from(code_sets).where(isNotNull(code_sets.practice_item_id)),
+    db.select({ id: problem_sets.practice_item_id }).from(problem_sets).where(isNotNull(problem_sets.practice_item_id)),
+  ]);
+  const practiceItemIds = [...codePractice, ...problemPractice].map((r) => r.id as number);
+  const [quizRows, reviewRows, questionRows, practiceRows] = await Promise.all([
     db
       .select({ completed_at: quiz_attempts.completed_at })
       .from(quiz_attempts)
@@ -3123,6 +3138,18 @@ export async function listStudyActivity(): Promise<StudyActivity> {
       .where(
         and(eq(review_logs.source, "queue"), eq(review_items.kind, "question"), gte(review_logs.reviewed_at, cutoff))
       ),
+    db
+      .select({ reviewed_at: review_logs.reviewed_at })
+      .from(review_logs)
+      .innerJoin(review_items, eq(review_items.id, review_logs.review_item_id))
+      .where(
+        and(
+          gte(review_logs.reviewed_at, cutoff),
+          practiceItemIds.length > 0
+            ? or(eq(review_logs.source, "exam"), and(eq(review_logs.source, "quiz"), inArray(review_items.generated_item_id, practiceItemIds)))
+            : eq(review_logs.source, "exam")
+        )
+      ),
   ]);
   const dates = new Set<string>();
   const counts: Record<string, number> = {};
@@ -3132,7 +3159,7 @@ export async function listStudyActivity(): Promise<StudyActivity> {
     dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;
   }
-  for (const row of [...reviewRows, ...questionRows]) {
+  for (const row of [...reviewRows, ...questionRows, ...practiceRows]) {
     const day = localDayOfUtc(row.reviewed_at);
     dates.add(day);
     counts[day] = (counts[day] ?? 0) + 1;

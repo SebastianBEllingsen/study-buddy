@@ -148,7 +148,7 @@ export async function loadReadiness(courseId: number, now = new Date()): Promise
     .flatMap((e) =>
       e.attempts
         .filter((a) => a.status === "graded" && a.score !== null)
-        .map((a) => ({ title: e.title, date: a.started_at.slice(0, 10), fraction: (a.score as number) / e.total_points }))
+        .map((a) => ({ title: e.title, date: a.started_at, fraction: (a.score as number) / e.total_points }))
     )
     .sort((a, b) => a.date.localeCompare(b.date));
   return {

@@ -89,8 +89,11 @@ const TIME_SLOTS = Array.from({ length: 96 }, (_, i) => {
 // slots to get there.
 function TimePicker({ value, onChange, id }: { value: string; onChange: (value: string) => void; id?: string }) {
   const fmt = useDateFormatter();
+  // An existing event can start between the 15-minute slots (09:10); its own
+  // time stays selectable and shown instead of the field reading as empty.
+  const items = !value || TIME_SLOTS.includes(value) ? TIME_SLOTS : [...TIME_SLOTS, value].sort();
   return (
-    <Combobox items={TIME_SLOTS} value={value || null} onValueChange={(v) => v && onChange(v)} itemToStringLabel={(item: string) => formatTimeLabel(item, fmt)}>
+    <Combobox items={items} value={value || null} onValueChange={(v) => v && onChange(v)} itemToStringLabel={(item: string) => formatTimeLabel(item, fmt)}>
       <ComboboxInputGroup className="w-[8rem] shrink-0">
         <ClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <ComboboxInput id={id} placeholder="Time" className="tabular-nums" />

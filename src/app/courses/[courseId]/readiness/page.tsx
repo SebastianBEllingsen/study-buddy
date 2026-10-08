@@ -4,6 +4,8 @@ import { Explain } from "@/components/Explain";
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { CalendarClock, Gauge } from "lucide-react";
@@ -11,6 +13,7 @@ import { cn } from "cn";
 import type { Readiness } from "@/lib/readiness/load";
 import type { ForecastGroup } from "@/lib/readiness/forecast";
 import { looksLikeExamEvent } from "@/lib/exams/detect";
+import { dateKey } from "@/components/calendar/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +28,15 @@ interface CalendarEvent {
   id: string;
   title: string;
   start: string;
+}
+
+// The calendar day an event starts on for the viewer: an all-day start is
+// already a plain date, a timed one is an instant (often in UTC, from a feed),
+// whose first ten characters can be the day before or after the local one.
+function startDay(start: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(start)) return start;
+  const date = new Date(start);
+  return Number.isNaN(date.getTime()) ? start.slice(0, 10) : dateKey(date);
 }
 
 function pct(n: number) {
@@ -57,6 +69,7 @@ function GroupRows({ groups }: { groups: ForecastGroup[] }) {
 
 export default function ReadinessPage() {
   const { courseId } = useParams<{ courseId: string }>();
+  const fmt = useDateFormatter();
   const key = `/api/courses/${courseId}/readiness`;
   const { data, error, mutate } = useSWR<ReadinessResponse>(key);
   const { data: calendar } = useSWR<{ events: CalendarEvent[] }>("/api/calendar/events?maxResults=100");
@@ -82,7 +95,7 @@ export default function ReadinessPage() {
   const suggestions = (calendar?.events ?? [])
     .filter((e) => looksLikeExamEvent(e.title))
     .slice(0, 5)
-    .map((e) => ({ label: e.title, date: e.start.slice(0, 10) }));
+    .map((e) => ({ label: e.title, date: startDay(e.start) }));
   if (data.planDeadline && data.source !== "plan") suggestions.unshift({ label: "Study plan finish date", date: data.planDeadline });
   const f = data.forecast;
 
@@ -201,7 +214,7 @@ export default function ReadinessPage() {
             {data.mockScores.map((m, i) => (
               <li key={i} className="flex justify-between gap-3">
                 <span>
-                  {m.title} · {m.date}
+                  {m.title} · {fmt.numericDate(fromUtcTimestamp(m.date))}
                 </span>
                 <span className="tabular-nums">{pct(m.fraction)}</span>
               </li>

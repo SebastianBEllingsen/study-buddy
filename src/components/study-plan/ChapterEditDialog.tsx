@@ -71,13 +71,17 @@ export function ChapterEditDialog({
   async function handleSave() {
     if (!valid) return;
     setSaving(true);
-    const ok = await onSave({
-      title: title.trim(),
-      summary: summary.trim(),
-      subtopics: subtopicsFromLines(lines, initial?.subtopics ?? []),
-      stage: stageNumber ?? initial?.stage ?? 0,
-    });
-    setSaving(false);
+    let ok = false;
+    try {
+      ok = await onSave({
+        title: title.trim(),
+        summary: summary.trim(),
+        subtopics: subtopicsFromLines(lines, initial?.subtopics ?? []),
+        stage: stageNumber ?? initial?.stage ?? 0,
+      });
+    } finally {
+      setSaving(false);
+    }
     if (ok) onOpenChange(false);
   }
 

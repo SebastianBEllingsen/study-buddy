@@ -4,6 +4,8 @@ import { Explain } from "@/components/Explain";
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { Footprints, LoaderCircle, Shuffle, Trash2 } from "lucide-react";
@@ -30,6 +32,7 @@ function ProblemsInner() {
   const router = useRouter();
   const aiEnabled = useAiEnabled();
   const [chapterId, setChapterId] = useState(search.get("chapterId") ?? "");
+  const fmt = useDateFormatter();
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState<"coach" | "mixed" | null>(null);
   const { data: detail } = useSWR<{ course: { name: string }; studyPlan: StudyPlan | null }>(`/api/courses/${courseId}`);
@@ -150,7 +153,7 @@ function ProblemsInner() {
                   {s.title}
                 </Link>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {s.done}/{s.total} done · {s.created_at.slice(0, 10)}
+                  {s.done}/{s.total} done · {fmt.numericDate(fromUtcTimestamp(s.created_at))}
                 </span>
                 <Button size="icon-xs" variant="ghost" aria-label={`Delete ${s.title}`} onClick={() => void remove(s.id)}>
                   <Trash2 />

@@ -145,11 +145,15 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
   async function handleIconChange(icon: string | null) {
     if (!detail) return;
     mutate({ ...detail, note: { ...detail.note, icon } }, { revalidate: false });
-    await fetch(`/api/notes/${noteId}`, {
+    const res = await fetch(`/api/notes/${noteId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ icon }),
-    });
+    }).catch(() => null);
+    if (!res?.ok) {
+      toast.error("Couldn't change the icon");
+      void mutate();
+    }
   }
 
   // Whether new cards, quizzes and notes for the course draw on this note,
@@ -188,8 +192,8 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
 
   async function handleDelete() {
     discardSaves();
-    const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
-    if (!res.ok) {
+    const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" }).catch(() => null);
+    if (!res?.ok) {
       toast.error("Couldn't delete note");
       return;
     }

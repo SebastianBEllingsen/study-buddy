@@ -78,8 +78,25 @@ export function runCli(params: RunCliParams): Promise<RunCliResult> {
         // app was launched with a minimal PATH (see cliPath.ts).
         env: withCommonCliDirs(params.env) as NodeJS.ProcessEnv,
         shell: isWindows,
+        // Its own process group (POSIX), so a timeout can take down everything
+        // the CLI started — Claude Code runs shells and tools of its own.
+        detached: !isWindows,
       }
     );
+
+    // Stops the CLI and what it spawned. Killing only the CLI would leave its
+    // children running (and, for an agent, still working and spending).
+    function killTree() {
+      try {
+        if (!isWindows && child.pid !== undefined) {
+          process.kill(-child.pid, "SIGKILL");
+          return;
+        }
+      } catch {
+        // already gone, or no group to signal: fall through to the plain kill
+      }
+      child.kill();
+    }
 
     let stdout = "";
     let stderr = "";
@@ -95,7 +112,7 @@ export function runCli(params: RunCliParams): Promise<RunCliResult> {
 
     const timer = setTimeout(() => {
       finish(() => {
-        child.kill();
+        killTree();
         reject(new CliTimeoutError(`${params.command} timed out after ${params.timeoutMs}ms`));
       });
     }, params.timeoutMs);
@@ -104,7 +121,7 @@ export function runCli(params: RunCliParams): Promise<RunCliResult> {
       stdoutBytes += chunk.length;
       if (stdoutBytes > params.maxBufferBytes) {
         finish(() => {
-          child.kill();
+          killTree();
           reject(new Error(`${params.command} output exceeded ${params.maxBufferBytes} bytes`));
         });
         return;

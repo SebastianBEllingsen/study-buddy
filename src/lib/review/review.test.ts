@@ -240,6 +240,26 @@ describe("recordQuizAnswers", () => {
 
 describe("recoveredSinceLastMiss", () => {
   const log = (day: string, correct: boolean) => ({ reviewed_at: `${day} 10:00:00`, correct });
+  it("counts days by the learner's own clock, not UTC", () => {
+    // Two evening reviews in the same local day (UTC−5 here) fall on different UTC days.
+    const original = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      const at = (utc: string, correct: boolean) => ({ reviewed_at: utc, correct });
+      // Missed Jan 1 evening; recalled Jan 1 late evening (local) = Jan 2 UTC; then Jan 2 local.
+      expect(
+        mistakesModule.recoveredSinceLastMiss([
+          at("2026-01-01 23:00:00", false),
+          at("2026-01-02 03:00:00", true), // 22:00 local on Jan 1: the miss's own day
+          at("2026-01-03 15:00:00", true), // Jan 3 local
+        ])
+      ).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+
   it("needs correct recalls on two separate days after the latest miss, not the miss day", () => {
     expect(mistakesModule.recoveredSinceLastMiss([log("2026-01-01", false), log("2026-01-01", true), log("2026-01-02", true)])).toBe(false);
     expect(mistakesModule.recoveredSinceLastMiss([log("2026-01-01", false), log("2026-01-02", true), log("2026-01-03", true)])).toBe(true);
@@ -355,6 +375,36 @@ describe("due counts and activity", () => {
     });
     const activity = await listStudyActivity();
     expect(activity.dates).toContain(now.toISOString().slice(0, 10));
+  });
+
+  it("counts code practice and mock exam answers as study activity, but not a stray quiz-sourced answer", async () => {
+    const { course, quiz } = await setup();
+    const { createCodeSet, setCodePracticeItem } = await import("../code/store");
+    const when = new Date(Date.now() - 3 * 86_400_000);
+    const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const entry = { question: questions[0], answer: 0, confidence: null, result: result(0, true) };
+
+    // Answered with source "quiz" but not as a quiz attempt, on an item no exercise uses: not counted.
+    await recordQuizAnswers({ item: quiz, source: "quiz", now: when, entries: [entry] });
+    expect((await listStudyActivity()).dates).not.toContain(day(when));
+
+    // The same through a code set's practice quiz: counted.
+    const set = await createCodeSet({ courseId: course.id, chapterId: null, title: "Sample exercises", language: "python", exercises: [] });
+    await setCodePracticeItem(set.id, quiz.id);
+    expect((await listStudyActivity()).dates).toContain(day(when));
+  });
+
+  it("counts a mock exam's answers as study activity", async () => {
+    const { quiz } = await setup();
+    const when = new Date(Date.now() - 5 * 86_400_000);
+    await recordQuizAnswers({
+      item: quiz,
+      source: "exam",
+      now: when,
+      entries: [{ question: questions[0], answer: 0, confidence: null, result: result(0, true) }],
+    });
+    const day = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-${String(when.getDate()).padStart(2, "0")}`;
+    expect((await listStudyActivity()).dates).toContain(day);
   });
 
   it("removes review state with its item", async () => {

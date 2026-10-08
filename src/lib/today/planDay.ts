@@ -12,8 +12,9 @@
 //     left between them (none in an exam's final days). A course with nothing
 //     left to learn brings its weakest finished chapter back for revision
 //     (lib/today/revision.ts), after new learning, and exam days keep it
-//  5. daily coding practice, on a programming plan: write code for the
-//     current chapter (reading about code is not writing it)
+//  5. coding practice, on a programming plan: write code for the
+//     current chapter (reading about code is not writing it). A plan set to
+//     "at least N days a week" gets it only until it has met that target
 //  6. one weak concept, if time is left — two in exam mode, for more
 //     mixed practice. A weak concept from code exercises comes back as a
 //     fresh exercise to write, not a question to answer.
@@ -45,7 +46,7 @@ export interface TodayStep {
   completion: StepCompletion | null;
   // The plan session this step belongs to, marked done when the day's
   // session is finished.
-  sessionId: { planId: number; sessionId: number } | null;
+  sessionId: { planId: number; sessionId: number; chapterId?: number } | null;
 }
 
 export type ChapterNextStep =
@@ -85,6 +86,9 @@ export interface ChapterCandidate {
   // exercises still to do (null when there isn't one yet — opening the step
   // writes one).
   code?: { language: CodeLanguage; setId: number | null };
+  // A plan set to "at least N days a week" has met its target: no coding
+  // practice today (see cadence.ts).
+  skipCode?: boolean;
 }
 
 export interface WeakConcept {
@@ -188,7 +192,7 @@ function chapterStep(c: ChapterCandidate, minutes: number): TodayStep {
     minutes,
     courseName: c.courseName,
     why: chapterWhy(c),
-    sessionId: c.session ? { planId: c.planId, sessionId: c.session.id } : null,
+    sessionId: c.session ? { planId: c.planId, sessionId: c.session.id, chapterId: c.chapterId } : null,
   };
   if (c.next.type === "resource") {
     const verb = RESOURCE_VERBS[c.next.kind] ?? "Study";
@@ -260,7 +264,7 @@ function codeStep(c: ChapterCandidate, code: NonNullable<ChapterCandidate["code"
     href: code.setId !== null ? `/courses/${c.courseId}/code/${code.setId}` : `/courses/${c.courseId}/code?${params}`,
     external: false,
     courseName: c.courseName,
-    why: "daily coding practice — writing code, not just reading it",
+    why: "coding practice — writing code, not just reading it",
     completion: null,
     sessionId: null,
   };
@@ -361,7 +365,7 @@ export function planDay(input: TodayInput): TodayStep[] {
   const maxSteps =
     input.maxChapterSteps ?? (left >= THREE_CHAPTER_MINUTES ? MAX_CHAPTER_STEPS + 1 : MAX_CHAPTER_STEPS);
   // Today's coding practice: the best-ranked chapter of a programming plan.
-  const codeChapter = rankChapters(input.chapters).find((c) => c.code);
+  const codeChapter = rankChapters(input.chapters).find((c) => c.code && !c.skipCode);
   const codeReserve = codeChapter && left >= CODE_RESERVE_FROM_MINUTES ? CODE_MINUTES : 0;
   const reserve =
     (input.weakConcepts.length > 0 && left >= CONCEPT_RESERVE_FROM_MINUTES ? CONCEPT_MINUTES : 0) + codeReserve;

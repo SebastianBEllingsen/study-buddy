@@ -36,6 +36,12 @@ describe("PATCH /api/study-plans/[planId]", () => {
     expect(reschedulePlan).not.toHaveBeenCalled();
   });
 
+  it("reschedules a scheduled plan when 'Test yourself' is switched, since check sessions depend on it", async () => {
+    getStudyPlan.mockResolvedValue({ id: 1, options: { ...PRESET_DEFAULTS.guided, practice: false } });
+    await PATCH(patch({ options: { practice: true } }), params);
+    expect(reschedulePlan).toHaveBeenCalledWith(1);
+  });
+
   it("reschedules when schedule settings change, returning its warnings", async () => {
     const res = await PATCH(patch({ options: { schedule: true, minutesPerDay: 90 } }), params);
     expect(reschedulePlan).toHaveBeenCalledWith(1);

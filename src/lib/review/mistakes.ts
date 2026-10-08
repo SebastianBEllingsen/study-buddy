@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { concepts, courses, db, generated_items, mistakes, review_logs } from "../db";
-import { nowUtc } from "../time";
+import { localDayOfUtc, nowUtc } from "../time";
 import type { MistakeType } from "./mistakeTypes";
 import type { Confidence, ReviewItemKind } from "./types";
 
@@ -84,12 +84,13 @@ export function recoveredSinceLastMiss(logs: { reviewed_at: string; correct: boo
     if (!log.correct) lastMiss = i;
   });
   if (lastMiss === -1) return false;
-  const missDay = logs[lastMiss].reviewed_at.slice(0, 10);
+  // Separate days are the learner's own, like the streak — not UTC days.
+  const missDay = localDayOfUtc(logs[lastMiss].reviewed_at);
   const days = new Set(
     logs
       .slice(lastMiss + 1)
       .filter((l) => l.correct)
-      .map((l) => l.reviewed_at.slice(0, 10))
+      .map((l) => localDayOfUtc(l.reviewed_at))
       .filter((d) => d !== missDay)
   );
   return days.size >= RESOLVE_AFTER_DAYS;

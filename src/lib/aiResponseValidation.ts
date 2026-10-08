@@ -33,8 +33,11 @@ export function assertQuizContentShape(content: unknown): void {
     if (!isRecord(q) || typeof q.question !== "string" || typeof q.explanation !== "string") {
       throw new InvalidAiResponseError("a quiz question is missing required fields");
     }
+    if (q.type !== "mcq" && q.type !== "multi_select" && q.type !== "short_answer") {
+      throw new InvalidAiResponseError("a quiz question has an unknown type");
+    }
     if (q.type === "mcq" || q.type === "multi_select") {
-      if (!Array.isArray(q.options)) {
+      if (!Array.isArray(q.options) || q.options.length < 2 || !q.options.every((o: unknown) => typeof o === "string")) {
         throw new InvalidAiResponseError("a multiple-choice question is missing its options");
       }
       // Captured into a local rather than relying on q.options staying
@@ -54,7 +57,10 @@ export function assertQuizContentShape(content: unknown): void {
         if (!Array.isArray(q.correctIndices)) {
           throw new InvalidAiResponseError("a multi-select question is missing its correct answers");
         }
-        if (!q.correctIndices.every((i: unknown) => Number.isInteger(i) && (i as number) in options)) {
+        if (
+          q.correctIndices.length === 0 ||
+          !q.correctIndices.every((i: unknown) => Number.isInteger(i) && (i as number) in options)
+        ) {
           throw new InvalidAiResponseError("a multi-select question's correct answers are out of range");
         }
       }

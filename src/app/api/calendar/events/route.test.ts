@@ -144,7 +144,7 @@ describe("GET /api/calendar/events", () => {
   });
 
   describe("with feedId", () => {
-    const feed = { id: 3, label: "Mine Studier", url: "https://x/ms.ics", enabled: false, show_on_calendar: false };
+    const feed = { id: 3, label: "Timetable", url: "https://x/ms.ics", enabled: false, show_on_calendar: false };
 
     it("returns only that feed's events, skipping Google, even when the feed is disabled", async () => {
       listCalendarFeeds.mockResolvedValue([feed]);
@@ -172,7 +172,7 @@ describe("GET /api/calendar/events", () => {
   it("leaves feeds with their own tab out of the merged list", async () => {
     listCalendarFeeds.mockResolvedValue([
       { label: "Canvas", url: "https://x/c.ics", enabled: true, show_on_calendar: true, own_calendar: false },
-      { label: "Mine Studier", url: "https://x/ms.ics", enabled: true, show_on_calendar: true, own_calendar: true },
+      { label: "Timetable", url: "https://x/ms.ics", enabled: true, show_on_calendar: true, own_calendar: true },
     ]);
     await GET(new Request("http://localhost/api/calendar/events"));
     const [feeds] = fetchAllFeedEvents.mock.calls[0];

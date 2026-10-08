@@ -28,7 +28,7 @@ import {
   StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
-import { isPastDue } from "@/lib/overdueAssignments";
+import { isPastDue, withCompletion } from "@/lib/overdueAssignments";
 import { cn } from "cn";
 import type {
   AppSettings,
@@ -653,30 +653,31 @@ function AssignmentsWidget({
   const compact = layout.colSpan <= 2 || layout.rowSpan === 1;
   const overdueIds = new Set((events ?? []).filter((e) => isPastDue(e, new Date())).map((e) => e.id));
 
-  async function toggleCompleted(eventId: string) {
-    const wasCompleted = completedIds?.has(eventId) ?? false;
-    const optimisticIds = new Set(completedData?.ids ?? []);
-    if (wasCompleted) optimisticIds.delete(eventId);
-    else optimisticIds.add(eventId);
+  async function setCompleted(eventId: string, completed: boolean) {
     try {
-      // Shows the optimistic result immediately; SWR rolls the cache back
-      // to what it was before if the request rejects, matching the manual
-      // set/rollback this used to do by hand.
+      // Shows the result immediately and rolls back if the request fails.
+      // The optimistic list is built from the cache as it is at that moment,
+      // so the Undo below (created in an earlier render) can't act on stale ids.
       await mutateCompleted(
         fetch("/api/assignments/completed", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ eventId, completed: !wasCompleted }),
+          body: JSON.stringify({ eventId, completed }),
         }).then((res) => {
           if (!res.ok) throw new Error("Couldn't save that");
-          return { ids: Array.from(optimisticIds) };
+          return undefined;
         }),
-        { optimisticData: { ids: Array.from(optimisticIds) }, rollbackOnError: true }
+        {
+          optimisticData: (current) => ({ ids: withCompletion(current?.ids ?? [], eventId, completed) }),
+          rollbackOnError: true,
+          populateCache: false,
+          revalidate: true,
+        }
       );
       // A past-due item drops out of the list the moment it's checked
       // (the optimistic update above), so offer a way back.
-      if (!wasCompleted && overdueIds.has(eventId)) {
-        toast("Marked as done", { action: { label: "Undo", onClick: () => void toggleCompleted(eventId) } });
+      if (completed && overdueIds.has(eventId)) {
+        toast("Marked as done", { action: { label: "Undo", onClick: () => void setCompleted(eventId, false) } });
       }
     } catch {
       toast.error("Couldn't save that");
@@ -771,7 +772,7 @@ function AssignmentsWidget({
                 >
                   <Checkbox
                     checked={done}
-                    onCheckedChange={() => toggleCompleted(event.id)}
+                    onCheckedChange={() => setCompleted(event.id, !done)}
                     aria-label={done ? `Mark ${event.title} as not done` : `Mark ${event.title} as done`}
                   />
                   <EventInfoTooltip event={event}>
@@ -984,17 +985,20 @@ function HomePageContent() {
       const course = await res.json();
       setOpen(false);
       router.push(`/courses/${course.id}`);
+    } catch {
+      toast.error("Couldn't create the course");
     } finally {
       setCreating(false);
     }
   }
 
   async function handleRename(courseId: number, newName: string) {
-    await fetch(`/api/courses/${courseId}`, {
+    const res = await fetch(`/api/courses/${courseId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName }),
-    });
+    }).catch(() => null);
+    if (!res?.ok) toast.error("Couldn't rename the course");
     refresh();
   }
 
@@ -1037,10 +1041,13 @@ function HomePageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ homeWidgets: next }),
       });
-      if (!res.ok) toast.error("Couldn't save dashboard layout");
+      if (res.ok) return;
     } catch {
-      toast.error("Couldn't save dashboard layout");
+      // handled below
     }
+    // Local state was already changed above, so put it back to what's saved.
+    toast.error("Couldn't save dashboard layout");
+    void mutateSettings();
   }
 
   // The dot on a course's card — either it has cards due, or it has a

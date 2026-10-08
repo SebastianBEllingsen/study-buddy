@@ -14,13 +14,14 @@ import {
   sessionProgress,
   setStepStatus,
   snoozeStep,
+  studiedMinutes,
   type SessionStep,
   type TodaySession,
 } from "@/lib/today/session";
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Button } from "@/components/ui/button";
 import { usePomodoro } from "@/components/pomodoro/PomodoroProvider";
-import { recordFinishedSession, saveTodaySession, updateTodaySession } from "./todayStore";
+import { currentTodaySession, recordFinishedSession, saveTodaySession, updateTodaySession } from "./todayStore";
 
 async function post(url: string, body: unknown): Promise<boolean> {
   try {
@@ -74,10 +75,16 @@ export function useOpenStep() {
   };
 }
 
+// What the step is credited with in the plan: the time it really took, up to its planned time.
+function minutesStudied(step: SessionStep): number {
+  const session = currentTodaySession();
+  return session ? studiedMinutes(session, step, Date.now()) : step.minutes;
+}
+
 // "Done": records it in the study plan where there's something to record,
 // then moves on.
 export async function completeTodayStep(step: SessionStep): Promise<boolean> {
-  if (step.completion && !(await post("/api/today/complete", step.completion))) {
+  if (step.completion && !(await post("/api/today/complete", { ...step.completion, minutes: minutesStudied(step) }))) {
     toast.error("Couldn't save that step");
     return false;
   }
@@ -89,6 +96,11 @@ export async function completeTodayStep(step: SessionStep): Promise<boolean> {
 // long playlist) is done, but the resource stays open in the plan and comes
 // back tomorrow.
 export function doneForToday(step: SessionStep) {
+  // Recorded as study done today, so the day counts toward the plan's Today
+  // frequency (the resource itself stays open).
+  if (step.completion?.type === "resource") {
+    void post("/api/today/complete", { ...step.completion, type: "progress", minutes: minutesStudied(step) });
+  }
   updateTodaySession((s) => markDoneForToday(s, step.id));
 }
 

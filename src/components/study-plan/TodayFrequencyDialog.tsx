@@ -13,7 +13,7 @@ export type TodayFrequency = Pick<StudyPlanOptions, "todayCadence" | "todayPerWe
 
 const CHOICES: { value: TodayCadence; label: string; hint: string }[] = [
   { value: "auto", label: "Automatic", hint: "Your courses take turns, the one you studied longest ago first." },
-  { value: "daily", label: "Every day", hint: "A chapter step from this plan every day you haven't worked on it yet." },
+  { value: "daily", label: "Every day", hint: "A chapter step from this plan every day you haven't worked on it yet, even on a day its schedule has no session." },
   {
     value: "every_other_day",
     label: "Every other day",
@@ -22,7 +22,7 @@ const CHOICES: { value: TodayCadence; label: string; hint: string }[] = [
   {
     value: "weekly",
     label: "At least some days a week",
-    hint: "Moves to the front while you're short of your days in the last 7, then goes back to its turn.",
+    hint: "Moves to the front while you're short of your days in the last 7, then goes back to its turn. Coding practice follows the same days.",
   },
   {
     value: "off",
@@ -31,8 +31,9 @@ const CHOICES: { value: TodayCadence; label: string; hint: string }[] = [
   },
 ];
 
-// How often a study plan shows up in Today. Any activity in the course
-// counts as studying it that day. The mixed view of all courses follows this;
+// How often a study plan shows up in Today. Work on the plan (a resource, a
+// subtopic, a chapter quiz, code practice) counts as studying it that day;
+// reviewing the course's other cards doesn't. The mixed view of all courses follows this;
 // opening Today for the one course always shows it.
 export function TodayFrequencyDialog({
   open,

@@ -53,6 +53,15 @@ function toDatetimeLocalValue(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// An all-day event's end date is the day AFTER it (Google's convention), so a
+// one-day event dated "10th to 10th" would be an empty range and refused.
+function allDayEnd(start: string, end: string): string {
+  if (end > start) return end;
+  const next = new Date(`${start}T00:00:00`);
+  next.setDate(next.getDate() + 1);
+  return dateKey(next);
+}
+
 interface EventDraft {
   title: string;
   description: string;
@@ -83,7 +92,7 @@ function draftFromEvent(event?: CalendarEvent, initialDate?: Date, forceAllDay?:
       description: "",
       allDay,
       start: allDay ? dateKey(start) : toDatetimeLocalValue(start.toISOString()),
-      end: allDay ? dateKey(end) : toDatetimeLocalValue(end.toISOString()),
+      end: allDay ? allDayEnd(dateKey(start), dateKey(end)) : toDatetimeLocalValue(end.toISOString()),
     };
   }
   return {
@@ -131,7 +140,7 @@ function EventDialog({
     setSaving(true);
     try {
       const start = draft.allDay ? draft.start : new Date(draft.start).toISOString();
-      const end = draft.allDay ? draft.end : new Date(draft.end).toISOString();
+      const end = draft.allDay ? allDayEnd(draft.start, draft.end) : new Date(draft.end).toISOString();
       const body = {
         title: draft.title.trim(),
         description: draft.description.trim(),
@@ -139,7 +148,7 @@ function EventDialog({
         end,
         allDay: draft.allDay,
       };
-      const res = await fetch(event ? `/api/calendar/events/${event.id}` : "/api/calendar/events", {
+      const res = await fetch(event ? `/api/calendar/events/${encodeURIComponent(event.id)}` : "/api/calendar/events", {
         method: event ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -385,15 +394,22 @@ function CalendarPageContent() {
     setDialogOpen(true);
   }
 
-  async function handleDelete(eventId: string) {
-    const res = await fetch(`/api/calendar/events/${eventId}`, { method: "DELETE" });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      toast.error(body.error ?? "Couldn't delete event");
-      return;
+  // Whether it was deleted; the dialog stays open when it wasn't.
+  async function handleDelete(eventId: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error ?? "Couldn't delete event");
+        return false;
+      }
+    } catch {
+      toast.error("Couldn't delete event");
+      return false;
     }
     toast.success("Event deleted");
     refreshEvents();
+    return true;
   }
 
   // Feeds are read-only external subscriptions — hiding one here only
@@ -508,8 +524,7 @@ function CalendarPageContent() {
         onDelete={
           editingEvent
             ? async () => {
-                await handleDelete(editingEvent.id);
-                setDialogOpen(false);
+                if (await handleDelete(editingEvent.id)) setDialogOpen(false);
               }
             : undefined
         }

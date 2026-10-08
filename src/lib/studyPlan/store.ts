@@ -828,6 +828,49 @@ export async function setSessionDone(id: number, done: boolean, minutes?: number
     .where(eq(study_plan_sessions.id, id));
 }
 
+// The plan session for a chapter on a day, an open one first. Today's steps
+// find their session this way when its id has gone (a reschedule replaces
+// the plan's open sessions).
+export async function findChapterSession(
+  planId: number,
+  chapterId: number,
+  date: string
+): Promise<typeof study_plan_sessions.$inferSelect | undefined> {
+  const rows = await db
+    .select()
+    .from(study_plan_sessions)
+    .where(
+      and(
+        eq(study_plan_sessions.plan_id, planId),
+        eq(study_plan_sessions.chapter_id, chapterId),
+        eq(study_plan_sessions.date, date)
+      )
+    )
+    .orderBy(asc(study_plan_sessions.id));
+  return rows.find((r) => !r.done_at) ?? rows[0];
+}
+
+// Records study that wasn't on the schedule as a finished session, so it
+// counts as a study day and as time spent on the chapter.
+export async function addDoneSession(planId: number, chapterId: number, date: string, minutes: number): Promise<void> {
+  const now = nowUtc();
+  await db.insert(study_plan_sessions).values({
+    plan_id: planId,
+    chapter_id: chapterId,
+    date,
+    minutes: Math.max(1, Math.round(minutes)),
+    kind: "study",
+    done_at: now,
+    created_at: now,
+  });
+}
+
+// More study on a session Today recorded (see addDoneSession).
+export async function addSessionMinutes(id: number, minutes: number): Promise<void> {
+  const [row] = await db.select({ minutes: study_plan_sessions.minutes }).from(study_plan_sessions).where(eq(study_plan_sessions.id, id)).limit(1);
+  if (row) await db.update(study_plan_sessions).set({ minutes: row.minutes + Math.max(1, Math.round(minutes)) }).where(eq(study_plan_sessions.id, id));
+}
+
 export async function setSessionGoogleEventId(id: number, eventId: string | null): Promise<void> {
   await db.update(study_plan_sessions).set({ google_event_id: eventId }).where(eq(study_plan_sessions.id, id));
 }

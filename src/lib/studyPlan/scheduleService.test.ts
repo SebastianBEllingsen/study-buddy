@@ -8,6 +8,8 @@ vi.mock("../googleCalendar", () => ({
   deleteEvent: (...a: unknown[]) => deleteEvent(...a),
 }));
 vi.mock("../models", () => ({ getCourse: async () => ({ id: 1, name: "Sample Course" }) }));
+let examDate: string | null = null;
+vi.mock("../readiness/load", () => ({ getExamDate: async () => examDate }));
 
 let plan: StudyPlan;
 const replaceOpenSessions = vi.fn();
@@ -20,7 +22,8 @@ vi.mock("./store", () => ({
   setSessionGoogleEventId: (...a: unknown[]) => setSessionGoogleEventId(...a),
 }));
 
-const { reschedulePlan, setGoogleCalendarSync, pushSessionsToGoogle, removePlanFromGoogle } = await import("./scheduleService");
+const { localToday } = await import("./schedule");
+const { removeChapterFromGoogle, reschedulePlan, setGoogleCalendarSync, pushSessionsToGoogle, removePlanFromGoogle } = await import("./scheduleService");
 const { PRESET_DEFAULTS } = await import("./options");
 
 function makePlan(options: Partial<StudyPlan["options"]>, sessions: StudyPlan["sessions"] = []): StudyPlan {
@@ -59,6 +62,7 @@ const session = (id: number, overrides: Partial<StudyPlan["sessions"][number]> =
 
 beforeEach(() => {
   vi.clearAllMocks();
+  examDate = null;
   createEvent.mockImplementation(async () => ({ id: `evt-${createEvent.mock.calls.length}` }));
 });
 
@@ -87,6 +91,79 @@ describe("reschedulePlan", () => {
     expect(deleteEvent).toHaveBeenCalledWith("old");
     expect(deleteEvent).not.toHaveBeenCalledWith("kept");
     expect(setSessionGoogleEventId).toHaveBeenCalledWith(1, null);
+  });
+});
+
+describe("the course's exam date", () => {
+  it("ends the schedule at the exam when it comes before the plan's finish date", async () => {
+    const inDays = (n: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return localToday(d);
+    };
+    plan = makePlan({ schedule: true, deadline: inDays(60), minutesPerDay: 60, studyDays: [0, 1, 2, 3, 4, 5, 6] });
+    plan.chapters[0].estimated_minutes = 6000;
+    examDate = inDays(5);
+    const { warnings } = await reschedulePlan(1);
+    const dates = replaceOpenSessions.mock.calls[0][1].map((s: { date: string }) => s.date);
+    expect(dates.length).toBeGreaterThan(0);
+    expect(dates.every((d: string) => d <= (examDate as string))).toBe(true);
+    expect(warnings.some((w) => w.type === "not_enough_time")).toBe(true);
+  });
+
+  it("is ignored once it has passed", async () => {
+    plan = makePlan({ schedule: true, deadline: null });
+    examDate = "2000-01-01";
+    const { warnings } = await reschedulePlan(1);
+    expect(warnings).toEqual([]);
+    expect(replaceOpenSessions.mock.calls[0][1].length).toBeGreaterThan(0);
+  });
+});
+
+describe("removeChapterFromGoogle", () => {
+  it("removes only that chapter's events, and only when syncing", async () => {
+    plan = makePlan({ googleCalendar: true }, [
+      session(1, { chapter_id: 10, google_event_id: "mine" }),
+      session(2, { chapter_id: 11, google_event_id: "other" }),
+      session(3, { chapter_id: 10, google_event_id: null }),
+    ]);
+    await removeChapterFromGoogle(1, 10);
+    expect(deleteEvent).toHaveBeenCalledTimes(1);
+    expect(deleteEvent).toHaveBeenCalledWith("mine");
+    deleteEvent.mockClear();
+    plan = makePlan({ googleCalendar: false }, [session(1, { google_event_id: "mine" })]);
+    await removeChapterFromGoogle(1, 10);
+    expect(deleteEvent).not.toHaveBeenCalled();
+  });
+
+  it("carries on when Google refuses one", async () => {
+    plan = makePlan({ googleCalendar: true }, [session(1, { google_event_id: "a" }), session(2, { google_event_id: "b" })]);
+    deleteEvent.mockRejectedValueOnce(new Error("gone"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await removeChapterFromGoogle(1, 10);
+    expect(deleteEvent).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("reschedulePlan safety", () => {
+  it("leaves the calendar events alone when the new schedule can't be built", async () => {
+    plan = makePlan({ schedule: true, googleCalendar: true }, [session(1, { google_event_id: "old" })]);
+    (plan as unknown as { chapters: unknown }).chapters = undefined;
+    await expect(reschedulePlan(1)).rejects.toThrow();
+    expect(deleteEvent).not.toHaveBeenCalled();
+    expect(replaceOpenSessions).not.toHaveBeenCalled();
+  });
+
+  it("runs overlapping reschedules of one plan one after the other", async () => {
+    plan = makePlan({ schedule: true });
+    const order: string[] = [];
+    replaceOpenSessions.mockImplementation(async () => {
+      order.push("start");
+      await new Promise((r) => setTimeout(r, 10));
+      order.push("end");
+    });
+    await Promise.all([reschedulePlan(1), reschedulePlan(1)]);
+    expect(order).toEqual(["start", "end", "start", "end"]);
   });
 });
 

@@ -73,18 +73,24 @@ export function CustomizeCourseDialog({
   // image on every dashboard load, so this dialog fetches it on demand —
   // only while it's actually open — instead of trusting a field that isn't
   // on the `course` prop at all.
-  const { data: bgData } = useSWR<{ pageBackgroundImage: string | null }>(
+  const { data: bgData, mutate: mutateBg } = useSWR<{ pageBackgroundImage: string | null }>(
     open ? `/api/courses/${course.id}/page-background` : null
   );
 
-  // Re-seeds drafts from the course the moment a fresh course id opens the
-  // dialog, so a previous open's edits (or a cancel) never leak into a
-  // later one. Adjusting state directly during render like this — rather
-  // than in an effect — avoids the extra render an effect-based reset would
-  // cause; see the react-hooks/set-state-in-effect note in
-  // EditFlashcardsDialog.tsx for the same pattern.
-  const [seededFor, setSeededFor] = useState(course.id);
-  if (open && seededFor !== course.id) {
+  // Re-seeds drafts from the course every time the dialog opens, so a
+  // previous open's edits (or a cancel) never leak into a later one — and so
+  // a setting changed elsewhere in the meantime (hiding Practice from the
+  // course page, say) isn't overwritten by an older draft when this saves.
+  // Adjusting state directly during render like this — rather than in an
+  // effect — avoids the extra render an effect-based reset would cause; see
+  // the react-hooks/set-state-in-effect note in EditFlashcardsDialog.tsx for
+  // the same pattern.
+  const [bgSeededFor, setBgSeededFor] = useState<number | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+  }
+  if (open && !wasOpen) {
     setIcon(course.icon);
     setColor(course.color);
     setCoverImage(course.cover_image);
@@ -95,13 +101,12 @@ export function CustomizeCourseDialog({
     setShowStudyTools(course.show_study_tools);
     setLockBackgroundCrop(course.lock_background_crop);
     setFolderChips(parseFolderChipSettings(course.folder_chips));
-    setSeededFor(course.id);
+    setBgSeededFor(null);
   }
 
   // backgroundImage is seeded separately, once its own on-demand fetch
   // resolves for the currently open course — it can't be seeded above
   // alongside the rest since it isn't available synchronously from the prop.
-  const [bgSeededFor, setBgSeededFor] = useState<number | null>(null);
   if (open && bgData && bgSeededFor !== course.id) {
     setBackgroundImage(bgData.pageBackgroundImage);
     setBgSeededFor(course.id);
@@ -168,6 +173,9 @@ export function CustomizeCourseDialog({
         toast.error(body.error ?? "Couldn't save changes");
         return;
       }
+      // The on-demand backdrop cache now holds the saved one, not the one
+      // from before, for the next time the dialog opens.
+      void mutateBg({ pageBackgroundImage: backgroundImage }, { revalidate: false });
       onSaved();
       onOpenChange(false);
     } catch {

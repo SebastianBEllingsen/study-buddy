@@ -65,8 +65,15 @@ beforeEach(() => {
   generateStructured.mockReset();
   generateText.mockReset();
   buildCourseContext.mockReset();
-  generateStructured.mockResolvedValue({ questions: [] });
+  generateStructured.mockResolvedValue({ questions: [SHORT_QUESTION] });
 });
+
+// The calls that wrote the content, leaving out the fact-check that follows.
+function writingCalls() {
+  return generateStructured.mock.calls.filter(([params]) => !String(params.system).startsWith("You are a careful subject expert"));
+}
+
+const SHORT_QUESTION = { type: "short_answer", question: "Q", modelAnswer: "A", explanation: "E" };
 
 describe("generateForCourse — chunked quiz generation", () => {
   it("distributes the 12-question total across chunks instead of asking every chunk for 12", async () => {
@@ -74,8 +81,8 @@ describe("generateForCourse — chunked quiz generation", () => {
 
     await generateForCourse(1, "quiz");
 
-    expect(generateStructured).toHaveBeenCalledTimes(4);
-    const totals = generateStructured.mock.calls.map(([params]) => totalFromQuizPrompt(params.system));
+    expect(writingCalls()).toHaveLength(4);
+    const totals = writingCalls().map(([params]) => totalFromQuizPrompt(params.system));
     expect(totals.reduce((a, b) => a + b, 0)).toBe(12);
   });
 
@@ -88,8 +95,8 @@ describe("generateForCourse — chunked quiz generation", () => {
 
     await generateForCourse(1, "quiz");
 
-    expect(generateStructured).toHaveBeenCalledTimes(12);
-    const totals = generateStructured.mock.calls.map(([params]) => totalFromQuizPrompt(params.system));
+    expect(writingCalls()).toHaveLength(12);
+    const totals = writingCalls().map(([params]) => totalFromQuizPrompt(params.system));
     expect(totals.every((n) => n === 1)).toBe(true);
     expect(totals.reduce((a, b) => a + b, 0)).toBe(12);
   });
@@ -99,20 +106,20 @@ describe("generateForCourse — chunked quiz generation", () => {
 
     await generateForCourse(1, "quiz");
 
-    expect(generateStructured).toHaveBeenCalledTimes(1);
-    expect(totalFromQuizPrompt(generateStructured.mock.calls[0][0].system)).toBe(12);
+    expect(writingCalls()).toHaveLength(1);
+    expect(totalFromQuizPrompt(writingCalls()[0][0].system)).toBe(12);
   });
 });
 
 describe("generateForCourse — chunked flashcard generation", () => {
   it("distributes the 20-card total across chunks instead of asking every chunk for 20", async () => {
     buildCourseContext.mockResolvedValue(fakeContext(5));
-    generateStructured.mockResolvedValue({ cards: [] });
+    generateStructured.mockResolvedValue({ cards: [{ front: "Q", back: "A" }] });
 
     await generateForCourse(1, "flashcards");
 
-    expect(generateStructured).toHaveBeenCalledTimes(5);
-    const totals = generateStructured.mock.calls.map(
+    expect(writingCalls()).toHaveLength(5);
+    const totals = writingCalls().map(
       ([params]) => Number(params.system.match(/Generate around (\d+) cards/)?.[1])
     );
     expect(totals.every((n) => !Number.isNaN(n))).toBe(true);
@@ -227,7 +234,7 @@ describe("generateForCourse — sources and fact-check", () => {
       needsChunking: false,
       combinedText: "--- Note: My summary [authoritative material] ---\ntext",
     });
-    generateStructured.mockResolvedValue({ cards: [] });
+    generateStructured.mockResolvedValue({ cards: [{ front: "Q", back: "A" }] });
     await expect(generateForCourse(1, "flashcards")).resolves.toBeTruthy();
   });
 });
@@ -236,7 +243,7 @@ describe("generateForCourse from a typed topic", () => {
   beforeEach(() => {
     createGeneratedItem.mockClear();
     getCourse.mockResolvedValue({ id: 1, name: "Test Course" });
-    generateStructured.mockResolvedValue({ cards: [] });
+    generateStructured.mockResolvedValue({ cards: [{ front: "Q", back: "A" }] });
   });
 
   it("generates from the topic when the scope has no material", async () => {
@@ -262,5 +269,16 @@ describe("generateForCourse from a typed topic", () => {
 
   it("tells the model to teach from established knowledge", () => {
     expect(topicText("Recursion")).toMatch(/well-established knowledge/);
+  });
+});
+
+describe("generateForCourse — empty replies", () => {
+  it("refuses to save a quiz or deck the model left empty", async () => {
+    getCourse.mockResolvedValue({ id: 1, name: "Test Course" });
+    buildCourseContext.mockResolvedValue({ ...fakeContext(1), needsChunking: false, combinedText: "doc text" });
+    generateStructured.mockResolvedValue({ questions: [] });
+    await expect(generateForCourse(1, "quiz")).rejects.toThrow(/no questions/);
+    generateStructured.mockResolvedValue({ cards: [] });
+    await expect(generateForCourse(1, "flashcards")).rejects.toThrow(/no cards/);
   });
 });

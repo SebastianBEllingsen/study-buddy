@@ -360,6 +360,12 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
   }
 
   const remaining = queue.length - position;
+  // Checking with nothing entered would record a wrong first try for a
+  // question that was never answered.
+  const hasAnswer =
+    typeof answer === "number" ||
+    (typeof answer === "string" && answer.trim() !== "") ||
+    (Array.isArray(answer) && answer.length > 0);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
@@ -472,7 +478,7 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
               value={typeof answer === "string" ? answer : ""}
               onChange={(e) => setAnswer(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void checkQuestion();
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && typeof answer === "string" && answer.trim()) void checkQuestion();
               }}
             />
           )}
@@ -527,7 +533,7 @@ export function ReviewSession({ courseId, focus = { mode: "due" } }: { courseId:
               {entryFooter()}
             </>
           ) : (
-            <Button className="self-start" disabled={busy} onClick={() => void checkQuestion()}>
+            <Button className="self-start" disabled={busy || !hasAnswer} onClick={() => void checkQuestion()}>
               {busy && <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />}
               Check
             </Button>

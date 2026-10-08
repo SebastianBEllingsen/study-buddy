@@ -446,4 +446,28 @@ describe("study plan store", () => {
     await store.extendChapter(id, { subtopics: [], documentIds: [6], noteIds: [9, 10] });
     expect(await store.getChapter(id)).toMatchObject({ linked_document_ids: [5, 6], linked_note_ids: [8, 9, 10] });
   });
+
+  it("records study done outside the schedule as a finished session, and finds a chapter's session for a day", async () => {
+    const course = await createCourse("Sample Course");
+    const plan = await store.replaceStudyPlan(newPlan(course.id, [chapter("A"), chapter("B")]));
+    const [a, b] = plan.chapters.map((c) => c.id);
+    await store.replaceOpenSessions(plan.id, [{ chapterId: b, date: "2026-03-02", minutes: 30, kind: "study" }]);
+
+    expect(await store.findChapterSession(plan.id, a, "2026-03-02")).toBeUndefined();
+    await store.addDoneSession(plan.id, a, "2026-03-02", 25);
+    const added = await store.findChapterSession(plan.id, a, "2026-03-02");
+    expect(added).toMatchObject({ chapter_id: a, minutes: 25, kind: "study" });
+    expect(added?.done_at).toBe(added?.created_at);
+
+    await store.addSessionMinutes(added!.id, 10);
+    expect((await store.findChapterSession(plan.id, a, "2026-03-02"))?.minutes).toBe(35);
+
+    // A scheduled session is found by its chapter and day, an open one first.
+    expect(await store.findChapterSession(plan.id, b, "2026-03-02")).toMatchObject({ minutes: 30, done_at: null });
+    expect(await store.findChapterSession(plan.id, b, "2026-03-03")).toBeUndefined();
+
+    // A rebuild keeps what was done.
+    await store.replaceOpenSessions(plan.id, []);
+    expect((await store.getStudyPlan(plan.id))?.sessions.map((s) => s.chapter_id)).toEqual([a]);
+  });
 });

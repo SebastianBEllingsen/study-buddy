@@ -4,6 +4,8 @@ import { Explain } from "@/components/Explain";
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useDateFormatter } from "@/components/DateFormatProvider";
+import { fromUtcTimestamp } from "@/lib/dateFormat";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { Code2, LoaderCircle, Trash2 } from "lucide-react";
@@ -31,6 +33,7 @@ function CodeInner() {
   const search = useSearchParams();
   const router = useRouter();
   const aiEnabled = useAiEnabled();
+  const fmt = useDateFormatter();
   const requestedLanguage = search.get("language");
   const [language, setLanguage] = useState<CodeLanguage>(isCodeLanguage(requestedLanguage) ? requestedLanguage : "cpp");
   const [chapterId, setChapterId] = useState(search.get("chapterId") ?? "");
@@ -172,7 +175,7 @@ function CodeInner() {
                   {s.title}
                 </Link>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {s.done}/{s.total} done · {s.created_at.slice(0, 10)}
+                  {s.done}/{s.total} done · {fmt.numericDate(fromUtcTimestamp(s.created_at))}
                 </span>
                 <Button size="icon-xs" variant="ghost" aria-label={`Delete ${s.title}`} onClick={() => void remove(s.id)}>
                   <Trash2 />

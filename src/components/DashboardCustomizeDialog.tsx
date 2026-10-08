@@ -411,10 +411,21 @@ export function DashboardCustomizeDialog({
       const { col, row } = pointToCell(gridEl, ev.clientX, ev.clientY);
       setPreviewLayout({ ...widget, zone, ...clampLayout({ col, row, colSpan: widget.colSpan, rowSpan: widget.rowSpan }) });
     }
+    // The system took the pointer away (a touch gesture, say): nothing is
+    // dropped, and the drag's ghost and outline go away.
+    function handleCancel() {
+      handle.removeEventListener("pointermove", handleMove);
+      handle.removeEventListener("pointerup", handleUp);
+      handle.removeEventListener("pointercancel", handleCancel);
+      setGhost(null);
+      setActiveId(null);
+      setPreviewLayout(null);
+    }
     function handleUp(ev: PointerEvent) {
       handle.releasePointerCapture(e.pointerId);
       handle.removeEventListener("pointermove", handleMove);
       handle.removeEventListener("pointerup", handleUp);
+      handle.removeEventListener("pointercancel", handleCancel);
       const zone = zoneAtPoint(ev.clientX, ev.clientY);
       const gridEl = gridRefFor(zone).current;
       if (gridEl) {
@@ -427,6 +438,7 @@ export function DashboardCustomizeDialog({
     }
     handle.addEventListener("pointermove", handleMove);
     handle.addEventListener("pointerup", handleUp);
+    handle.addEventListener("pointercancel", handleCancel);
   }
 
   function startResize(e: React.PointerEvent, widget: HomeWidgetConfig) {
@@ -452,10 +464,18 @@ export function DashboardCustomizeDialog({
     function handleMove(ev: PointerEvent) {
       setPreviewLayout(sizeFromDelta(ev));
     }
+    function handleCancel() {
+      handle.removeEventListener("pointermove", handleMove);
+      handle.removeEventListener("pointerup", handleUp);
+      handle.removeEventListener("pointercancel", handleCancel);
+      setActiveId(null);
+      setPreviewLayout(null);
+    }
     function handleUp(ev: PointerEvent) {
       handle.releasePointerCapture(e.pointerId);
       handle.removeEventListener("pointermove", handleMove);
       handle.removeEventListener("pointerup", handleUp);
+      handle.removeEventListener("pointercancel", handleCancel);
       const resized = sizeFromDelta(ev);
       onChange(widgets.map((w) => (w.id === widget.id ? resized : w)));
       setActiveId(null);
@@ -463,6 +483,7 @@ export function DashboardCustomizeDialog({
     }
     handle.addEventListener("pointermove", handleMove);
     handle.addEventListener("pointerup", handleUp);
+    handle.addEventListener("pointercancel", handleCancel);
   }
 
   const ghostWidget = ghost ? widgets.find((w) => w.id === ghost.id) : null;

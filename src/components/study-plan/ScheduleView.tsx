@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { CalendarCheck, CalendarDays, CalendarX, LoaderCircle, RefreshCw, Settings2 } from "lucide-react";
 import { cn } from "cn";
 import type { StudyPlan, StudyPlanSession } from "@/lib/studyPlan/types";
-import { buildSchedule, localToday, missedSessions, scheduleInputFromPlan } from "@/lib/studyPlan/schedule";
+import { buildSchedule, effectiveDeadline, localToday, missedSessions, scheduleInputFromPlan } from "@/lib/studyPlan/schedule";
 import {
   formatDay,
   formatMinutes,
@@ -55,11 +55,14 @@ export function ScheduleView({
   plan,
   chapterNumbers,
   googleConnected,
+  examDate,
   onChanged,
 }: {
   plan: StudyPlan;
   chapterNumbers: Map<number, number>;
   googleConnected: boolean;
+  // The course's exam date: the schedule ends there if it's before the finish date.
+  examDate?: string | null;
   onChanged: () => void;
 }) {
   const fmt = useDateFormatter();
@@ -76,7 +79,7 @@ export function ScheduleView({
   const done = plan.sessions.filter((s) => s.done_at);
   // Recomputed here rather than stored: the same warnings a reschedule
   // from today would give.
-  const warnings = buildSchedule(scheduleInputFromPlan(plan, today)).warnings;
+  const warnings = buildSchedule(scheduleInputFromPlan(plan, today, undefined, examDate)).warnings;
   const shown = showAll ? open : open.slice(0, INITIAL_SESSIONS_SHOWN);
   const weeks = groupSessionsByWeek(shown, today);
   // Totals over every open session, so a week cut off by "show fewer" isn't undercounted.
@@ -84,6 +87,7 @@ export function ScheduleView({
     groupSessionsByWeek(open, today).map((w) => [w.label, w.sessions.reduce((n, s) => n + s.minutes, 0)])
   );
   const { deadline, studyDays, minutesPerDay } = plan.options;
+  const endsAt = effectiveDeadline(deadline, examDate, today);
 
   async function toggleSession(session: StudyPlanSession, isDone: boolean) {
     if (await send(`/api/study-plans/${plan.id}/sessions/${session.id}`, "PATCH", { done: isDone })) onChanged();
@@ -94,7 +98,7 @@ export function ScheduleView({
     const res = await send(`/api/study-plans/${plan.id}/replan`, "POST", { useAi });
     setReplanning(false);
     if (!res) return;
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setReplanMessage(data.message ?? null);
     onChanged();
   }
@@ -130,7 +134,7 @@ export function ScheduleView({
           </h2>
           <p className="text-xs text-muted-foreground">
             {daysSummary(studyDays)} · {formatMinutes(minutesPerDay)} a day
-            {deadline ? ` · finish by ${formatDay(fmt, deadline, { day: "numeric", month: "long", year: "numeric" })}` : ""}
+            {endsAt ? ` · ${endsAt === deadline ? "finish by" : "until your exam on"} ${formatDay(fmt, endsAt, { day: "numeric", month: "long", year: "numeric" })}` : ""}
             {plan.sessions.length > 0 && ` · ${done.length} of ${plan.sessions.length} sessions done`}
           </p>
         </div>

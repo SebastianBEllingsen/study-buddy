@@ -111,12 +111,13 @@ function RunExercise({
     // are the AI's mistakes, not the learner's.
     let bad = broken.get(index);
     if (!bad) {
-      bad = brokenTestNames(
-        isProject
-          ? await runTests(set.language, "", exercise.tests, exercise.setup, exercise.solutionFiles)
-          : await runTests(set.language, exercise.solution, exercise.tests, exercise.setup)
-      );
-      broken.set(index, bad);
+      const solutionRun = isProject
+        ? await runTests(set.language, "", exercise.tests, exercise.setup, exercise.solutionFiles)
+        : await runTests(set.language, exercise.solution, exercise.tests, exercise.setup);
+      bad = brokenTestNames(solutionRun);
+      // A run that errored (a timeout, the server unreachable) says nothing
+      // about the tests, so it isn't remembered — the next run checks again.
+      if (solutionRun.error === null) broken.set(index, bad);
     }
     setRunning("running");
     const raw = isProject ? await runTests(set.language, "", exercise.tests, exercise.setup, files) : await runTests(set.language, code, exercise.tests, exercise.setup);

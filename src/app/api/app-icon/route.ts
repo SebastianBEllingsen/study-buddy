@@ -12,6 +12,8 @@ function emojiFaviconSvg(emoji: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="50" y="72" font-size="72" text-anchor="middle">${escapeXml(emoji)}</text></svg>`;
 }
 
+const SAFE_ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
 export async function GET(request: Request) {
   const settings = await getAppSettings();
 
@@ -19,9 +21,20 @@ export async function GET(request: Request) {
     const match = settings.appIconImage.match(/^data:([^;]+);base64,(.+)$/);
     if (match) {
       const [, contentType, base64] = match;
-      return new Response(Buffer.from(base64, "base64"), {
-        headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=300" },
-      });
+      // Served as its own document under this app's origin, so only the raster
+      // types an image upload can produce: an SVG here could run script with
+      // the app's privileges when opened directly.
+      if (SAFE_ICON_TYPES.has(contentType)) {
+        return new Response(Buffer.from(base64, "base64"), {
+          headers: {
+            "Content-Type": contentType,
+            "Cache-Control": "public, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+          },
+        });
+      }
+      return Response.redirect(new URL("/favicon.ico", request.url), 307);
     }
     // A real URL (local /api/blobs/... or a Supabase Storage public URL,
     // see src/lib/blobStorage) rather than an inline data URL — hand the

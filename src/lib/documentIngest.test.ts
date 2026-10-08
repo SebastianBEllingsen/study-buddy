@@ -100,3 +100,20 @@ describe("ingestDocumentBytes", () => {
     ).rejects.toThrow(UnsupportedDocumentTypeError);
   });
 });
+
+describe("onDiskName", () => {
+  it("leaves an ordinary name alone and drops any directory part", async () => {
+    const { onDiskName } = await import("./documentIngest");
+    expect(onDiskName("lecture 3.pdf")).toBe("lecture 3.pdf");
+    expect(onDiskName("../../etc/passwd.pdf")).toBe("passwd.pdf");
+  });
+
+  it("shortens a very long name but keeps its extension, counting bytes", async () => {
+    const { onDiskName } = await import("./documentIngest");
+    const long = `${"é".repeat(200)}.pdf`;
+    const short = onDiskName(long);
+    expect(short.endsWith(".pdf")).toBe(true);
+    expect(Buffer.byteLength(short)).toBeLessThanOrEqual(120);
+    expect(short.length).toBeGreaterThan(10);
+  });
+});

@@ -99,7 +99,8 @@ export function CourseCanvasSection({
   }
 
   async function handleDelete(id: number) {
-    await fetch(`/api/canvases/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/canvases/${id}`, { method: "DELETE" }).catch(() => null);
+    if (!res?.ok) toast.error("Couldn't delete that canvas");
     onChanged();
   }
 
@@ -115,11 +116,12 @@ export function CourseCanvasSection({
     if (from === -1 || to === -1) return;
     ids.splice(from, 1);
     ids.splice(to, 0, payload.id);
-    await fetch(`/api/courses/${courseId}/canvases/reorder`, {
+    const res = await fetch(`/api/courses/${courseId}/canvases/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ orderedIds: ids }),
-    });
+    }).catch(() => null);
+    if (!res?.ok) toast.error("Couldn't save the new order");
     onChanged();
   }
 

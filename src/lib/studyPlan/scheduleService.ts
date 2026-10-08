@@ -1,9 +1,11 @@
 import { createEvent, deleteEvent } from "../googleCalendar";
 import { getCourse } from "../models";
 import { buildSchedule, carriedExtraReview, localToday, scheduleInputFromPlan, type ScheduleWarning } from "./schedule";
+import { getExamDate } from "../readiness/load";
 import { StudyPlanNotFoundError } from "./resources";
-import { sessionKindLabel } from "../studyPlanDisplay";
+import { chapterIsComplete, sessionKindLabel } from "../studyPlanDisplay";
 import {
+  getChapter,
   getStudyPlan,
   replaceOpenSessions,
   setPlanOptions,
@@ -53,23 +55,21 @@ export async function pushSessionsToGoogle(planId: number): Promise<void> {
   }
 }
 
-// Rebuilds the plan's open sessions from today. Finished sessions are kept
-// (and count toward their chapters). Without an explicit extraReview, the
-// extra review a replan added earlier is kept too. With the schedule
-// switched off, the open sessions are cleared instead.
-export async function reschedulePlan(
-  planId: number,
-  extraReview?: Map<number, number>
-): Promise<{ warnings: ScheduleWarning[] }> {
+async function rebuild(planId: number, extraReview?: Map<number, number>): Promise<{ warnings: ScheduleWarning[] }> {
   const plan = await getStudyPlan(planId);
   if (!plan) throw new StudyPlanNotFoundError();
-  if (plan.options.googleCalendar) await removeGoogleEvents(plan, true);
 
   if (!plan.options.schedule) {
+    if (plan.options.googleCalendar) await removeGoogleEvents(plan, true);
     await replaceOpenSessions(planId, []);
     return { warnings: [] };
   }
-  const { sessions, warnings } = buildSchedule(scheduleInputFromPlan(plan, localToday(), extraReview ?? carriedExtraReview(plan.sessions)));
+  // Built before anything is removed, so a failure leaves the old schedule
+  // and its calendar events as they were.
+  const { sessions, warnings } = buildSchedule(
+    scheduleInputFromPlan(plan, localToday(), extraReview ?? carriedExtraReview(plan.sessions), await getExamDate(plan.course_id))
+  );
+  if (plan.options.googleCalendar) await removeGoogleEvents(plan, true);
   await replaceOpenSessions(planId, sessions);
   if (plan.options.googleCalendar) {
     try {
@@ -79,6 +79,57 @@ export async function reschedulePlan(
     }
   }
   return { warnings };
+}
+
+// One rebuild of a plan at a time: a chapter edit and a Today load can
+// overlap, and two at once would each recreate the plan's calendar events.
+const rebuilds = new Map<number, Promise<unknown>>();
+
+// Rebuilds the plan's open sessions from today. Finished sessions are kept
+// (and count toward their chapters). Without an explicit extraReview, the
+// extra review a replan added earlier is kept too. With the schedule
+// switched off, the open sessions are cleared instead.
+export function reschedulePlan(
+  planId: number,
+  extraReview?: Map<number, number>
+): Promise<{ warnings: ScheduleWarning[] }> {
+  const run = (rebuilds.get(planId) ?? Promise.resolve()).catch(() => {}).then(() => rebuild(planId, extraReview));
+  rebuilds.set(planId, run);
+  const clear = () => {
+    if (rebuilds.get(planId) === run) rebuilds.delete(planId);
+  };
+  run.then(clear, clear);
+  return run;
+}
+
+// Whether the chapter counts as finished, read before a change that might finish it.
+export async function chapterWasComplete(chapterId: number): Promise<boolean> {
+  const chapter = await getChapter(chapterId);
+  return !!chapter && chapterIsComplete(chapter);
+}
+
+// A chapter finished (or reopened) by ticking its subtopics changes what's
+// left to schedule, like completing it outright does. Quiet: the tick that
+// caused it already succeeded.
+export async function rescheduleIfFinishedChanged(planId: number, chapterId: number, wasComplete: boolean): Promise<void> {
+  if ((await chapterWasComplete(chapterId)) === wasComplete) return;
+  if ((await getStudyPlan(planId))?.options.schedule) await rescheduleQuietly(planId);
+}
+
+// Takes a chapter's calendar events out of Google Calendar, ahead of deleting
+// the chapter: its sessions go with it, and the events' ids with them, so
+// afterwards nothing could remove them. Best effort, like any removal.
+export async function removeChapterFromGoogle(planId: number, chapterId: number): Promise<void> {
+  const plan = await getStudyPlan(planId);
+  if (!plan?.options.googleCalendar) return;
+  for (const session of plan.sessions) {
+    if (session.chapter_id !== chapterId || !session.google_event_id) continue;
+    try {
+      await deleteEvent(session.google_event_id);
+    } catch (err) {
+      console.warn("Study plan: couldn't remove a Google Calendar event:", err);
+    }
+  }
 }
 
 // For callers where the schedule is a side effect (a finished build, new

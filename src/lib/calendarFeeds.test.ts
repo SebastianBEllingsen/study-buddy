@@ -53,6 +53,29 @@ describe("fetchFeedEvents", () => {
     expect(safeFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("shares one download between requests that arrive while it is still running", async () => {
+    let release!: (value: { ok: true; text: string }) => void;
+    safeFetch.mockReturnValue(new Promise((resolve) => (release = resolve)));
+    parseICS.mockReturnValue({});
+    const feed = { label: "A", url: "https://school.example/in-flight.ics" };
+    const first = fetchFeedEvents(feed, range);
+    const second = fetchFeedEvents(feed, range);
+    release({ ok: true, text: "ics text" });
+    await Promise.all([first, second]);
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    expect(parseICS).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not remember a failed download, so the next request tries again", async () => {
+    const feed = { label: "A", url: "https://school.example/in-flight-fail.ics" };
+    safeFetch.mockResolvedValueOnce({ ok: false, error: "unreachable" });
+    await expect(fetchFeedEvents(feed, range)).rejects.toThrow("unreachable");
+    safeFetch.mockResolvedValueOnce({ ok: true, text: "ics text" });
+    parseICS.mockReturnValue({});
+    await fetchFeedEvents(feed, range);
+    expect(safeFetch).toHaveBeenCalledTimes(2);
+  });
+
   it("re-fetches (and re-validates) once the cache entry goes stale", async () => {
     vi.useFakeTimers();
     safeFetch.mockResolvedValue({ ok: true, text: "ics text" });

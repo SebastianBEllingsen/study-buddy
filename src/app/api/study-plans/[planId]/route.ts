@@ -40,9 +40,12 @@ export async function PATCH(request: Request, { params }: Params) {
       googleCalendar: plan.options.googleCalendar,
     });
     await setPlanOptions(id, next);
-    const scheduleChanged = (["schedule", "deadline", "studyDays", "minutesPerDay"] as const).some(
-      (key) => JSON.stringify(next[key]) !== JSON.stringify(plan.options[key])
-    );
+    const changed = (keys: readonly (keyof typeof next)[]) =>
+      keys.some((key) => JSON.stringify(next[key]) !== JSON.stringify(plan.options[key]));
+    // "Test yourself" decides whether a finished chapter needs a check
+    // session, so it matters to a plan that has a schedule.
+    const scheduleChanged =
+      changed(["schedule", "deadline", "studyDays", "minutesPerDay"]) || (next.schedule && changed(["practice"]));
     if (scheduleChanged) ({ warnings } = await reschedulePlan(id));
   }
   return Response.json({ plan: await getStudyPlan(id), warnings });

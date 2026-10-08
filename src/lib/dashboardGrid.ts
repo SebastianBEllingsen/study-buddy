@@ -135,14 +135,35 @@ export function clampSpanAgainstNeighbors(
   return { colSpan, rowSpan };
 }
 
+type Box = Pick<HomeWidgetConfig, "col" | "row" | "colSpan" | "rowSpan">;
+
+// Where a widget of `size` goes at (or as near as possible to) `col`/`row`
+// without overlapping `others`: that spot if it's free, else the nearest free
+// one at the same size, scanning down from `row` (rows never run out, so one
+// always exists). It keeps its size and stays inside the grid.
+function findFreeSpot(others: Box[], size: { colSpan: number; rowSpan: number }, col: number, row: number) {
+  const maxCol = GRID_COLS - size.colSpan;
+  const start = Math.min(Math.max(0, col), maxCol);
+  const bottom = others.reduce((max, o) => Math.max(max, o.row + o.rowSpan), 0);
+  const columns = Array.from({ length: maxCol + 1 }, (_, c) => c).sort((a, b) => Math.abs(a - start) - Math.abs(b - start) || a - b);
+  for (let r = Math.max(0, row); ; r++) {
+    for (const c of columns) {
+      if (!others.some((o) => boxesOverlap({ colSpan: size.colSpan, rowSpan: size.rowSpan, col: c, row: r }, o))) return { col: c, row: r };
+    }
+    if (r > bottom) return { col: start, row: Math.max(r, bottom) };
+  }
+}
+
 // Moves `id` so its top-left corner is at (col, row), keeping its own size.
-// If that lands on top of another enabled widget IN THE SAME ZONE, they
-// swap places (the occupant takes the mover's old spot and old zone) rather
-// than the drop being rejected — the same "always succeeds, never just
-// refuses" feel as Android's widget grid. Passing `zone` (e.g. dragging a
-// tile from the top grid into the bottom one in the customize dialog)
-// reassigns the widget there; omitting it keeps its current zone, so every
-// existing call site that never mentions zones is unaffected.
+// Every enabled widget IN THE SAME ZONE that it lands on is bumped back to the
+// mover's old zone, to the mover's old spot when it fits there (a plain swap,
+// the same "always succeeds, never just refuses" feel as Android's widget
+// grid) or else the nearest free spot, at its own size — so two widgets of
+// different sizes can swap, and a big one dropped over several small ones
+// moves them all, without anything overlapping or leaving the grid. Passing
+// `zone` (e.g. dragging a tile from the top grid into the bottom one in the
+// customize dialog) reassigns the widget there; omitting it keeps its current
+// zone, so every existing call site that never mentions zones is unaffected.
 export function moveWidgetTo(
   widgets: HomeWidgetConfig[],
   id: HomeWidgetId,
@@ -155,12 +176,18 @@ export function moveWidgetTo(
   const targetZone = zone ?? moving.zone;
   const layout = clampLayout({ col, row, colSpan: moving.colSpan, rowSpan: moving.rowSpan });
   const target: HomeWidgetConfig = { ...moving, ...layout, zone: targetZone, enabled: true };
-  const collision = widgets.find((w) => w.id !== id && w.enabled && w.zone === targetZone && boxesOverlap(target, w));
-  return widgets.map((w) => {
-    if (w.id === id) return target;
-    if (collision && w.id === collision.id) return { ...w, col: moving.col, row: moving.row, zone: moving.zone };
-    return w;
-  });
+  const collided = widgets
+    .filter((w) => w.id !== id && w.enabled && w.zone === targetZone && boxesOverlap(target, w))
+    .sort((a, b) => a.row - b.row || a.col - b.col);
+
+  const placed = new Map(widgets.map((w) => [w.id, w]));
+  placed.set(id, target);
+  for (const w of collided) {
+    const others = [...placed.values()].filter((o) => o.id !== w.id && o.enabled && o.zone === moving.zone);
+    const spot = findFreeSpot(others, w, moving.col, moving.row);
+    placed.set(w.id, { ...w, ...spot, zone: moving.zone });
+  }
+  return widgets.map((w) => placed.get(w.id) as HomeWidgetConfig);
 }
 
 // Resizes `id` in place, shrinking as needed so it never overlaps another

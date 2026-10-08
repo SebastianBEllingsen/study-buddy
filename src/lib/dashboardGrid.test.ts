@@ -113,6 +113,73 @@ describe("moveWidgetTo", () => {
   });
 });
 
+describe("moveWidgetTo with widgets of different sizes", () => {
+  const inGrid = (w: HomeWidgetConfig) => w.col >= 0 && w.col + w.colSpan <= GRID_COLS && w.rowSpan <= MAX_ROW_SPAN;
+  const noOverlap = (ws: HomeWidgetConfig[]) =>
+    ws.every((a, i) => ws.slice(i + 1).every((b) => !(a.enabled && b.enabled && a.zone === b.zone && boxesOverlap(a, b))));
+
+  it("swaps a narrow widget with a wide one without the wide one leaving the grid", () => {
+    // The narrow one sits on the right edge; the wide one can't take its old spot at full width.
+    const widgets = [
+      widget({ id: "streak", col: 5, row: 3, colSpan: 1 }),
+      widget({ id: "due", col: 3, row: 0, colSpan: 3, rowSpan: 2 }),
+    ];
+    const result = moveWidgetTo(widgets, "streak", 4, 1);
+    expect(result.every(inGrid)).toBe(true);
+    expect(noOverlap(result)).toBe(true);
+    expect(result.find((w) => w.id === "due")).toMatchObject({ colSpan: 3, rowSpan: 2 });
+  });
+
+  it("moves every widget a big one lands on, not just the first", () => {
+    const widgets = [
+      widget({ id: "streak", col: 0, row: 5, colSpan: 4 }),
+      widget({ id: "due", col: 0, row: 0 }),
+      widget({ id: "heatmap", col: 1, row: 0 }),
+      widget({ id: "recent", col: 2, row: 0 }),
+    ];
+    const result = moveWidgetTo(widgets, "streak", 0, 0);
+    expect(noOverlap(result)).toBe(true);
+    expect(result.every(inGrid)).toBe(true);
+    expect(result.find((w) => w.id === "streak")).toMatchObject({ col: 0, row: 0, colSpan: 4 });
+  });
+
+  it("puts a widget bumped by a cross-zone drag into the zone the mover left", () => {
+    const widgets = [
+      widget({ id: "streak", col: 0, row: 0, zone: "top" }),
+      widget({ id: "due", col: 0, row: 0, zone: "bottom", colSpan: 2 }),
+    ];
+    const result = moveWidgetTo(widgets, "streak", 0, 0, "bottom");
+    expect(result.find((w) => w.id === "streak")).toMatchObject({ zone: "bottom", col: 0, row: 0 });
+    expect(result.find((w) => w.id === "due")).toMatchObject({ zone: "top", colSpan: 2 });
+    expect(noOverlap(result)).toBe(true);
+  });
+
+  it("never overlaps or leaves the grid, whatever is dragged where", () => {
+    let seed = 99;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+    const int = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1));
+    for (let n = 0; n < 1500; n++) {
+      // A valid starting layout: no overlaps, everything inside the grid.
+      const ws: HomeWidgetConfig[] = [];
+      for (let i = 0; i < int(2, 7); i++) {
+        for (let tries = 0; tries < 30; tries++) {
+          const colSpan = int(1, 4);
+          const w = widget({ id: `w${i}` as never, colSpan, rowSpan: int(1, 2), col: int(0, GRID_COLS - colSpan), row: int(0, 5), zone: rnd() < 0.3 ? "bottom" : "top" });
+          if (!ws.some((o) => o.zone === w.zone && boxesOverlap(w, o))) {
+            ws.push(w);
+            break;
+          }
+        }
+      }
+      const mover = ws[int(0, ws.length - 1)];
+      const result = moveWidgetTo(ws, mover.id, int(0, GRID_COLS - 1), int(0, 6), rnd() < 0.5 ? mover.zone : rnd() < 0.5 ? "top" : "bottom");
+      expect(result.every(inGrid)).toBe(true);
+      expect(noOverlap(result)).toBe(true);
+      expect(result.map((w) => [w.id, w.colSpan, w.rowSpan])).toEqual(ws.map((w) => [w.id, w.colSpan, w.rowSpan]));
+    }
+  });
+});
+
 describe("resizeWidgetTo", () => {
   it("resizes freely when nothing is in the way", () => {
     const widgets = [widget({ id: "streak", col: 0, row: 0, colSpan: 1, rowSpan: 1 })];

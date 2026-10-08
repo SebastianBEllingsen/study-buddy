@@ -8,7 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // this file would. Mocked here so that never happens.
 vi.mock("../models", () => ({ getProviderKey: vi.fn() }));
 
-const { describeError } = await import("./anthropicApi");
+const { describeError, effortConfig } = await import("./anthropicApi");
 
 describe("anthropicApi describeError", () => {
   it("gives a specific message for an authentication error", () => {
@@ -52,5 +52,16 @@ describe("anthropicApi describeError", () => {
 
   it("falls back to a generic message for a non-Error value", () => {
     expect(describeError("a string, not an Error")).toBe("Generation failed.");
+  });
+});
+
+describe("anthropicApi effortConfig", () => {
+  it("sets the effort for the main model", () => {
+    expect(effortConfig(false, "high")).toEqual({ output_config: { effort: "high" } });
+    expect(effortConfig(undefined, "low")).toEqual({ output_config: { effort: "low" } });
+  });
+
+  it("leaves it out in efficiency mode, whose Haiku model rejects it", () => {
+    expect(effortConfig(true, "medium")).toEqual({});
   });
 });

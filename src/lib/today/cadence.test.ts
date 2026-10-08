@@ -57,8 +57,22 @@ describe("cadenceStatus", () => {
       expect(cadenceStatus(weekly(3), days("2026-10-05", "2026-10-02"), TODAY)).toEqual({
         must: "2 of 3 study days in the last week",
         skip: false,
+        codeDue: true,
       });
       expect(cadenceStatus(weekly(3), days(), TODAY).must).toBe("0 of 3 study days in the last week");
+    });
+
+    it("keeps coding practice due all day, even after studying today", () => {
+      const before = days("2026-10-05", "2026-10-02");
+      expect(cadenceStatus(weekly(3), before, TODAY).codeDue).toBe(true);
+      // Today's own activity is the third day: the chapter step is done, coding still due.
+      const studied = cadenceStatus(weekly(3), days(TODAY, "2026-10-05", "2026-10-02"), TODAY);
+      expect(studied.must).toBeNull();
+      expect(studied.codeDue).toBe(true);
+    });
+
+    it("has no coding practice once the target was met before today", () => {
+      expect(cadenceStatus(weekly(3), days("2026-10-06", "2026-10-05", "2026-10-04"), TODAY).codeDue).toBe(false);
     });
 
     it("goes back to normal once the target is met", () => {

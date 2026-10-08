@@ -1188,8 +1188,13 @@ function liveTableFormatting(): Extension {
         // happens to re-decorate after the font *is* loaded, which is
         // exactly the "some rows line up, some don't" pattern this caused.
         document.fonts.ready.then(() => {
-          view.dispatch({ effects: tableFontsReadyEffect.of(null) });
+          // The editor may be gone by now (a quick navigation away).
+          if (!this.destroyed) view.dispatch({ effects: tableFontsReadyEffect.of(null) });
         });
+      }
+      destroyed = false;
+      destroy() {
+        this.destroyed = true;
       }
       update(update: ViewUpdate) {
         if (
@@ -1986,8 +1991,13 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
 
   function loadTargets() {
     fetch("/api/link-targets")
-      .then((r) => r.json())
-      .then(setTargets);
+      .then((r) => (r.ok ? r.json() : null))
+      // An error body or a dropped request keeps the targets already loaded
+      // rather than replacing them with something the link code can't read.
+      .then((body: LinkTargets | null) => {
+        if (body && Array.isArray(body.notes)) setTargets(body);
+      })
+      .catch(() => {});
   }
 
   useEffect(loadTargets, []);
@@ -2366,10 +2376,13 @@ function InsertLinkDialog({
     const requestId = ++docRequestIdRef.current;
     if (doc) {
       fetch(`/api/link-targets/document-lines/${doc.id}`)
-        .then((r) => r.json())
-        .then((body: { lines: string[] }) => {
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body: { lines?: string[] } | null) => {
           if (requestId !== docRequestIdRef.current) return;
-          setLines(body.lines);
+          setLines(body?.lines ?? []);
+        })
+        .catch(() => {
+          if (requestId === docRequestIdRef.current) setLines([]);
         });
     }
   }

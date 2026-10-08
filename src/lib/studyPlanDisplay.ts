@@ -203,5 +203,9 @@ export function scheduleWarningText(warning: ScheduleWarning): string {
       return `About ${formatMinutes(Math.round((warning.neededMinutes - warning.availableMinutes) / 5) * 5)} of study doesn't fit before the finish date, so sessions are shortened. Add study days or minutes, or move the date.`;
     case "too_long":
       return "At this pace the plan runs on for more than two years — add study days or minutes.";
+    case "unscheduled_chapters":
+      return `${warning.count} chapter${warning.count === 1 ? "" : "s"} still can't fit before the finish date, even shortened. Add study days or minutes, move the date, or drop some chapters.`;
+    case "order_conflict":
+      return "Some chapters' stages and prerequisites contradict each other (a chapter and one it builds on each wait for the other), so one was ignored. Check the stage numbers.";
   }
 }

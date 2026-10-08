@@ -56,8 +56,13 @@ export function ScheduleSettingsDialog({
 
   async function run(action: () => Promise<boolean>) {
     setSaving(true);
-    const ok = await action();
-    setSaving(false);
+    let ok = false;
+    try {
+      ok = await action();
+    } finally {
+      // A rejected save must not leave the dialog stuck on "Saving…".
+      setSaving(false);
+    }
     if (ok) onOpenChange(false);
   }
 

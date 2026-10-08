@@ -1,6 +1,7 @@
 import { parseId } from "@/lib/routeParams";
 import { parseJsonObjectBody } from "@/lib/requestBody";
-import { reorderChapters } from "@/lib/studyPlan/store";
+import { getStudyPlan, reorderChapters } from "@/lib/studyPlan/store";
+import { rescheduleQuietly } from "@/lib/studyPlan/scheduleService";
 import { parseOrderedIds } from "@/lib/studyPlan/requestParsing";
 
 type Params = { params: Promise<{ planId: string }> };
@@ -14,5 +15,7 @@ export async function POST(request: Request, { params }: Params) {
   const orderedIds = parseOrderedIds((await parseJsonObjectBody(request)).orderedIds);
   if (!orderedIds) return Response.json({ error: "orderedIds must be a list of distinct ids" }, { status: 400 });
   await reorderChapters(id, orderedIds);
+  // The schedule studies chapters in roadmap order, so a new order changes it.
+  if ((await getStudyPlan(id))?.options.schedule) await rescheduleQuietly(id);
   return Response.json({ ok: true });
 }
