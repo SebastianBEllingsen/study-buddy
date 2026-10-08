@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import { localToday } from "@/lib/studyPlan/schedule";
 import { localDayStart } from "@/lib/review/session";
 import type { TodayStep } from "@/lib/today/planDay";
 import {
-  addFinishedSession,
   mergeFresh,
-  parseDayTotals,
   parseSession,
   type DayTotals,
   type TodaySession,
@@ -66,55 +64,19 @@ export function saveTodaySession(session: TodaySession | null) {
   emit();
 }
 
-// What today's finished sessions add up to — see DayTotals. Per device too.
-const DONE_KEY = "studybuddy-today-finished";
-let cachedDoneRaw: string | null = null;
-let cachedDone: DayTotals | null = null;
+// What today's finished sessions add up to — see DayTotals. Kept on the
+// server (lib/today/finished.ts) so it follows the learner across devices.
+const finishedUrl = (date: string) => `/api/today/finished?date=${date}`;
 
-function readDone(): DayTotals | null {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(DONE_KEY);
-  } catch {
-    return null;
-  }
-  if (raw !== cachedDoneRaw) {
-    cachedDoneRaw = raw;
-    try {
-      cachedDone = raw ? parseDayTotals(JSON.parse(raw)) : null;
-    } catch {
-      cachedDone = null;
-    }
-  }
-  return cachedDone;
-}
-
-function subscribeDone(listener: () => void) {
-  listeners.add(listener);
-  const onStorage = (e: StorageEvent) => {
-    if (e.key === DONE_KEY) listener();
-  };
-  window.addEventListener("storage", onStorage);
-  return () => {
-    listeners.delete(listener);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-// Adds a just-finished session to its day's totals.
-export function recordFinishedSession(session: TodaySession, focusMs: number) {
-  try {
-    localStorage.setItem(DONE_KEY, JSON.stringify(addFinishedSession(readDone(), session, focusMs)));
-  } catch {
-    // storage unavailable: the day just won't show as done
-  }
-  emit();
+// Re-reads the day's totals after a session was recorded.
+export function refreshTodayFinished() {
+  return mutate(finishedUrl(localToday()));
 }
 
 // Today's finished sessions, or null when none has been finished today.
 export function useTodayFinished(): DayTotals | null {
-  const totals = useSyncExternalStore(subscribeDone, readDone, () => null);
-  return totals && totals.date === localToday() ? totals : null;
+  const { data } = useSWR<{ totals: DayTotals | null }>(finishedUrl(localToday()));
+  return data?.totals ?? null;
 }
 
 // The running session as it is right now, outside of rendering.

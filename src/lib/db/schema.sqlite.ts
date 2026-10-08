@@ -511,6 +511,21 @@ export const study_plan_sessions = sqliteTable("study_plan_sessions", {
   created_at: text("created_at").notNull(),
 });
 
+// One row per finished Today session (lib/today/finished.ts), so the Today
+// card's "sessions done · focused" summary follows the learner across
+// devices. `date` is the learner's local YYYY-MM-DD day.
+export const today_finished_sessions = sqliteTable(
+  "today_finished_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(),
+    steps: integer("steps").notNull(),
+    focus_ms: integer("focus_ms").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_today_finished_sessions_date").on(table.date)]
+);
+
 // A named idea a course's cards and questions test — see lib/review/concepts.ts.
 // chapter_id links it to a study plan chapter when it came from the plan's
 // subtopics.

@@ -225,29 +225,12 @@ export function parseSession(raw: unknown): TodaySession | null {
   };
 }
 
-// What today's finished sessions add up to, kept after each one ends so the
-// Today card can show the day as done (and still offer another session).
+// What today's finished sessions add up to, kept on the server after each one
+// ends (lib/today/finished.ts) so the Today card can show the day as done
+// (and still offer another session).
 export interface DayTotals {
   date: string;
   sessions: number;
   steps: number;
   focusMs: number;
-}
-
-export function addFinishedSession(prev: DayTotals | null, session: TodaySession, focusMs: number): DayTotals {
-  const before = prev && prev.date === session.date ? prev : { date: session.date, sessions: 0, steps: 0, focusMs: 0 };
-  return {
-    date: session.date,
-    sessions: before.sessions + 1,
-    steps: before.steps + sessionProgress(session).done,
-    focusMs: before.focusMs + Math.max(0, focusMs),
-  };
-}
-
-export function parseDayTotals(raw: unknown): DayTotals | null {
-  if (!raw || typeof raw !== "object") return null;
-  const t = raw as Partial<DayTotals>;
-  const count = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
-  if (typeof t.date !== "string" || count(t.sessions) === 0) return null;
-  return { date: t.date, sessions: count(t.sessions), steps: count(t.steps), focusMs: count(t.focusMs) };
 }

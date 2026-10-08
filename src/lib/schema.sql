@@ -401,6 +401,18 @@ CREATE TABLE IF NOT EXISTS study_plan_sessions (
 CREATE INDEX IF NOT EXISTS idx_study_plan_sessions_plan_id ON study_plan_sessions(plan_id);
 CREATE INDEX IF NOT EXISTS idx_study_plan_sessions_date ON study_plan_sessions(date);
 
+-- One row per finished Today session (lib/today/finished.ts), so the Today
+-- card's "sessions done · focused" summary follows the learner across
+-- devices. `date` is the learner's local YYYY-MM-DD day.
+CREATE TABLE IF NOT EXISTS today_finished_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  steps INTEGER NOT NULL,
+  focus_ms INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_today_finished_sessions_date ON today_finished_sessions(date);
+
 -- Concepts: the named ideas a course's cards and questions test (lib/review/
 -- concepts.ts). chapter_id is set when the concept is a study plan subtopic.
 CREATE TABLE IF NOT EXISTS concepts (

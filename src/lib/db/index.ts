@@ -139,6 +139,7 @@ export let study_plans = initial.schema.study_plans;
 export let study_plan_chapters = initial.schema.study_plan_chapters;
 export let study_plan_resources = initial.schema.study_plan_resources;
 export let study_plan_sessions = initial.schema.study_plan_sessions;
+export let today_finished_sessions = initial.schema.today_finished_sessions;
 export let concepts = initial.schema.concepts;
 export let review_items = initial.schema.review_items;
 export let review_logs = initial.schema.review_logs;
@@ -185,6 +186,7 @@ export async function reconnect(): Promise<{ ok: boolean; error: string | null }
     study_plan_chapters = next.schema.study_plan_chapters;
     study_plan_resources = next.schema.study_plan_resources;
     study_plan_sessions = next.schema.study_plan_sessions;
+    today_finished_sessions = next.schema.today_finished_sessions;
     concepts = next.schema.concepts;
     review_items = next.schema.review_items;
     review_logs = next.schema.review_logs;

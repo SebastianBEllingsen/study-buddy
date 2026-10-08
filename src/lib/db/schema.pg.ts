@@ -603,6 +603,21 @@ export const study_plan_sessions = pgTable(
   ]
 );
 
+// One row per finished Today session (lib/today/finished.ts), so the Today
+// card's "sessions done · focused" summary follows the learner across
+// devices. `date` is the learner's local YYYY-MM-DD day.
+export const today_finished_sessions = pgTable(
+  "today_finished_sessions",
+  {
+    id: serial("id").primaryKey(),
+    date: text("date").notNull(),
+    steps: integer("steps").notNull(),
+    focus_ms: integer("focus_ms").notNull(),
+    created_at: text("created_at").notNull(),
+  },
+  (table) => [index("idx_today_finished_sessions_date").on(table.date)]
+);
+
 // See the matching tables in schema.sqlite.ts.
 export const concepts = pgTable(
   "concepts",

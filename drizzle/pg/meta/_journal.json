@@ -484,6 +484,13 @@
       "when": 1791301101574,
       "tag": "0068_flashcard_card_style",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1791478269077,
+      "tag": "0069_today_finished_sessions",
+      "breakpoints": true
     }
   ]
 }

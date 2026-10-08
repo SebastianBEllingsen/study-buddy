@@ -21,7 +21,7 @@ import {
 import { useAiEnabled } from "@/lib/useAiEnabled";
 import { Button } from "@/components/ui/button";
 import { usePomodoro } from "@/components/pomodoro/PomodoroProvider";
-import { currentTodaySession, recordFinishedSession, saveTodaySession, updateTodaySession } from "./todayStore";
+import { currentTodaySession, refreshTodayFinished, saveTodaySession, updateTodaySession } from "./todayStore";
 
 async function post(url: string, body: unknown): Promise<boolean> {
   try {
@@ -114,13 +114,25 @@ export function formatFocus(ms: number): string {
   return `${Math.floor(ms / 60_000)} min`;
 }
 
-// Finishing the day marks the plan sessions whose work got done.
-export async function finishTodaySession(session: TodaySession, focusMs: number) {
+// Finishing the day marks the plan sessions whose work got done and records
+// the session in the day's totals. If any of that can't be saved the running
+// session is kept, so Finish can be tried again (every write is safe to repeat
+// except the totals, which are written last).
+export async function finishTodaySession(session: TodaySession, focusMs: number): Promise<boolean> {
+  let saved = true;
   for (const s of finishedPlanSessions(session, focusMs)) {
-    await post("/api/today/complete", { type: "session", ...s });
+    saved = (await post("/api/today/complete", { type: "session", ...s })) && saved;
   }
-  recordFinishedSession(session, focusMs);
+  saved =
+    saved &&
+    (await post("/api/today/finished", { date: session.date, steps: sessionProgress(session).done, focusMs }));
+  if (!saved) {
+    toast.error("Couldn't save the session — try Finish again");
+    return false;
+  }
+  void refreshTodayFinished();
   saveTodaySession(null);
+  return true;
 }
 
 export function StepActions({ step, compact }: { step: SessionStep; compact?: boolean }) {
