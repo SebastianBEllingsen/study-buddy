@@ -1277,6 +1277,8 @@ export interface Note {
   icon: string | null;
   // Null: not used for generation; otherwise included with that trust.
   generation_source: SourceTrust | null;
+  // When the note was pinned to the dashboard's Pinned notes widget; null: not pinned.
+  pinned_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1381,6 +1383,43 @@ export async function updateNoteIcon(id: number, icon: string | null): Promise<v
 // to the note itself.
 export async function setNoteGenerationSource(id: number, source: SourceTrust | null): Promise<void> {
   await db.update(notes).set({ generation_source: source }).where(eq(notes.id, id));
+}
+
+// Doesn't touch updated_at either: pinning isn't an edit to the note.
+export async function setNotePinned(id: number, pinned: boolean): Promise<void> {
+  await db
+    .update(notes)
+    .set({ pinned_at: pinned ? nowUtc() : null })
+    .where(eq(notes.id, id));
+}
+
+export interface PinnedNote {
+  id: number;
+  title: string;
+  icon: string | null;
+  course_id: number;
+  course_name: string;
+  markdown: string;
+  pinned_at: string;
+}
+
+// Most recently pinned first — what the dashboard's Pinned notes widget lists.
+export async function listPinnedNotes(): Promise<PinnedNote[]> {
+  const rows = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      icon: notes.icon,
+      course_id: notes.course_id,
+      course_name: courses.name,
+      markdown: notes.markdown,
+      pinned_at: notes.pinned_at,
+    })
+    .from(notes)
+    .innerJoin(courses, eq(notes.course_id, courses.id))
+    .where(isNotNull(notes.pinned_at))
+    .orderBy(desc(notes.pinned_at), desc(notes.id));
+  return rows as PinnedNote[];
 }
 
 export async function setDocumentTrust(id: number, trust: SourceTrust): Promise<void> {
@@ -1691,6 +1730,7 @@ export const HOME_WIDGET_IDS = [
   "pomodoro",
   "links",
   "timetable",
+  "pinnedNotes",
 ] as const;
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
 
@@ -1739,6 +1779,8 @@ const DEFAULT_HOME_WIDGETS: HomeWidgetConfig[] = [
   // /calendar tab (Settings → Calendar feeds → "Own tab") before it has
   // anything to show.
   { id: "timetable", enabled: false, zone: "top", col: 0, row: 8, colSpan: 6, rowSpan: 2 },
+  // Starts hidden: nothing is pinned until a note's Pin button is used.
+  { id: "pinnedNotes", enabled: false, zone: "top", col: 0, row: 10, colSpan: 3, rowSpan: 2 },
 ];
 
 function defaultFor(id: HomeWidgetId): HomeWidgetConfig {

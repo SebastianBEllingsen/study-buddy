@@ -44,6 +44,7 @@ import { tileGridStyle } from "@/lib/dashboardGrid";
 import { BACKGROUND_ASPECT } from "@/lib/imageCropPresets";
 import StudyHeatmap from "@/components/StudyHeatmap";
 import LinksWidget from "@/components/LinksWidget";
+import PinnedNotesWidget from "@/components/PinnedNotesWidget";
 import TimetableWidget from "@/components/calendar/TimetableWidget";
 import PomodoroWidget from "@/components/pomodoro/PomodoroWidget";
 import { CustomizeCourseDialog } from "@/components/CustomizeCourseDialog";
@@ -1157,6 +1158,10 @@ function HomePageContent() {
         );
       case "links":
         return <LinksWidget key="links" layout={layout} label={widget.label} transparent={plainOnPicture} />;
+      case "pinnedNotes":
+        return (
+          <PinnedNotesWidget key="pinnedNotes" layout={layout} label={widget.label} transparent={plainOnPicture} />
+        );
       case "timetable":
         return (
           <TimetableWidget key="timetable" layout={layout} label={widget.label} transparent={plainOnPicture} />

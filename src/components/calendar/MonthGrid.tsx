@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EventInfoTooltip } from "@/components/EventInfoTooltip";
 import { prefersReducedMotion } from "@/lib/motion";
 import { addDays, addMonths, dateKey, monthGridRange, sameDay, startOfMonth, weekdayLabels, type CalendarEvent } from "./shared";
@@ -38,6 +39,8 @@ export function MonthGrid({
   highlightEventId,
   renderEvent,
   hideHeader,
+  completedIds,
+  onToggleCompleted,
 }: {
   events: CalendarEvent[];
   onDayClick: (date: Date) => void;
@@ -57,6 +60,10 @@ export function MonthGrid({
   // For a caller with its own month navigation (a feed's own tab), which
   // then drives the shown month through initialMonth + a key.
   hideHeader?: boolean;
+  // The Assignments tab passes these so feed events can be checked off (and
+  // un-checked again) right on the grid; completed ones render struck through.
+  completedIds?: ReadonlySet<string>;
+  onToggleCompleted?: (event: CalendarEvent, completed: boolean) => void;
 }) {
   const fmt = useDateFormatter();
   const [month, setMonth] = useState(() => startOfMonth(initialMonth ?? new Date()));
@@ -185,10 +192,26 @@ export function MonthGrid({
                     <EventInfoTooltip key={event.id} event={event}>
                       <div
                         data-event-id={event.id}
-                        className="flex items-center gap-1 truncate rounded-md border border-border bg-muted px-1 py-0.5 text-[11px] text-muted-foreground"
+                        className={cn(
+                          "flex items-center gap-1 truncate rounded-md border border-border bg-muted px-1 py-0.5 text-[11px] text-muted-foreground",
+                          completedIds?.has(event.id) && "bg-sage/10"
+                        )}
                       >
+                        {onToggleCompleted && completedIds && (
+                          <Checkbox
+                            checked={completedIds.has(event.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onCheckedChange={() => onToggleCompleted(event, !completedIds.has(event.id))}
+                            aria-label={
+                              completedIds.has(event.id)
+                                ? `Mark ${event.title} as not done`
+                                : `Mark ${event.title} as done`
+                            }
+                            className="size-3 shrink-0"
+                          />
+                        )}
                         <span className={`size-1.5 shrink-0 rounded-full ${sourceDotColor(event.source)}`} />
-                        <span className="truncate">{event.title}</span>
+                        <span className={cn("truncate", completedIds?.has(event.id) && "line-through")}>{event.title}</span>
                       </div>
                     </EventInfoTooltip>
                   )

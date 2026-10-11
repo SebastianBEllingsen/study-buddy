@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { browserOpenCommand, isExternalHttpUrl, isLocalSameOriginRequest } from "./externalLinks";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { browserOpenCommand, isExternalHttpUrl, isLocalSameOriginRequest, openExternal } from "./externalLinks";
 
 describe("isExternalHttpUrl", () => {
   it("accepts http and https URLs", () => {
@@ -43,5 +43,40 @@ describe("browserOpenCommand", () => {
     expect(browserOpenCommand("win32", url)).toEqual({ command: "explorer.exe", args: [url] });
     expect(browserOpenCommand("linux", url)).toEqual({ command: "xdg-open", args: [url] });
     expect(browserOpenCommand("freebsd", url)).toEqual({ command: "xdg-open", args: [url] });
+  });
+});
+
+describe("openExternal", () => {
+  const url = "https://example.com/page";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stub(fetchImpl: () => Promise<{ ok: boolean }>) {
+    const open = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(fetchImpl));
+    vi.stubGlobal("window", { open });
+    return open;
+  }
+
+  it("lets the server open the link when it can", async () => {
+    const open = stub(async () => ({ ok: true }));
+    await openExternal(url);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a new tab when the server refuses (remote client)", async () => {
+    const open = stub(async () => ({ ok: false }));
+    await openExternal(url);
+    expect(open).toHaveBeenCalledWith(url, "_blank", "noopener,noreferrer");
+  });
+
+  it("falls back to a new tab when the request fails", async () => {
+    const open = stub(async () => {
+      throw new Error("network");
+    });
+    await openExternal(url);
+    expect(open).toHaveBeenCalledWith(url, "_blank", "noopener,noreferrer");
   });
 });

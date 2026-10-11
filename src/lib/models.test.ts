@@ -34,6 +34,8 @@ const {
   getDocument,
   moveDocument,
   createNote,
+  setNotePinned,
+  listPinnedNotes,
   getNote,
   moveNote,
   updateNoteMarkdown,
@@ -252,6 +254,27 @@ describe("cross-course move validation (InvalidDestinationFolderError)", () => {
 // through unchecked, which could produce a row whose course_id disagrees
 // with its own folder's course_id (an invisible orphan — the course page
 // only groups folders/content by parent within that same course).
+describe("pinned notes", () => {
+  it("lists only pinned notes, most recently pinned first, and unpinning removes them", async () => {
+    const { course } = await makeCourseWithFolder();
+    const a = await createNote("A", course.id);
+    const b = await createNote("B", course.id);
+    await createNote("C", course.id);
+    expect(await listPinnedNotes()).toEqual([]);
+
+    await setNotePinned(a.id, true);
+    await new Promise((r) => setTimeout(r, 5));
+    await setNotePinned(b.id, true);
+    const pinned = await listPinnedNotes();
+    expect(pinned.map((n) => n.title)).toEqual(["B", "A"]);
+    expect(pinned[0].course_name).toBe(course.name);
+
+    await setNotePinned(b.id, false);
+    expect((await listPinnedNotes()).map((n) => n.title)).toEqual(["A"]);
+    expect((await getNote(b.id))?.pinned_at).toBeNull();
+  });
+});
+
 describe("cross-course create-path validation", () => {
   it("createNote throws when an explicit folderId belongs to a different course", async () => {
     const { course: courseA } = await makeCourseWithFolder("A");

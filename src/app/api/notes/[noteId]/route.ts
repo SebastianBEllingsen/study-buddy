@@ -7,6 +7,7 @@ import {
   moveNote,
   renameNote,
   setNoteGenerationSource,
+  setNotePinned,
   updateNoteIcon,
   updateNoteMarkdown,
 } from "@/lib/models";
@@ -56,6 +57,10 @@ export async function PATCH(request: Request, { params }: Params) {
         return Response.json({ error: "Invalid icon" }, { status: 400 });
       }
       await updateNoteIcon(id, body.icon as string | null);
+    }
+    if ("pinned" in body) {
+      if (typeof body.pinned !== "boolean") return Response.json({ error: "pinned must be true or false" }, { status: 400 });
+      await setNotePinned(id, body.pinned);
     }
     // null: not used for generation; "official" / "personal": included.
     if ("generationSource" in body) {

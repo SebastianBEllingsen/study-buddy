@@ -67,6 +67,23 @@ describe("GET /api/calendar/events", () => {
     expect(range.timeMin.getTime()).toBeLessThan(Date.now());
   });
 
+  it("includeCompleted keeps checked-off past-due events alongside includeOverdue", async () => {
+    const past = (id: string) => ({
+      id,
+      title: id,
+      start: new Date(Date.now() - 86_400_000).toISOString(),
+      end: new Date(Date.now() - 86_400_000).toISOString(),
+      allDay: false,
+    });
+    listCalendarFeeds.mockResolvedValue([{ label: "F", url: "https://x/f.ics", enabled: true, show_on_calendar: true }]);
+    listCompletedAssignmentIds.mockResolvedValue(["done"]);
+    fetchAllFeedEvents.mockResolvedValue([past("open"), past("done")]);
+    const res = await GET(new Request("http://localhost/api/calendar/events?includeOverdue=true&includeCompleted=true"));
+    const { events } = await res.json();
+    expect(events.map((e: { id: string }) => e.id).sort()).toEqual(["done", "open"]);
+    expect(fetchAllFeedEvents.mock.calls[0][1].timeMin.getTime()).toBe(0);
+  });
+
   it("caps results at the default of 20 when no maxResults is given", async () => {
     fetchAllFeedEvents.mockResolvedValue(makeEvents(30));
     const res = await GET(new Request("http://localhost/api/calendar/events"));

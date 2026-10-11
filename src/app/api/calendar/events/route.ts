@@ -85,6 +85,10 @@ export async function GET(request: Request) {
   // until they're checked off, instead of vanishing the moment the due date
   // passes. Applied before the maxResults cap, like excludeHiddenFeeds.
   const includeOverdue = url.searchParams.get("includeOverdue") === "true";
+  // The Assignments calendar tab passes this on top of includeOverdue so
+  // checked-off past-due events stay in the list (shown as done, and
+  // uncheckable if one needs to come back as a reminder).
+  const includeCompleted = url.searchParams.get("includeCompleted") === "true";
   const now = new Date();
   const range = parseRange(url);
 
@@ -129,11 +133,14 @@ export async function GET(request: Request) {
   const allowedFeeds = excludeHiddenFeeds ? activeFeeds.filter((f) => f.show_on_calendar) : activeFeeds;
   const feedRange =
     range ??
-    (includeOverdue
+    (includeOverdue && includeCompleted
+      ? // Whole history, so checked-off assignments never age out of the calendar.
+        { timeMin: new Date(0), timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) }
+      : includeOverdue
       ? { timeMin: new Date(now.getTime() - OVERDUE_LOOKBACK_MS), timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) }
       : { timeMin: now, timeMax: new Date(now.getTime() + FEED_LOOKAHEAD_MS) });
   let feedEvents = await fetchAllFeedEvents(allowedFeeds, feedRange);
-  if (includeOverdue) {
+  if (includeOverdue && !includeCompleted) {
     feedEvents = keepUnlessCompletedAndPast(feedEvents, new Set(await listCompletedAssignmentIds()), now);
   }
 
@@ -144,7 +151,9 @@ export async function GET(request: Request) {
 
   const events = [...googleResult.events, ...feedEvents, ...sessionEvents]
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-    .slice(0, maxResults ?? 20);
+    // With the whole history in play, an ascending cap would cut off the
+    // upcoming end, so includeCompleted callers get everything.
+    .slice(0, includeCompleted ? undefined : maxResults ?? 20);
 
   // Only surface the Google error when there's nothing else to show —
   // otherwise a viewer with working feeds but no Google connection would

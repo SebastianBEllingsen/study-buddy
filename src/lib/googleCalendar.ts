@@ -155,10 +155,13 @@ export async function listUpcomingEvents(params: {
   timeMin: string;
   timeMax?: string;
   maxResults?: number;
+  // Google's own free-text filter over title, description, location, etc.
+  query?: string;
 }): Promise<CalendarEvent[]> {
   const calendar = await calendarClient();
   const res = await calendar.events.list({
     calendarId: "primary",
+    q: params.query,
     timeMin: params.timeMin,
     timeMax: params.timeMax,
     maxResults: params.maxResults ?? 20,

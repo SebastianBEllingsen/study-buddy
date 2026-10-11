@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { saveStateLabel, useAutosave } from "@/lib/autosave";
 import useSWR from "swr";
-import { ArrowLeft, ExternalLink, GitFork, Link2, X } from "lucide-react";
+import { ArrowLeft, ExternalLink, GitFork, Link2, Pin, PinOff, X } from "lucide-react";
 import { toast } from "sonner";
 import type { CanvasBacklink, Note, NoteBacklink } from "@/lib/models";
 import { stripNoteLinkSyntax } from "@/lib/noteLinks";
@@ -175,6 +175,27 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
     }
   }
 
+  // Pins the note to (or unpins it from) the dashboard's Pinned notes widget.
+  async function handlePinToggle() {
+    if (!detail) return;
+    const pinned = !detail.note.pinned_at;
+    mutate(
+      { ...detail, note: { ...detail.note, pinned_at: pinned ? new Date().toISOString() : null } },
+      { revalidate: false }
+    );
+    const res = await fetch(`/api/notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      toast.error("Couldn't save that");
+      void mutate();
+    } else if (pinned) {
+      toast.success("Pinned — shows in the Pinned notes widget");
+    }
+  }
+
   // Pops this note into its own browser window — e.g. so it can sit next to
   // the course page while browsing other material — then returns this tab
   // to the course, mirroring DocumentViewer's own Detach (the content has
@@ -275,6 +296,20 @@ export default function NoteWorkspace({ noteId, detached = false }: { noteId: nu
             </div>
           </Explain>
           <NoteSyntaxHelp />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={detail.note.pinned_at ? "Unpin from dashboard" : "Pin to dashboard"}
+            title={detail.note.pinned_at ? "Unpin from dashboard" : "Pin to dashboard"}
+            aria-pressed={!!detail.note.pinned_at}
+            onClick={() => void handlePinToggle()}
+          >
+            {detail.note.pinned_at ? (
+              <PinOff className="size-3.5 text-focus" />
+            ) : (
+              <Pin className="size-3.5 text-muted-foreground" />
+            )}
+          </Button>
           <RowActionsMenu
             ariaLabel="Note actions"
             actions={detached ? [] : [{ label: "Open in new window", icon: ExternalLink, onSelect: handleDetach }]}

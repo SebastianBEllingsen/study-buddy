@@ -7,6 +7,7 @@ import {
   Layers,
   Link2,
   ListChecks,
+  Pin,
   Timer,
   type LucideIcon,
 } from "lucide-react";
@@ -25,4 +26,5 @@ export const HOME_WIDGET_META: Record<HomeWidgetId, { label: string; icon: Lucid
   pomodoro: { label: "Pomodoro", icon: Timer },
   links: { label: "Links", icon: Link2 },
   timetable: { label: "Timetable", icon: CalendarClock },
+  pinnedNotes: { label: "Pinned notes", icon: Pin },
 };

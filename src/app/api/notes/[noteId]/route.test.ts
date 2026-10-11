@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getNote = vi.fn();
 const updateNoteMarkdown = vi.fn();
+const setNotePinned = vi.fn();
 vi.mock("@/lib/models", () => ({
   deleteNote: vi.fn(),
   getCanvasBacklinksForNote: vi.fn(),
@@ -11,6 +12,7 @@ vi.mock("@/lib/models", () => ({
   moveNote: vi.fn(),
   renameNote: vi.fn(),
   setNoteGenerationSource: vi.fn(),
+  setNotePinned: (...a: unknown[]) => setNotePinned(...a),
   updateNoteIcon: vi.fn(),
   updateNoteMarkdown: (...a: unknown[]) => updateNoteMarkdown(...a),
 }));
@@ -24,6 +26,7 @@ const patch = (body: unknown) =>
 beforeEach(() => {
   getNote.mockReset();
   updateNoteMarkdown.mockReset();
+  setNotePinned.mockReset();
 });
 
 describe("PATCH /api/notes/[noteId]", () => {
@@ -39,5 +42,20 @@ describe("PATCH /api/notes/[noteId]", () => {
     const res = await PATCH(patch({ markdown: "hi" }), params);
     expect(res.status).toBe(200);
     expect(updateNoteMarkdown).toHaveBeenCalledWith(3, "hi");
+  });
+
+  it("pins and unpins a note", async () => {
+    getNote.mockResolvedValue({ id: 3 });
+    expect((await PATCH(patch({ pinned: true }), params)).status).toBe(200);
+    expect(setNotePinned).toHaveBeenLastCalledWith(3, true);
+    expect((await PATCH(patch({ pinned: false }), params)).status).toBe(200);
+    expect(setNotePinned).toHaveBeenLastCalledWith(3, false);
+  });
+
+  it("rejects a non-boolean pinned value", async () => {
+    getNote.mockResolvedValue({ id: 3 });
+    const res = await PATCH(patch({ pinned: "yes" }), params);
+    expect(res.status).toBe(400);
+    expect(setNotePinned).not.toHaveBeenCalled();
   });
 });

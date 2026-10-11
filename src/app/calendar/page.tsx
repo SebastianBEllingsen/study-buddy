@@ -1,10 +1,10 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { CalendarDays, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, ExternalLink, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
 import type { AppSettings, CalendarFeed } from "@/lib/models";
@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DateTimePicker } from "@/components/DateTimePicker";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDateFormatter } from "@/components/DateFormatProvider";
 import { MonthGrid } from "@/components/calendar/MonthGrid";
 import { FeedCalendarTab } from "@/components/calendar/FeedCalendarTab";
 import { dateKey, type CalendarEvent } from "@/components/calendar/shared";
@@ -41,6 +42,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { STUDY_PLAN_EVENT_SOURCE } from "@/lib/studyPlanDisplay";
+import { isPastDue, withCompletion } from "@/lib/overdueAssignments";
 
 // "YYYY-MM-DDTHH:mm" in the viewer's own local time, for <input
 // type="datetime-local">, which has no timezone concept of its own — the
@@ -332,8 +334,19 @@ function CalendarPageContent() {
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | undefined>(undefined);
   const [newEventDate, setNewEventDate] = useState<Date | undefined>(undefined);
 
-  const dateParam = searchParams.get("date");
-  const highlightParam = searchParams.get("highlight");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  // Where a clicked search result sends the calendar, overriding the URL's
+  // ?date=/?highlight= (which only apply on arrival).
+  const [jump, setJump] = useState<{ date: string; id: string } | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+  const searching = searchInput.trim().length > 0;
+
+  const dateParam = jump?.date ?? searchParams.get("date");
+  const highlightParam = jump?.id ?? searchParams.get("highlight");
   const viewParam = searchParams.get("view");
   // "My calendar" mixes Google with feeds you've turned on for it;
   // "Assignments" is a dedicated, feeds-only view — some people want their
@@ -378,9 +391,62 @@ function CalendarPageContent() {
     data: eventsData,
     error: eventsError,
     mutate: refreshEvents,
-  } = useSWR<{ events: CalendarEvent[] }>(shouldLoadEvents ? "/api/calendar/events?maxResults=1000" : null);
+  } = useSWR<{ events: CalendarEvent[] }>(
+    // includeOverdue/includeCompleted look back so the Assignments tab can
+    // show past-due and checked-off items; "My calendar" drops the past
+    // feed events again below.
+    shouldLoadEvents ? "/api/calendar/events?maxResults=1000&includeOverdue=true&includeCompleted=true" : null
+  );
   const events = eventsData?.events ?? null;
   const loadError = eventsError instanceof Error ? eventsError.message : null;
+
+  const { data: completedData, mutate: mutateCompleted } = useSWR<{ ids: string[] }>(
+    shouldLoadEvents ? "/api/assignments/completed" : null
+  );
+  const completedIds = useMemo(() => new Set(completedData?.ids ?? []), [completedData]);
+
+  async function setCompleted(event: CalendarEvent, completed: boolean) {
+    try {
+      // Same optimistic check-off the dashboard's Assignments widget uses.
+      await mutateCompleted(
+        fetch("/api/assignments/completed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId: event.id, completed }),
+        }).then((res) => {
+          if (!res.ok) throw new Error("Couldn't save that");
+          return undefined;
+        }),
+        {
+          optimisticData: (current) => ({ ids: withCompletion(current?.ids ?? [], event.id, completed) }),
+          rollbackOnError: true,
+          populateCache: false,
+          revalidate: true,
+        }
+      );
+    } catch {
+      toast.error("Couldn't save that");
+    }
+  }
+
+  const {
+    data: searchData,
+    error: searchError,
+    isLoading: searchLoading,
+  } = useSWR<{ events: CalendarEvent[] }>(
+    shouldLoadEvents && searchQuery ? `/api/calendar/search?q=${encodeURIComponent(searchQuery)}` : null,
+    { keepPreviousData: true }
+  );
+
+  function openSearchResult(event: CalendarEvent) {
+    const feed = (feeds ?? []).find((f) => f.label === event.source);
+    // Google events live on My calendar, a feed with its own tab opens that
+    // tab, and any other feed's events are on the Assignments tab.
+    setView(event.source === "google" ? "personal" : feed?.own_calendar && feed.enabled ? `feed-${feed.id}` : "assignments");
+    setJump({ date: event.allDay ? event.start : dateKey(new Date(event.start)), id: event.id });
+    setSearchInput("");
+    setSearchQuery("");
+  }
 
   function openNewEvent(date?: Date) {
     setEditingEvent(undefined);
@@ -420,7 +486,18 @@ function CalendarPageContent() {
     [feeds]
   );
   const personalEvents = useMemo(
-    () => events?.filter((event) => !hiddenFeedLabels.has(event.source)) ?? null,
+    () => {
+      const now = new Date();
+      return (
+        events?.filter(
+          (event) =>
+            !hiddenFeedLabels.has(event.source) &&
+            // The lookback is for the Assignments tab; past feed events
+            // never belonged on the mixed calendar.
+            !(event.source !== "google" && event.source !== STUDY_PLAN_EVENT_SOURCE && isPastDue(event, now))
+        ) ?? null
+      );
+    },
     [events, hiddenFeedLabels]
   );
   // Every feed event, unconditionally — the whole point of this view is to
@@ -431,6 +508,12 @@ function CalendarPageContent() {
     () =>
       events?.filter((event) => event.source !== "google" && event.source !== STUDY_PLAN_EVENT_SOURCE) ?? null,
     [events]
+  );
+  // Feeds whose events are assignments (checkable), as opposed to a
+  // timetable on its own tab.
+  const trackedLabels = useMemo(
+    () => new Set((feeds ?? []).filter((f) => f.enabled && !f.own_calendar).map((f) => f.label)),
+    [feeds]
   );
   const visibleEvents = currentView === "personal" ? personalEvents : currentView === "assignments" ? assignmentEvents : null;
 
@@ -464,12 +547,34 @@ function CalendarPageContent() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <h1 className="font-heading text-2xl font-semibold">Calendar</h1>
-        {currentView === "personal" && settings.googleCalendarConnected && (
-          <Button onClick={() => openNewEvent()}>
-            <Plus />
-            New event
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search events"
+              aria-label="Search events"
+              className="w-44 pr-8 pl-8 sm:w-64"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearchInput("")}
+                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+          {currentView === "personal" && settings.googleCalendarConnected && (
+            <Button onClick={() => openNewEvent()}>
+              <Plus />
+              New event
+            </Button>
+          )}
+        </div>
       </div>
 
       {feeds && feeds.length > 0 && (
@@ -495,23 +600,44 @@ function CalendarPageContent() {
         </div>
       )}
 
-      {activeFeedTab && <FeedCalendarTab key={activeFeedTab.id} feed={activeFeedTab} />}
+      {searching && (
+        <SearchResults
+          query={searchQuery}
+          events={searchData?.events ?? null}
+          loading={searchLoading || searchQuery !== searchInput.trim()}
+          error={searchError instanceof Error ? searchError.message : null}
+          completedIds={completedIds}
+          trackedLabels={trackedLabels}
+          onOpen={openSearchResult}
+          onToggleCompleted={setCompleted}
+        />
+      )}
 
-      {!activeFeedTab && loadError && (
+      {!searching && activeFeedTab && (
+        <FeedCalendarTab
+          key={activeFeedTab.id}
+          feed={activeFeedTab}
+          initialDate={initialMonth}
+        />
+      )}
+
+      {!searching && !activeFeedTab && loadError && (
         <Alert variant="destructive">
           <AlertDescription>{loadError}</AlertDescription>
         </Alert>
       )}
 
-      {!activeFeedTab && visibleEvents === null && !loadError && <Skeleton className="h-[500px] rounded-xl" />}
+      {!searching && !activeFeedTab && visibleEvents === null && !loadError && <Skeleton className="h-[500px] rounded-xl" />}
 
-      {visibleEvents && (
+      {!searching && visibleEvents && (
         <MonthGrid
           events={visibleEvents}
           onDayClick={(date) => currentView === "personal" && openNewEvent(date)}
           onEventClick={(event) => openEditEvent(event)}
           initialMonth={initialMonth}
           highlightEventId={highlightParam ?? undefined}
+          completedIds={currentView === "assignments" && completedData ? completedIds : undefined}
+          onToggleCompleted={currentView === "assignments" ? setCompleted : undefined}
         />
       )}
 
@@ -530,6 +656,71 @@ function CalendarPageContent() {
         }
       />
     </div>
+  );
+}
+
+function SearchResults({
+  query,
+  events,
+  loading,
+  error,
+  completedIds,
+  trackedLabels,
+  onOpen,
+  onToggleCompleted,
+}: {
+  query: string;
+  events: CalendarEvent[] | null;
+  loading: boolean;
+  error: string | null;
+  completedIds: ReadonlySet<string>;
+  trackedLabels: ReadonlySet<string>;
+  onOpen: (event: CalendarEvent) => void;
+  onToggleCompleted: (event: CalendarEvent, completed: boolean) => void;
+}) {
+  const fmt = useDateFormatter();
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+  if (!events) return <Skeleton className="h-40 rounded-xl" />;
+  if (events.length === 0) {
+    return (
+      <p className="rounded-xl border px-4 py-8 text-center text-sm text-muted-foreground">
+        {loading ? "Searching…" : `No events match “${query}”.`}
+      </p>
+    );
+  }
+  return (
+    <ul className={cn("divide-y overflow-hidden rounded-xl border", loading && "opacity-60")}>
+      {events.map((event) => {
+        const done = completedIds.has(event.id);
+        const date = new Date(event.allDay ? `${event.start}T00:00:00` : event.start);
+        return (
+          <li key={event.id} className={cn("flex items-center gap-3 px-4 py-2 text-sm hover:bg-muted/40", done && "bg-sage/10")}>
+            {trackedLabels.has(event.source) && (
+              <Checkbox
+                checked={done}
+                onCheckedChange={() => onToggleCompleted(event, !done)}
+                aria-label={done ? `Mark ${event.title} as not done` : `Mark ${event.title} as done`}
+              />
+            )}
+            <button type="button" onClick={() => onOpen(event)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <span className="w-28 shrink-0 text-xs whitespace-nowrap text-muted-foreground">
+                {fmt.date(date, { day: "numeric", month: "short", year: "numeric" })}
+              </span>
+              <span className={cn("min-w-0 flex-1 truncate", done && "text-muted-foreground line-through")}>{event.title}</span>
+              <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                {event.source === "google" ? "Google Calendar" : event.source}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

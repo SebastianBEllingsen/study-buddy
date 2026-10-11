@@ -200,6 +200,9 @@ CREATE TABLE IF NOT EXISTS notes (
   -- NULL: not used for generation. 'official' / 'personal': included in
   -- generation from this course, with that trust level (see documents.trust).
   generation_source TEXT,
+  -- When the note was pinned to the dashboard's Pinned notes widget; NULL:
+  -- not pinned.
+  pinned_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

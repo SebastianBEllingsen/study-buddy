@@ -604,6 +604,9 @@ export function migrate(database: Database.Database) {
   if (!hasColumn("notes", "generation_source")) {
     database.exec("ALTER TABLE notes ADD COLUMN generation_source TEXT");
   }
+  if (!hasColumn("notes", "pinned_at")) {
+    database.exec("ALTER TABLE notes ADD COLUMN pinned_at TEXT");
+  }
   if (!hasColumn("app_settings", "fsrs_migrated_at")) {
     database.exec("ALTER TABLE app_settings ADD COLUMN fsrs_migrated_at TEXT");
   }

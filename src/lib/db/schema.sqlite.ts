@@ -342,6 +342,8 @@ export const notes = sqliteTable("notes", {
   icon: text("icon"),
   // Null: not used for generation; otherwise included with that trust.
   generation_source: text("generation_source").$type<SourceTrust>(),
+  // When the note was pinned to the dashboard's Pinned notes widget; null: not pinned.
+  pinned_at: text("pinned_at"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });

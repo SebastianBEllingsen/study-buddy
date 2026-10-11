@@ -27,12 +27,12 @@ function weekLabel(weekStart: Date, days: number, fmt: DateFormatter): string {
 // One feed's own /calendar tab: that feed only (no Google, no other feeds),
 // as a timetable week grid or the shared month grid, with its own
 // per-course colours/aliases and display settings.
-export function FeedCalendarTab({ feed }: { feed: CalendarFeed }) {
+export function FeedCalendarTab({ feed, initialDate }: { feed: CalendarFeed; initialDate?: Date }) {
   const fmt = useDateFormatter();
   const config = useMemo(() => parseFeedCalendarConfig(feed.calendar_config), [feed.calendar_config]);
   const [view, setView] = useState<"week" | "month">(config.defaultView);
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
-  const [month, setMonth] = useState(() => startOfMonth(new Date()));
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(initialDate ?? new Date()));
+  const [month, setMonth] = useState(() => startOfMonth(initialDate ?? new Date()));
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Fetched per visible range, not the whole year ahead the shared views
